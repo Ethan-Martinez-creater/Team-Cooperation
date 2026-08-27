@@ -1,0 +1,245 @@
+{
+  "realm": "coifesp",
+  "enabled": true,
+  "displayName": "COIFESP Harness",
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": false,
+  "verifyEmail": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "maxDeltaTimeSeconds": 43200,
+  "passwordPolicy": "length(14) and digits(1) and lowerCase(1) and upperCase(1) and specialChars(1) and notUsername(undefined) and forceExpiredPasswordChange(90) and passwordHistory(5)",
+  "accessTokenLifespan": 300,
+  "accessTokenLifespanForImplicitFlow": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 28800,
+  "offlineSessionIdleTimeout": 2592000,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "defaultSignatureAlgorithm": "RS256",
+  "roles": {
+    "realm": [
+      {"name": "lead", "description": "Plans and governs collaborative work"},
+      {"name": "contributor", "description": "Accepts and delivers assigned work"},
+      {"name": "reviewer", "description": "Reviews collaborative deliverables"},
+      {"name": "observer", "description": "Read-only collaboration participant"},
+      {"name": "tool_approver", "description": "Approves bound high-risk tool executions"},
+      {"name": "memory_curator", "description": "Curates trusted shared memory records"},
+      {"name": "collaboration_creator", "description": "Creates cross-team collaboration programs"},
+      {"name": "agent_run_controller", "description": "Controls Agent Runs owned by other principals in the same tenant"},
+      {"name": "execution_controller", "description": "Reads execution tasks owned by other principals in the same tenant"},
+      {"name": "platform_administrator", "description": "Tenant-scoped platform administration"},
+      {"name": "agent_worker", "description": "Durable Agent Worker service identity"},
+      {"name": "tool_worker", "description": "Durable Tool Worker service identity"},
+      {"name": "execution_worker", "description": "Durable execution task worker service identity"}
+    ]
+  },
+  "clientScopes": [
+    {
+      "name": "coifesp-identity",
+      "description": "Security attributes required by the COIFESP policy engine",
+      "protocol": "openid-connect",
+      "attributes": {"include.in.token.scope": "true"},
+      "protocolMappers": [
+        {
+          "name": "tenant-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "multivalued": "false"
+          }
+        },
+        {
+          "name": "clearance",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "clearance",
+            "claim.name": "clearance",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "multivalued": "false"
+          }
+        },
+        {
+          "name": "compartments",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "compartments",
+            "claim.name": "compartments",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "multivalued": "true",
+            "aggregate.attrs": "true"
+          }
+        },
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "multivalued": "true",
+            "user.model.clientRoleMapping.clientId": ""
+          }
+        },
+        {
+          "name": "coifesp-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "coifesp-control-plane",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "name": "coifesp-service-identity",
+      "description": "Marks machine tokens as service identities",
+      "protocol": "openid-connect",
+      "attributes": {"include.in.token.scope": "true"},
+      "protocolMappers": [
+        {
+          "name": "token-use-service",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "token_use",
+            "claim.value": "service",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "coifesp-control-plane",
+      "name": "COIFESP Control Plane API",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
+    },
+    {
+      "clientId": "coifesp-local-ui",
+      "name": "COIFESP Local UI",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "rootUrl": "http://127.0.0.1:8000",
+      "baseUrl": "http://127.0.0.1:8000/",
+      "redirectUris": ["http://127.0.0.1:8000/*"],
+      "webOrigins": ["http://127.0.0.1:8000"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://127.0.0.1:8000/*"
+      },
+      "defaultClientScopes": ["openid", "profile", "email", "roles", "coifesp-identity"]
+    },
+    {
+      "clientId": "coifesp-agent-worker",
+      "name": "COIFESP Durable Agent Worker",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "defaultClientScopes": ["roles", "coifesp-identity", "coifesp-service-identity"]
+    },
+    {
+      "clientId": "coifesp-tool-worker",
+      "name": "COIFESP Durable Tool Worker",
+      "description": "Separately credentialed least-privilege consumer of authorized Tool Jobs",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "defaultClientScopes": ["roles", "coifesp-identity", "coifesp-service-identity"]
+    },
+    {
+      "clientId": "coifesp-directory-reader",
+      "name": "COIFESP Worker Identity Directory Reader",
+      "description": "Separately credentialed least-privilege client for resolving current worker owner identities",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "defaultClientScopes": ["roles"]
+    }
+  ],
+  "groups": [
+    {
+      "name": "team-a",
+      "attributes": {
+        "tenant_id": ["team-a"],
+        "clearance": ["internal"],
+        "compartments": ["project-x"]
+      }
+    },
+    {
+      "name": "team-b",
+      "attributes": {
+        "tenant_id": ["team-b"],
+        "clearance": ["internal"],
+        "compartments": ["project-x"]
+      }
+    }
+  ],
+  "defaultDefaultClientScopes": [
+    "profile", "email", "roles", "web-origins", "acr", "basic", "coifesp-identity"
+  ],
+  "defaultOptionalClientScopes": [
+    "address", "phone", "offline_access", "microprofile-jwt"
+  ]
+}

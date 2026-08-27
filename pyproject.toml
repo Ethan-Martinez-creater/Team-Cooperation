@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coifesp-harness"
+version = "0.1.0"
+description = "Agent-first harness for multi-team project collaboration"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+dependencies = [
+  "a2a-sdk[http-server]>=1.1.1,<2",
+  "alembic>=1.18,<2",
+  "anthropic>=0.104,<1",
+  "cryptography>=42,<47",
+  "fastapi>=0.139,<0.140",
+  "httpx>=0.28,<1",
+  "jsonschema>=4.26,<5",
+  "mcp>=1.28.1,<2",
+  "openai>=2.48,<3",
+  "opentelemetry-api>=1.44,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.44,<2",
+  "opentelemetry-sdk>=1.44,<2",
+  "packaging>=23,<27",
+  "pydantic>=2.13,<3",
+  "pydantic-settings>=2.2,<3",
+  "prometheus-client>=0.26,<1",
+  "psycopg[binary]>=3.3,<4",
+  "PyJWT[crypto]>=2.13,<3",
+  "python-dotenv>=1.2,<2",
+  "python-multipart>=0.0.22,<1",
+  "python-docx>=1.1,<2",
+  "openpyxl>=3.1,<4",
+  "python-pptx>=1.0,<2",
+  "pypdf>=5,<7",
+  "PyYAML>=6,<7",
+  "SQLAlchemy>=2.0,<3",
+  "tiktoken>=0.12,<1",
+  "uvicorn[standard]>=0.51,<0.52",
+]
+
+[project.optional-dependencies]
+dev = [
+  "black>=24",
+  "promql-parser>=0.10,<1",
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+coifesp-agent-worker = "coifesp_harness.worker_main:main"
+coifesp-tool-worker = "coifesp_harness.tool_worker_main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+coifesp_harness = ["control_plane/workspace_assets/*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]

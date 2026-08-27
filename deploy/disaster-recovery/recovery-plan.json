@@ -1,0 +1,22 @@
+{
+  "format_version": "1.0.0",
+  "plan_id": "dr-regional-outage-v1",
+  "created_at": "2026-08-13T00:00:00Z",
+  "primary_region": "region-a",
+  "recovery_region": "region-b",
+  "object_storage": {"provider": "object-store", "immutable": true, "retention_days": 30, "inventory_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+  "postgres_pitr": {"enabled": true, "base_backup_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "wal_manifest_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "recovery_target_utc": "2026-08-13T00:00:00Z", "maximum_backup_age_seconds": 300},
+  "dependencies": {"backup_encryption_key_ref": "backup-key-v1", "audit_verification_key_ref": "audit-key-v1", "restore_authorization_ref": "restore-authorization-v1"},
+  "object_inventory_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "audit_chain_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "queue_replay": {"checkpoint_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "idempotency_required": true, "dead_letter_review_required": true},
+  "fencing": {"lease_epoch": 41, "primary_write_fence_required": true, "recovery_epoch_must_increase": true},
+  "rpo_seconds": 300,
+  "rto_seconds": 1800,
+  "recovery_sequence": ["declare_incident", "fence_primary_writes", "verify_immutable_backup", "restore_postgres_pitr", "verify_audit_chain", "promote_recovery_region", "replay_queues_idempotently", "reopen_writes"],
+  "approvals": [
+    {"role": "incident_commander", "principal": "incident-commander", "decision": "approved", "plan_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
+    {"role": "database_recovery", "principal": "database-recovery", "decision": "approved", "plan_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
+    {"role": "security_approver", "principal": "security-approver", "decision": "approved", "plan_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"}
+  ]
+}

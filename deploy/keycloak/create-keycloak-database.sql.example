@@ -1,0 +1,9 @@
+-- Run this while connected as a PostgreSQL administrator.
+-- Replace the password placeholder with an independently generated password.
+-- Do not reuse the COIFESP application database password.
+CREATE ROLE keycloak_runtime LOGIN PASSWORD '<KEYCLOAK_DATABASE_PASSWORD>'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
+CREATE DATABASE keycloak OWNER keycloak_runtime
+  ENCODING 'UTF8' TEMPLATE template0;
+REVOKE ALL ON DATABASE keycloak FROM PUBLIC;
+GRANT CONNECT, TEMPORARY ON DATABASE keycloak TO keycloak_runtime;

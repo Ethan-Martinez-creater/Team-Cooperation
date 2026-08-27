@@ -1,0 +1,33 @@
+.auth-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+  padding: 5px;
+  margin: 22px 0 18px;
+  border-radius: 12px;
+  background: #eef1ec;
+}
+.auth-tabs button {
+  padding: 9px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--muted);
+  background: transparent;
+}
+.auth-tabs button.active {
+  color: var(--green);
+  background: #fff;
+  box-shadow: 0 2px 8px #ccd3ca;
+}
+.auth-form { display: grid; gap: 12px; }
+.auth-form .wide { margin-top: 4px; }
+.credential-box {
+  margin-top: 16px;
+  padding: 16px;
+  overflow-wrap: anywhere;
+  border: 1px solid #efc78c;
+  border-radius: 12px;
+  background: #fff3df;
+}
+.credential-box strong { display: block; margin-bottom: 8px; }
+.login-card:has(#builtin-auth:not(.hidden)) { width: min(620px, 100%); }

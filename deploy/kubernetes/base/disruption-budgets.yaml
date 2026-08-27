@@ -1,0 +1,33 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: coifesp-control-plane
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: coifesp
+      app.kubernetes.io/component: control-plane
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: coifesp-agent-worker
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: coifesp
+      app.kubernetes.io/component: agent-worker
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: coifesp-tool-worker
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: coifesp
+      app.kubernetes.io/component: tool-worker
+

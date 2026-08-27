@@ -1,0 +1,59 @@
+{
+  "format_version": "1.0.0",
+  "release_id": "release-1.1.0",
+  "requested_by": "release-requester",
+  "source_release": "1.0.0",
+  "target_release": "1.1.0",
+  "compatibility_matrix_digest": "sha256:36d612e8378970de4e4fcdcab1e861ee43dc28b32c921049871563a2bdabc485",
+  "artifact": {
+    "artifact_uri": "artifact://coifesp/release-1.1.0",
+    "artifact_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "image_ref": "registry.example.invalid/coifesp@sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "sbom_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "provenance_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "produced_by": "build-service"
+  },
+  "approvals": [
+    {
+      "role": "artifact_attestor",
+      "principal": "supply-chain-reviewer",
+      "decision": "approved",
+      "artifact_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "compatibility_matrix_digest": "sha256:36d612e8378970de4e4fcdcab1e861ee43dc28b32c921049871563a2bdabc485"
+    },
+    {
+      "role": "release_manager",
+      "principal": "release-manager",
+      "decision": "approved",
+      "artifact_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "compatibility_matrix_digest": "sha256:36d612e8378970de4e4fcdcab1e861ee43dc28b32c921049871563a2bdabc485"
+    },
+    {
+      "role": "risk_approver",
+      "principal": "risk-reviewer",
+      "decision": "approved",
+      "artifact_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "compatibility_matrix_digest": "sha256:36d612e8378970de4e4fcdcab1e861ee43dc28b32c921049871563a2bdabc485"
+    }
+  ],
+  "automatic_rollback": true,
+  "slo": {
+    "availability_target": 0.99,
+    "max_error_budget_burn_rate": 2.0,
+    "max_p95_latency_ms": 500.0
+  },
+  "stages": [
+    {
+      "name": "canary-5",
+      "traffic_percent": 5,
+      "observation_window_seconds": 300,
+      "minimum_requests": 1000
+    },
+    {
+      "name": "full-100",
+      "traffic_percent": 100,
+      "observation_window_seconds": 900,
+      "minimum_requests": 10000
+    }
+  ]
+}

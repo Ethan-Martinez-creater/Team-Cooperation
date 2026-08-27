@@ -1,0 +1,23 @@
+{
+  "format_version": "1.0.0",
+  "observations": [
+    {
+      "stage": "canary-5",
+      "artifact_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "image_ref": "registry.example.invalid/coifesp@sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "elapsed_seconds": 300,
+      "requests": 1000,
+      "errors": 1,
+      "p95_latency_ms": 350.0
+    },
+    {
+      "stage": "full-100",
+      "artifact_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "image_ref": "registry.example.invalid/coifesp@sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "elapsed_seconds": 900,
+      "requests": 10000,
+      "errors": 5,
+      "p95_latency_ms": 410.0
+    }
+  ]
+}

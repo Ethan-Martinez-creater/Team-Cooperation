@@ -1,0 +1,35 @@
+.agent-workbench-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, .8fr);
+  gap: 24px;
+  margin-top: 20px;
+}
+.conversation {
+  display: grid;
+  gap: 12px;
+  max-height: 560px;
+  overflow: auto;
+  padding: 4px;
+}
+.message {
+  max-width: 88%;
+  padding: 13px 16px;
+  border-radius: 15px;
+  background: #edf2ee;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.message.user { margin-left: auto; background: #dceade; }
+.message small { display: block; color: var(--muted); margin-bottom: 5px; }
+.control-composer { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.control-composer select { border: 1px solid #cfd6ce; border-radius: 9px; padding: 8px; background: #fff; }
+.control-composer .task-actions { justify-content: flex-end; }
+.agent-workbench-grid .timeline { max-height: 650px; overflow: auto; }
+@media (max-width: 900px) { .agent-workbench-grid { grid-template-columns: 1fr; } }
+.artifact-picker { display: grid; gap: 10px; max-height: 420px; overflow: auto; }
+.artifact-picker .card { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 8px 12px; cursor: pointer; }
+.artifact-picker .card .meta { grid-column: 2; }
+.profile-picker { display: grid; gap: 10px; margin: 20px 0; text-align: left; }
+.profile-choice { width: 100%; border: 1px solid var(--line); background: #fff; color: inherit; padding: 14px 16px; border-radius: 12px; display: grid; gap: 4px; }
+.profile-choice:hover { border-color: var(--green); background: #f3f8f4; }
+.profile-choice small { color: var(--muted); }

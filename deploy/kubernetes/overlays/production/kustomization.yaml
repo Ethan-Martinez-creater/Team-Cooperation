@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: coifesp-harness
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: true
+    includeTemplates: true
+replicas:
+  - name: coifesp-control-plane
+    count: 3
+  - name: coifesp-agent-worker
+    count: 2
+  - name: coifesp-tool-worker
+    count: 2
+images:
+  - name: example.invalid/coifesp/harness
+    newName: example.invalid/coifesp/harness
+    digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  - name: example.invalid/coifesp/docker-dind-rootless
+    newName: example.invalid/coifesp/docker-dind-rootless
+    digest: sha256:3333333333333333333333333333333333333333333333333333333333333333

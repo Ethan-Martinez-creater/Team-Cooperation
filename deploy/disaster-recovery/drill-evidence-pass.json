@@ -1,0 +1,21 @@
+{
+  "format_version": "1.0.0",
+  "drill_id": "drill-regional-outage-001",
+  "plan_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "scenario": "regional_primary_outage",
+  "recovery_region": "region-b",
+  "restore_seconds": 1200,
+  "recovery_point_lag_seconds": 240,
+  "recovered_lease_epoch": 42,
+  "base_backup_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "wal_manifest_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "object_inventory_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "audit_chain_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "queue_checkpoint_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "primary_fenced": true,
+  "data_consistent": true,
+  "audit_chain_verified": true,
+  "queues_replayed_idempotently": true,
+  "dead_letters_reviewed": true,
+  "evidence_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+}

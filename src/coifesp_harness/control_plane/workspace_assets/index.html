@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>COIFESP 协作工作台</title>
+  <link rel="stylesheet" href="/app/app.css">
+  <link rel="stylesheet" href="/app/agent-workbench.css">
+  <link rel="stylesheet" href="/app/project-resources.css">
+  <link rel="stylesheet" href="/app/product-auth.css">
+  <link rel="stylesheet" href="/app/blue-theme.css">
+  <link rel="stylesheet" href="/app/project-workspace.css">
+</head>
+<body>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <section id="login" class="login-shell">
+    <div class="login-card">
+      <div class="brand-mark">C</div>
+      <p class="eyebrow">COIFESP HARNESS</p>
+      <h1>让团队与 Agent<br>在同一个节奏里工作</h1>
+      <p class="muted">规划、讨论、分工、执行和验收，都在一个可信的协作空间中完成。</p>
+      <div id="builtin-auth" class="hidden">
+        <div class="auth-tabs" role="tablist"><button type="button" class="active" data-auth-tab="account-login">账户登录</button><button type="button" data-auth-tab="account-register">申请账户</button><button type="button" data-auth-tab="team-register">注册团队</button></div>
+        <form id="account-login" class="auth-form"><label class="field">用户名或邮箱<input name="login" autocomplete="username" required></label><label class="field">密码<input name="password" type="password" autocomplete="current-password" required></label><button class="primary wide">登录</button><button id="show-initial-password" type="button" class="link">首次使用团队管理员账户？</button></form>
+        <form id="account-register" class="auth-form hidden"><label class="field">用户名<input name="username" required minlength="3"></label><label class="field">姓名<input name="display_name" required></label><label class="field">邮箱<input name="email" type="email" required></label><label class="field">申请加入的团队<select name="team_id" id="registration-team" required></select></label><label class="field">密码<input name="password" type="password" minlength="12" required></label><button class="primary wide">提交团队审批</button></form>
+        <form id="team-register" class="auth-form hidden"><label class="field">团队名称<input name="name" required></label><label class="field">团队标识<input name="handle" required minlength="3" placeholder="例如 alpha-engineering"></label><button class="primary wide">注册团队并生成管理员账户</button></form>
+        <form id="initial-password" class="auth-form hidden"><label class="field">初始管理员用户名<input name="login" required></label><label class="field">系统生成的初始密码<input name="current_password" type="password" required></label><label class="field">设置新密码<input name="new_password" type="password" minlength="12" required></label><button class="primary wide">更新密码</button><button type="button" class="link" data-auth-tab="account-login">返回登录</button></form>
+        <div id="bootstrap-credential" class="credential-box hidden"></div>
+      </div>
+      <div id="local-profiles" class="profile-picker hidden"></div>
+      <button id="login-button" class="primary wide">使用组织账号登录</button>
+      <p id="login-status" class="small muted"></p>
+    </div>
+  </section>
+
+  <div id="workspace" class="workspace hidden">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark small-mark">C</span><span>COIFESP</span></div>
+      <nav aria-label="主导航">
+        <button class="nav-item active" data-view="team-projects">项目 <span id="project-unread-count" class="badge hidden">0</span></button>
+        <button class="nav-item" data-view="collaboration-inbox">协作收件箱 <span id="inbox-action-count" class="badge hidden">0</span></button>
+        <button class="nav-item" data-view="team-network">团队</button>
+        <button class="nav-item" data-view="notifications">通知中心 <span id="notification-unread-count" class="badge hidden">0</span></button>
+        <button id="team-admin-nav" class="nav-item hidden" data-view="team-admin">团队管理 <span id="registration-count" class="badge hidden">0</span></button>
+      </nav>
+      <div class="profile">
+        <div id="avatar" class="avatar">?</div>
+        <div><strong id="profile-name">—</strong><small id="profile-tenant">—</small></div>
+        <button id="logout-button" class="icon-button" title="退出登录">↗</button>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div><p class="eyebrow" id="page-eyebrow">PROJECTS</p><h2 id="page-title">项目</h2></div>
+        <button id="refresh-button" class="secondary">刷新数据</button>
+      </header>
+
+      <section id="view-overview" class="view hidden">
+        <div class="hero"><div><p class="eyebrow">WELCOME BACK</p><h3 id="welcome">今天继续把协作往前推进。</h3><p>从团队关系、项目协作、任务交付到 Agent 辅助，都在同一个工作台完成。</p></div><button class="primary" data-view-jump="collaboration-inbox">查看待处理协作</button></div>
+        <div id="stats" class="stats"></div>
+        <div class="grid two"><section class="panel"><div class="panel-head"><h3>最近项目</h3><button class="link" data-view-jump="team-projects">查看全部</button></div><div id="recent-programs"></div></section><section class="panel"><div class="panel-head"><h3>需要我处理</h3><button class="link" data-view-jump="collaboration-inbox">打开收件箱</button></div><div id="attention"></div></section></div><section class="panel"><div class="panel-head"><div><p class="eyebrow">EXTERNAL CONNECTORS</p><h3>外部连接器</h3></div></div><div id="connector-panel"></div></section>
+      </section>
+
+      <section id="view-programs" class="view hidden">
+        <div class="actions"><button class="primary" data-action="new-program">新建项目</button><label class="search">搜索 <input id="program-search" placeholder="项目名称或 ID"></label></div>
+        <div id="program-list" class="card-list"></div>
+      </section>
+
+      <section id="view-team-network" class="view hidden"><div class="actions"><label class="search">查找团队 <input id="team-directory-search" placeholder="输入团队名称或标识"></label><button id="request-team-relation" class="primary">申请团队合作</button></div><div class="grid two"><section class="panel"><div class="panel-head"><h3>团队目录</h3></div><div id="team-directory-list" class="card-list"></div></section><section class="panel"><div class="panel-head"><h3>已关联团队</h3></div><div id="team-relation-list" class="card-list"></div></section></div><section class="panel network-requests"><div class="panel-head"><h3>关系申请</h3></div><div id="team-relation-request-list" class="card-list"></div></section></section>
+
+      <section id="view-team-projects" class="view"><div class="actions"><button id="new-team-project" class="primary">创建项目</button></div><div id="workspace-project-list" class="card-list"></div></section>
+      <section id="view-collaboration-inbox" class="view hidden"><div class="actions"><div class="segmented" role="group" aria-label="收件箱筛选"><button class="active" data-inbox-filter="all">全部</button><button data-inbox-filter="due_soon">临期</button><button data-inbox-filter="overdue">逾期</button><button data-inbox-filter="mine">我负责</button></div><button id="inbox-agent" class="primary">整理收件箱 Agent</button></div><div class="grid two"><section class="panel"><div class="panel-head"><div><p class="eyebrow">ACTION REQUIRED</p><h3>跨项目待处理事项</h3></div></div><div id="collaboration-action-list" class="card-list"></div></section><section class="panel"><div class="panel-head"><div><p class="eyebrow">UNREAD ACTIVITY</p><h3>未读项目动态</h3></div></div><div id="collaboration-activity-list" class="card-list"></div></section></div><section class="panel"><div class="panel-head"><div><p class="eyebrow">AGENT HISTORY</p><h3>我的收件箱 Agent 记录</h3></div></div><div id="inbox-agent-run-list" class="card-list"></div></section></section>
+      <section id="view-notifications" class="view hidden"><div class="actions"><div class="segmented" role="group" aria-label="通知页签"><button class="active" data-notification-tab="unread">未读</button><button data-notification-tab="all">全部</button><button data-notification-tab="archived">已归档</button></div><select id="notification-category" aria-label="类别筛选"><option value="">全部类别</option><option value="task">任务</option><option value="message">消息</option><option value="resource">资料</option><option value="topic">议题</option><option value="agent">Agent</option><option value="due_soon">临期提醒</option><option value="overdue">逾期提醒</option></select><select id="notification-project" aria-label="项目筛选"><option value="">全部项目</option></select><button id="notification-preferences-button" class="secondary">通知偏好</button><button id="notification-page-read" class="secondary">本页全部已读</button></div><div id="notification-list" class="card-list"></div><button id="notification-more" class="secondary wide hidden">加载更多</button></section>
+      <section id="view-team-project-detail" class="view hidden"><button class="link back" data-view-jump="team-projects">← 返回团队项目</button><div id="team-project-detail"></div></section>
+
+      <section id="view-program-detail" class="view hidden">
+        <button class="link back" data-view-jump="programs">← 返回项目</button>
+        <div id="program-detail"></div>
+      </section>
+
+      <section id="view-tasks" class="view hidden"><div class="segmented"><button class="active" data-task-filter="active">进行中</button><button data-task-filter="all">全部</button></div><div id="task-list" class="card-list"></div></section>
+      <section id="view-approvals" class="view hidden"><div id="approval-list" class="card-list"></div></section>
+      <section id="view-agents" class="view hidden"><div class="actions"><button id="new-agent" class="primary">启动 Agent</button></div><div id="agent-list" class="card-list"></div><section id="agent-workbench" class="panel hidden"><div class="panel-head"><div><p class="eyebrow">AGENT WORKBENCH</p><h3 id="agent-workbench-title">Agent 会话</h3></div><button id="close-events" class="link">关闭</button></div><div class="agent-workbench-grid"><div><h4>对话与结果</h4><div id="conversation-list" class="conversation"></div><form id="agent-control-form" class="control-composer"><label class="field">下一步指令<textarea id="agent-control-content" required placeholder="补充需求、追问结果，或调整正在执行的方向"></textarea></label><div class="task-actions"><select id="agent-control-type" aria-label="指令类型"><option value="follow_up">继续追问</option><option value="steer">调整方向</option></select><button class="primary">发送给 Agent</button></div></form></div><div><h4>实时运行事件</h4><div id="event-list" class="timeline"></div></div></div></section></section>
+      <section id="view-artifacts" class="view hidden"><div class="actions"><button id="upload-artifact" class="primary">上传交付物</button></div><div id="artifact-list" class="card-list"></div></section>
+      <section id="view-team-admin" class="view hidden"><div class="panel-head"><div><p class="eyebrow">TEAM ADMINISTRATION</p><h3>账户注册审批</h3></div></div><p class="muted">申请人只有在团队管理员批准后才会成为团队账户并取得登录能力。</p><div id="registration-list" class="card-list"></div></section>
+
+      <section id="view-project-workspace" class="view hidden">
+        <button class="link back" data-workspace-back>← 返回项目列表</button>
+        <div class="workspace-shell">
+          <main class="workspace-chat">
+            <header class="chat-head">
+              <div>
+                <p class="eyebrow" id="ws-project-id">—</p>
+                <h2 id="ws-project-name">—</h2>
+                <p class="muted" id="ws-project-desc"></p>
+              </div>
+              <div id="ws-project-teams" class="ws-teams"></div>
+            </header>
+            <div id="ws-conversation" class="ws-conversation" aria-live="polite">
+              <div class="empty-state">打开项目后，这里会出现你与项目 Agent 的持续对话。</div>
+            </div>
+            <footer class="chat-composer">
+              <div id="ws-attachments" class="attachment-bar" aria-label="待发送附件"></div>
+              <button id="ws-attach" class="icon-button" title="添加附件">＋</button>
+              <textarea id="ws-input" rows="1" placeholder="向项目 Agent 提问、上传资料、确认草案…（Enter 发送，Shift+Enter 换行）"></textarea>
+              <button id="ws-send" class="primary">发送</button>
+            </footer>
+          </main>
+          <aside class="workspace-drawer" id="ws-drawer">
+            <nav class="drawer-tabs" role="tablist" aria-label="项目上下文">
+              <button type="button" class="active" data-ws-tab="overview">概览</button>
+              <button type="button" data-ws-tab="data">数据</button>
+              <button type="button" data-ws-tab="collab">协作</button>
+              <button type="button" data-ws-tab="plan">计划</button>
+              <button type="button" data-ws-tab="inbox">任务</button>
+            </nav>
+            <div class="drawer-pane active" data-ws-pane="overview" id="ws-pane-overview"></div>
+            <div class="drawer-pane" data-ws-pane="data" id="ws-pane-data"></div>
+            <div class="drawer-pane" data-ws-pane="collab" id="ws-pane-collab"></div>
+            <div class="drawer-pane" data-ws-pane="plan" id="ws-pane-plan"></div>
+            <div class="drawer-pane" data-ws-pane="inbox" id="ws-pane-inbox"></div>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="modal"><form id="modal-form" method="dialog"><div class="modal-head"><h3 id="modal-title"></h3><button type="button" id="modal-close" class="icon-button">×</button></div><div id="modal-fields"></div><div class="modal-actions"><button type="button" id="modal-cancel" class="secondary">取消</button><button id="modal-submit" class="primary" value="submit">确认</button></div></form></dialog>
+  <dialog id="resource-preview"><div class="modal-head"><h3 id="resource-preview-title">项目资料预览</h3><button type="button" id="resource-preview-close" class="icon-button">×</button></div><div id="resource-preview-body" class="resource-preview-body"></div></dialog>
+  <script src="/app/session.js" defer></script>
+  <script src="/app/project-workspace.js" defer></script>
+  <script src="/app/app.js" defer></script>
+</body>
+</html>

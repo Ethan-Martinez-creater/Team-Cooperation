@@ -1,0 +1,29 @@
+schema: coifesp.slo.v1
+service: coifesp-control-plane
+window: 30d
+objectives:
+  - name: http-availability
+    target: 0.999
+    indicator:
+      kind: ratio
+      goodEvents: sum(rate(coifesp_http_requests_total{status_class!="5xx"}[5m]))
+      totalEvents: sum(rate(coifesp_http_requests_total[5m]))
+    burnRateAlerts:
+      - {severity: page, shortWindow: 5m, longWindow: 1h, multiplier: 14.4}
+      - {severity: ticket, shortWindow: 30m, longWindow: 6h, multiplier: 6}
+  - name: http-latency
+    target: 0.99
+    indicator:
+      kind: ratio
+      thresholdSeconds: 1
+      goodEvents: sum(rate(coifesp_http_request_duration_seconds_bucket{le="1.0"}[5m]))
+      totalEvents: sum(rate(coifesp_http_request_duration_seconds_count[5m]))
+  - name: durable-worker-success
+    target: 0.995
+    indicator:
+      kind: ratio
+      goodEvents: >-
+        sum(rate(coifesp_agent_worker_outcomes_total{outcome=~"completed|continuation_queued|awaiting_approval|awaiting_tool"}[5m]))
+      totalEvents: >-
+        sum(rate(coifesp_agent_worker_outcomes_total{outcome!="idle"}[5m]))
+

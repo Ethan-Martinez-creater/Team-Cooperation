@@ -1,0 +1,81 @@
+# Optional: not included by either Kustomization. Install KEDA and provide the
+# transactionally computed, tenant-filtered claimable metrics before applying.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: coifesp-keda-metrics
+  namespace: coifesp
+spec:
+  secretTargetRef:
+    - parameter: bearerToken
+      name: coifesp-keda-metrics
+      key: bearer-token
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: coifesp-agent-worker-claimable
+  namespace: coifesp
+spec:
+  scaleTargetRef:
+    name: coifesp-agent-worker
+  pollingInterval: 30
+  cooldownPeriod: 900
+  minReplicaCount: 2
+  maxReplicaCount: 10
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          selectPolicy: Disabled
+        scaleUp:
+          stabilizationWindowSeconds: 30
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 60
+  triggers:
+    - type: prometheus
+      metricType: Value
+      metadata:
+        serverAddress: https://metrics-gateway.invalid
+        query: max(coifesp_agent_runs_claimable{tenant_id="replace-me-tenant"})
+        threshold: "2"
+        authModes: bearer
+      authenticationRef:
+        name: coifesp-keda-metrics
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: coifesp-tool-worker-claimable
+  namespace: coifesp
+spec:
+  scaleTargetRef:
+    name: coifesp-tool-worker
+  pollingInterval: 30
+  cooldownPeriod: 900
+  minReplicaCount: 2
+  maxReplicaCount: 10
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          selectPolicy: Disabled
+        scaleUp:
+          stabilizationWindowSeconds: 30
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 60
+  triggers:
+    - type: prometheus
+      metricType: Value
+      metadata:
+        serverAddress: https://metrics-gateway.invalid
+        query: max(coifesp_tool_jobs_claimable{tenant_id="replace-me-tenant"})
+        threshold: "2"
+        authModes: bearer
+      authenticationRef:
+        name: coifesp-keda-metrics
+

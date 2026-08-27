@@ -1,0 +1,200 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coifesp-tool-worker
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: coifesp
+      app.kubernetes.io/component: tool-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: coifesp
+        app.kubernetes.io/component: tool-worker
+    spec:
+      # This RuntimeClass must provide safe nested-container isolation (for
+      # example, a user-namespace runtime). Do not replace it with runc plus
+      # privileged mode or a host container-engine socket.
+      runtimeClassName: coifesp-sandbox
+      serviceAccountName: coifesp-tool-worker
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 660
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: coifesp
+              app.kubernetes.io/component: tool-worker
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: coifesp
+              app.kubernetes.io/component: tool-worker
+      # A native sidecar starts and passes its startup probe before the worker
+      # can claim a job. This requires Kubernetes 1.29 or newer.
+      initContainers:
+        - name: sandbox-engine
+          restartPolicy: Always
+          image: example.invalid/coifesp/docker-dind-rootless@sha256:3333333333333333333333333333333333333333333333333333333333333333
+          imagePullPolicy: IfNotPresent
+          command: ["dockerd-rootless.sh"]
+          args:
+            - --host=unix:///run/user/1000/docker.sock
+            - --data-root=/home/rootless/.local/share/docker
+            - --exec-root=/run/user/1000/docker
+            - --storage-driver=fuse-overlayfs
+            - --iptables=false
+            - --bridge=none
+            - --ip-forward=false
+            - --ip-masq=false
+          env:
+            - name: HOME
+              value: /home/rootless
+            - name: XDG_RUNTIME_DIR
+              value: /run/user/1000
+            - name: DOCKER_HOST
+              value: unix:///run/user/1000/docker.sock
+          startupProbe: &engine-probe
+            exec:
+              command: ["docker", "info"]
+            failureThreshold: 60
+            periodSeconds: 5
+            timeoutSeconds: 3
+          readinessProbe:
+            <<: *engine-probe
+            failureThreshold: 3
+            periodSeconds: 10
+          livenessProbe:
+            <<: *engine-probe
+            failureThreshold: 3
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: docker-run
+              mountPath: /run/user/1000
+            - name: docker-data
+              mountPath: /home/rootless/.local/share/docker
+            - name: workspaces
+              mountPath: /var/lib/coifesp/workspaces
+      containers:
+        - name: tool-worker
+          image: example.invalid/coifesp/harness@sha256:1111111111111111111111111111111111111111111111111111111111111111
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "coifesp_harness.tool_worker_main"]
+          envFrom:
+            - configMapRef:
+                name: coifesp-tool-worker-config
+          env:
+            - name: DOCKER_HOST
+              value: unix:///run/user/1000/docker.sock
+            - name: HOME
+              value: /tmp
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: COIFESP_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: coifesp-tool-worker-secrets
+                  key: database-url
+            - name: COIFESP_TOOL_WORKER_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: coifesp-tool-worker-secrets
+                  key: tool-worker-client-secret
+            - name: COIFESP_AUDIT_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: coifesp-tool-worker-secrets
+                  key: audit-signing-key
+            - name: COIFESP_ENVELOPE_SIGNING_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: coifesp-tool-worker-secrets
+                  key: envelope-signing-key
+            - name: COIFESP_MEMORY_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: coifesp-tool-worker-secrets
+                  key: memory-master-key
+          startupProbe: &tool-process-probe
+            exec:
+              command: ["python", "-c", "import os; os.kill(1, 0)"]
+            failureThreshold: 60
+            periodSeconds: 5
+            timeoutSeconds: 2
+          readinessProbe:
+            <<: *tool-process-probe
+            failureThreshold: 3
+            periodSeconds: 10
+          livenessProbe:
+            <<: *tool-process-probe
+            failureThreshold: 3
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 250m
+              memory: 384Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          securityContext:
+            runAsUser: 65532
+            runAsGroup: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: docker-run
+              mountPath: /run/user/1000
+            - name: workspaces
+              mountPath: /var/lib/coifesp/workspaces
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
+        - name: docker-run
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+        - name: docker-data
+          emptyDir:
+            sizeLimit: 10Gi
+        - name: workspaces
+          emptyDir:
+            sizeLimit: 10Gi

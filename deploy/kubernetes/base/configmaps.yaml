@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coifesp-control-plane-config
+data:
+  COIFESP_ENV: production
+  COIFESP_OIDC_ISSUER: https://identity.invalid/realms/replace-me
+  COIFESP_OIDC_AUDIENCE: coifesp-control-plane
+  COIFESP_OIDC_AUTHORIZED_PARTIES: replace-me-control-client
+  COIFESP_OIDC_JWKS_URL: https://identity.invalid/realms/replace-me/protocol/openid-connect/certs
+  COIFESP_OIDC_ALGORITHMS: RS256
+  COIFESP_AUDIT_KEY_ID: active-v1
+  COIFESP_ENVELOPE_KEY_ID: active-v1
+  COIFESP_MEMORY_KEY_ID: active-v1
+  COIFESP_SERVICE_NAME: coifesp-control-plane
+  COIFESP_TELEMETRY_ENABLED: "true"
+  COIFESP_OTLP_TRACES_ENDPOINT: https://coifesp-otel-collector:4318/v1/traces
+  COIFESP_TRACE_SAMPLE_RATIO: "0.1"
+  COIFESP_METRICS_ENABLED: "true"
+  COIFESP_STRUCTURED_LOGGING: "true"
+  COIFESP_LOG_LEVEL: INFO
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coifesp-agent-worker-config
+data:
+  COIFESP_ENV: production
+  COIFESP_OIDC_ISSUER: https://identity.invalid/realms/replace-me
+  COIFESP_OIDC_AUDIENCE: coifesp-workers
+  COIFESP_OIDC_AUTHORIZED_PARTIES: replace-me-agent-worker
+  COIFESP_OIDC_JWKS_URL: https://identity.invalid/realms/replace-me/protocol/openid-connect/certs
+  COIFESP_OIDC_ALGORITHMS: RS256
+  COIFESP_WORKER_TOKEN_ENDPOINT: https://identity.invalid/realms/replace-me/protocol/openid-connect/token
+  COIFESP_WORKER_CLIENT_ID: replace-me-agent-worker
+  COIFESP_WORKER_TENANT_ID: replace-me-tenant
+  COIFESP_DIRECTORY_API_BASE_URL: https://identity.invalid
+  COIFESP_DIRECTORY_REALM: replace-me
+  COIFESP_DIRECTORY_TOKEN_ENDPOINT: https://identity.invalid/realms/replace-me/protocol/openid-connect/token
+  COIFESP_DIRECTORY_CLIENT_ID: replace-me-directory-reader
+  COIFESP_WORKER_IDLE_POLL_SECONDS: "2"
+  COIFESP_WORKER_LEASE_SECONDS: "60"
+  COIFESP_WORKER_HEARTBEAT_SECONDS: "20"
+  COIFESP_AUDIT_KEY_ID: active-v1
+  COIFESP_ENVELOPE_KEY_ID: active-v1
+  COIFESP_MEMORY_KEY_ID: active-v1
+  COIFESP_LLM_PROVIDER: openai_compatible
+  COIFESP_LLM_MODEL: replace-me-model
+  COIFESP_LLM_BASE_URL: https://llm-gateway.invalid/v1
+  COIFESP_LLM_MAX_FAILOVER_ATTEMPTS: "2"
+  COIFESP_SERVICE_NAME: coifesp-agent-worker
+  COIFESP_TELEMETRY_ENABLED: "true"
+  COIFESP_OTLP_TRACES_ENDPOINT: https://coifesp-otel-collector:4318/v1/traces
+  COIFESP_TRACE_SAMPLE_RATIO: "0.1"
+  COIFESP_METRICS_ENABLED: "false"
+  COIFESP_STRUCTURED_LOGGING: "true"
+  COIFESP_LOG_LEVEL: INFO
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coifesp-tool-worker-config
+data:
+  COIFESP_ENV: production
+  COIFESP_OIDC_ISSUER: https://identity.invalid/realms/replace-me
+  COIFESP_OIDC_AUDIENCE: coifesp-workers
+  COIFESP_OIDC_AUTHORIZED_PARTIES: replace-me-tool-worker
+  COIFESP_OIDC_JWKS_URL: https://identity.invalid/realms/replace-me/protocol/openid-connect/certs
+  COIFESP_OIDC_ALGORITHMS: RS256
+  COIFESP_TOOL_WORKER_TOKEN_ENDPOINT: https://identity.invalid/realms/replace-me/protocol/openid-connect/token
+  COIFESP_TOOL_WORKER_CLIENT_ID: replace-me-tool-worker
+  COIFESP_TOOL_WORKER_TENANT_ID: replace-me-tenant
+  COIFESP_TOOL_WORKER_IDLE_POLL_SECONDS: "2"
+  COIFESP_TOOL_WORKER_LEASE_SECONDS: "60"
+  COIFESP_TOOL_WORKER_HEARTBEAT_SECONDS: "20"
+  COIFESP_SANDBOX_RUNTIME: docker
+  COIFESP_SANDBOX_WORKSPACE_ROOT: /var/lib/coifesp/workspaces
+  COIFESP_SANDBOX_PROFILES_JSON: >-
+    [{"profile_id":"replace-me","image":"example.invalid/coifesp/sandbox@sha256:2222222222222222222222222222222222222222222222222222222222222222","executable":"/bin/false","fixed_arguments":[],"arguments_schema":{"type":"array","maxItems":0},"timeout_seconds":30,"memory_bytes":134217728,"cpu_count":0.5,"pids":64,"output_bytes":65536,"tmpfs_bytes":16777216,"workspace_access":"read_only"}]
+  COIFESP_AUDIT_KEY_ID: active-v1
+  COIFESP_ENVELOPE_KEY_ID: active-v1
+  COIFESP_MEMORY_KEY_ID: active-v1
+  COIFESP_SERVICE_NAME: coifesp-tool-worker
+  COIFESP_TELEMETRY_ENABLED: "true"
+  COIFESP_OTLP_TRACES_ENDPOINT: https://coifesp-otel-collector:4318/v1/traces
+  COIFESP_TRACE_SAMPLE_RATIO: "0.1"
+  COIFESP_METRICS_ENABLED: "false"
+  COIFESP_STRUCTURED_LOGGING: "true"
+  COIFESP_LOG_LEVEL: INFO

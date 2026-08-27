@@ -1,0 +1,86 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: coifesp-harness
+  labels:
+    app.kubernetes.io/name: coifesp-harness
+spec:
+  groups:
+    - name: coifesp.recording
+      interval: 30s
+      rules:
+        - record: coifesp:http_error_ratio:rate5m
+          expr: sum(rate(coifesp_http_requests_total{status_class="5xx"}[5m])) / clamp_min(sum(rate(coifesp_http_requests_total[5m])), 0.000001)
+        - record: coifesp:http_error_ratio:rate30m
+          expr: sum(rate(coifesp_http_requests_total{status_class="5xx"}[30m])) / clamp_min(sum(rate(coifesp_http_requests_total[30m])), 0.000001)
+        - record: coifesp:http_error_ratio:rate1h
+          expr: sum(rate(coifesp_http_requests_total{status_class="5xx"}[1h])) / clamp_min(sum(rate(coifesp_http_requests_total[1h])), 0.000001)
+        - record: coifesp:http_error_ratio:rate6h
+          expr: sum(rate(coifesp_http_requests_total{status_class="5xx"}[6h])) / clamp_min(sum(rate(coifesp_http_requests_total[6h])), 0.000001)
+        - record: coifesp:http_latency_good_ratio:rate5m
+          expr: sum(rate(coifesp_http_request_duration_seconds_bucket{le="1.0"}[5m])) / clamp_min(sum(rate(coifesp_http_request_duration_seconds_count[5m])), 0.000001)
+        - record: coifesp:agent_worker_failure_ratio:rate15m
+          expr: sum(rate(coifesp_agent_worker_outcomes_total{outcome=~"failed|lease_lost"}[15m])) / clamp_min(sum(rate(coifesp_agent_worker_outcomes_total{outcome!="idle"}[15m])), 0.000001)
+        - record: coifesp:model_failure_ratio:rate10m
+          expr: sum(rate(coifesp_model_attempts_total{outcome="failed"}[10m])) / clamp_min(sum(rate(coifesp_model_attempts_total[10m])), 0.000001)
+        - record: coifesp:model_cost_usd:increase1h
+          expr: sum(increase(coifesp_model_cost_microusd_total[1h])) / 1000000
+    - name: coifesp.alerts
+      rules:
+        - alert: COIFESPHttpAvailabilityFastBurn
+          expr: coifesp:http_error_ratio:rate5m > (14.4 * 0.001) and coifesp:http_error_ratio:rate1h > (14.4 * 0.001)
+          for: 2m
+          labels: {severity: page, service: coifesp-control-plane, slo: http-availability}
+          annotations:
+            summary: COIFESP control-plane availability is rapidly burning its error budget
+            runbook: http-availability
+        - alert: COIFESPHttpAvailabilitySlowBurn
+          expr: coifesp:http_error_ratio:rate30m > (6 * 0.001) and coifesp:http_error_ratio:rate6h > (6 * 0.001)
+          for: 15m
+          labels: {severity: ticket, service: coifesp-control-plane, slo: http-availability}
+          annotations:
+            summary: COIFESP control-plane availability is steadily consuming its error budget
+            runbook: http-availability
+        - alert: COIFESPHttpLatencySLOBreach
+          expr: coifesp:http_latency_good_ratio:rate5m < 0.99 and sum(rate(coifesp_http_request_duration_seconds_count[5m])) > 0.01
+          for: 15m
+          labels: {severity: ticket, service: coifesp-control-plane, slo: http-latency}
+          annotations:
+            summary: COIFESP control-plane latency SLO is below target
+            runbook: http-latency
+        - alert: COIFESPAgentWorkerSLOBreach
+          expr: coifesp:agent_worker_failure_ratio:rate15m > 0.005 and sum(rate(coifesp_agent_worker_outcomes_total{outcome!="idle"}[15m])) > 0.001
+          for: 10m
+          labels: {severity: page, service: coifesp-agent-worker, slo: durable-worker-success}
+          annotations:
+            summary: Durable Agent Worker success ratio is below target
+            runbook: agent-worker
+        - alert: COIFESPModelProviderFailureRatioHigh
+          expr: coifesp:model_failure_ratio:rate10m > 0.20 and sum(rate(coifesp_model_attempts_total[10m])) > 0.01
+          for: 10m
+          labels: {severity: ticket, service: coifesp-model-gateway}
+          annotations:
+            summary: Model provider attempts are failing above the operational guardrail
+            runbook: model-provider
+        - alert: COIFESPModelCostSpike
+          expr: coifesp:model_cost_usd:increase1h > 50
+          for: 10m
+          labels: {severity: ticket, service: coifesp-model-gateway}
+          annotations:
+            summary: Model spend exceeded the default one-hour operational guardrail
+            runbook: model-cost
+        - alert: COIFESPTelemetryExportFailures
+          expr: sum(rate(otelcol_exporter_send_failed_spans_total[10m])) > 0
+          for: 10m
+          labels: {severity: ticket, service: coifesp-otel-collector}
+          annotations:
+            summary: OpenTelemetry Collector is failing to export trace spans
+            runbook: telemetry-export
+        - alert: COIFESPTelemetryQueueNearCapacity
+          expr: max(otelcol_exporter_queue_size / clamp_min(otelcol_exporter_queue_capacity, 1)) > 0.8
+          for: 10m
+          labels: {severity: ticket, service: coifesp-otel-collector}
+          annotations:
+            summary: OpenTelemetry Collector persistent sending queue is near capacity
+            runbook: telemetry-export
+

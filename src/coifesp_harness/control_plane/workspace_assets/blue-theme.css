@@ -1,0 +1,149 @@
+:root {
+  --ink: #172b4d;
+  --muted: #63758d;
+  --paper: #f4f7fb;
+  --panel: #ffffff;
+  --line: #d9e3ef;
+  --green: #1769c2;
+  --green2: #e8f2fd;
+  --orange: #e58a16;
+  --shadow: 0 8px 24px rgba(28, 66, 110, 0.08);
+  color: var(--ink);
+  background: var(--paper);
+}
+
+body { color: var(--ink); background: var(--paper); }
+.login-shell { background: #eef4fb; }
+.login-card {
+  padding: 44px;
+  border: 1px solid #d5e1ee;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 16px 44px rgba(24, 64, 108, 0.12);
+  backdrop-filter: none;
+}
+.brand-mark {
+  border-radius: 8px;
+  background: #1769c2;
+  font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+.eyebrow { color: #1769c2; }
+.primary, .secondary {
+  border-radius: 6px;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.primary {
+  background: #1769c2;
+  box-shadow: 0 2px 5px rgba(23, 105, 194, 0.2);
+}
+.primary:hover { background: #0f58a8; }
+.secondary {
+  color: #29415f;
+  background: #ffffff;
+  border: 1px solid #cbd8e7;
+}
+.secondary:hover {
+  color: #125cae;
+  background: #f2f7fd;
+  border-color: #8eb9e5;
+}
+.workspace { background: #f4f7fb; }
+.sidebar {
+  padding-top: 24px;
+  color: #ffffff;
+  background: #123b68;
+  border-right: 1px solid #0d3158;
+}
+.small-mark { color: #1769c2; background: #ffffff; }
+.nav-item { color: #c8d9ea; border-radius: 6px; }
+.nav-item:hover { color: #ffffff; background: #1b4d80; }
+.nav-item.active {
+  color: #123b68;
+  background: #ffffff;
+  box-shadow: 0 3px 10px rgba(5, 28, 52, 0.18);
+}
+.profile { border-top-color: #315b84; }
+.profile small { color: #abc3da; }
+.avatar { color: #123b68; background: #dbeaf8; }
+.topbar {
+  height: 88px;
+  background: #ffffff;
+  border-bottom-color: #d9e3ef;
+  box-shadow: 0 1px 0 rgba(31, 65, 103, 0.02);
+}
+.view { padding-top: 26px; }
+.hero {
+  padding: 28px 32px;
+  border: 1px solid #d6e3f0;
+  border-left: 4px solid #1769c2;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 5px 18px rgba(29, 70, 116, 0.06);
+}
+.stat, .panel, .card {
+  border-color: #d9e3ef;
+  border-radius: 9px;
+  box-shadow: 0 2px 8px rgba(28, 66, 110, 0.045);
+}
+.stat strong { color: #145fae; }
+.link { color: #1769c2; }
+.card:hover { border-color: #bdd1e7; }
+.badge { background: #e58a16; }
+.pill {
+  border-radius: 4px;
+  color: #50647e;
+  background: #edf2f7;
+}
+.pill.green { color: #135ca9; background: #e6f1fc; }
+.pill.orange { color: #9a5a0b; background: #fff2df; }
+.segmented { background: #e8eef5; border-radius: 7px; }
+.segmented button { border-radius: 5px; }
+.segmented button.active {
+  color: #145fae;
+  box-shadow: 0 1px 4px rgba(28, 66, 110, 0.13);
+}
+.event::before { background: #1769c2; }
+.toast { border-radius: 6px; background: #173f69; }
+dialog {
+  border: 1px solid #d5e1ee;
+  border-radius: 10px;
+  box-shadow: 0 22px 64px rgba(17, 49, 84, 0.24);
+}
+dialog::backdrop { background: rgba(20, 42, 68, 0.55); }
+.field input, .field textarea, .field select, .search input,
+.control-composer select {
+  border-color: #c9d6e5;
+  border-radius: 6px;
+}
+.field input:focus, .field textarea:focus, .field select:focus,
+.search input:focus, .control-composer select:focus {
+  border-color: #3982cb;
+  outline: 3px solid rgba(57, 130, 203, 0.14);
+}
+.auth-tabs { border-radius: 7px; background: #e9eff6; }
+.auth-tabs button { border-radius: 5px; }
+.auth-tabs button.active {
+  color: #145fae;
+  box-shadow: 0 1px 4px rgba(28, 66, 110, 0.12);
+}
+.credential-box {
+  border-color: #b8d2eb;
+  border-radius: 7px;
+  background: #edf6ff;
+}
+.profile-choice { border-color: #d2deeb; border-radius: 7px; }
+.profile-choice:hover { border-color: #5595d3; background: #f1f7fd; }
+.message {
+  border: 1px solid #dce5ef;
+  border-radius: 8px;
+  background: #f3f6fa;
+}
+.message.user { border-color: #bfd7ef; background: #e7f2fd; }
+.resource-preview-body { background: #f4f7fb; }
+@media (max-width: 560px) {
+  .login-card { padding: 32px 24px; }
+  .sidebar {
+    border-top: 1px solid #0d3158;
+    border-right: 0;
+  }
+}
