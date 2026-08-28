@@ -1,0 +1,266 @@
+{
+  "schema": "coifesp.project-harness-contract.v1",
+  "adr_status_required": "Accepted",
+  "phase": [
+    "INTAKE",
+    "ANALYSIS",
+    "PLANNING",
+    "EXECUTION",
+    "INTEGRATION",
+    "VERIFICATION",
+    "DELIVERY",
+    "TERMINAL"
+  ],
+  "status": [
+    "READY",
+    "RUNNING",
+    "WAITING",
+    "BLOCKED",
+    "COMPLETED",
+    "FAILED",
+    "CANCELLED"
+  ],
+  "wait_reason": [
+    "NONE",
+    "HUMAN_INPUT",
+    "HUMAN_APPROVAL",
+    "TEAM_RESPONSE",
+    "AGENT_RUN",
+    "TOOL_JOB",
+    "DEPENDENCY",
+    "VERIFICATION",
+    "SCHEDULE"
+  ],
+  "work_node_type": [
+    "goal",
+    "requirement",
+    "milestone",
+    "phase",
+    "task",
+    "risk",
+    "decision",
+    "artifact",
+    "verification"
+  ],
+  "work_relation_type": [
+    "depends_on",
+    "blocks",
+    "implements",
+    "delivers",
+    "verifies",
+    "derived_from",
+    "supersedes",
+    "relates_to",
+    "part_of"
+  ],
+  "team_task_status": [
+    "proposed",
+    "accepted",
+    "in_progress",
+    "submitted",
+    "verified",
+    "changes_requested",
+    "rejected"
+  ],
+  "input_request_status": [
+    "OPEN",
+    "ANSWERED",
+    "CANCELLED",
+    "EXPIRED"
+  ],
+  "gate_status": [
+    "OPEN",
+    "DECIDED",
+    "CANCELLED",
+    "EXPIRED"
+  ],
+  "budget_gate_decision": [
+    "INCREASE_BUDGET",
+    "REDUCE_SCOPE",
+    "TERMINATE"
+  ],
+  "delivery_decision": [
+    "ACCEPT",
+    "REJECT"
+  ],
+  "delivery_status": [
+    "ASSEMBLING",
+    "READY",
+    "ACCEPTED",
+    "REJECTED"
+  ],
+  "resource_propagation": [
+    "team_private",
+    "project_readonly",
+    "portable"
+  ],
+  "project_execution_policy_fields": [
+    "max_agent_runs",
+    "max_total_tokens",
+    "max_model_cost_microusd",
+    "max_replans",
+    "max_generated_tasks",
+    "max_active_agent_runs",
+    "max_active_runs_per_team",
+    "max_specialist_depth",
+    "max_specialist_runs_per_task",
+    "deadline_at",
+    "version"
+  ],
+  "orchestration_reason": [
+    "ANALYSIS",
+    "INITIAL_PLANNING",
+    "TASK_DECOMPOSITION",
+    "CONTRACT_REJECTED",
+    "VERIFICATION_FAILED",
+    "DELIVERY_REJECTED",
+    "SCOPE_CHANGED",
+    "RISK_CHANGED",
+    "CAPACITY_UNAVAILABLE"
+  ],
+  "planner_command_type": [
+    "propose_task",
+    "propose_dependency",
+    "propose_risk",
+    "propose_decision",
+    "request_rework",
+    "request_replan",
+    "request_human_input",
+    "request_human_gate"
+  ],
+  "fixture_stimulus_origin": [
+    "HUMAN",
+    "TEAM",
+    "AGENT_WORKER",
+    "TOOL_WORKER",
+    "TIMER",
+    "FIXTURE_FAULT"
+  ],
+  "fixture_fault_kind": [
+    "agent_worker_crash",
+    "orchestrator_worker_crash",
+    "publisher_crash_after_commit_before_publish",
+    "outbox_replay",
+    "stale_worker_resume_attempt",
+    "control_plane_restart"
+  ],
+  "domain_fact": [
+    "project.goal.confirmed",
+    "project.analysis.started",
+    "project.analysis.completed",
+    "project.plan.approved",
+    "project.work.dispatched",
+    "project.work.required_submitted",
+    "project.verification.completed",
+    "project.integration.completed",
+    "project.delivery.accepted",
+    "project.delivery.rejected",
+    "project.scope.changed",
+    "team_task.accepted",
+    "team_task.started",
+    "team_task.submitted",
+    "team_task.verified",
+    "team_task.rejected",
+    "team_task.changes_requested",
+    "task.schedule.changed",
+    "artifact.published",
+    "exchange.responded",
+    "agent_run.completed",
+    "agent_run.failed",
+    "agent_run.cancelled",
+    "approval.decided",
+    "human.input.provided",
+    "risk.created",
+    "risk.resolved",
+    "project.input.requested",
+    "project.gate.opened",
+    "project.gate.decided",
+    "project.budget.exhausted",
+    "project.capability.matched",
+    "project.capacity.reserved",
+    "project.capacity.reservation_failed",
+    "project.capacity.negotiation_resolved",
+    "project.orchestrator.decision_stale",
+    "project.completion.evaluated"
+  ],
+  "main_transition": [
+    {
+      "domain_fact": "project.goal.confirmed",
+      "transition_key": "goal.confirmed",
+      "to": ["ANALYSIS", "READY", "NONE"]
+    },
+    {
+      "domain_fact": "project.analysis.started",
+      "transition_key": "analysis.started",
+      "to": ["ANALYSIS", "RUNNING", "NONE"]
+    },
+    {
+      "domain_fact": "project.analysis.completed",
+      "transition_key": "analysis.completed",
+      "to": ["PLANNING", "READY", "NONE"]
+    },
+    {
+      "domain_fact": "project.plan.approved",
+      "transition_key": "plan.approved",
+      "to": ["EXECUTION", "READY", "NONE"]
+    },
+    {
+      "domain_fact": "project.work.dispatched",
+      "transition_key": "work.dispatched",
+      "to": ["EXECUTION", "RUNNING", "NONE"]
+    },
+    {
+      "domain_fact": "project.work.required_submitted",
+      "transition_key": "all_required_work_submitted",
+      "to": ["VERIFICATION", "READY", "NONE"]
+    },
+    {
+      "domain_fact": "project.verification.completed",
+      "outcome": "FAIL",
+      "transition_key": "verification.failed",
+      "to": ["EXECUTION", "READY", "NONE"]
+    },
+    {
+      "domain_fact": "project.verification.completed",
+      "outcome": "PASS",
+      "transition_key": "verification.passed",
+      "to": ["INTEGRATION", "READY", "NONE"]
+    },
+    {
+      "domain_fact": "project.integration.completed",
+      "outcome": "PASS",
+      "transition_key": "integration.passed",
+      "to": ["DELIVERY", "READY", "NONE"]
+    },
+    {
+      "domain_fact": "project.delivery.accepted",
+      "transition_key": "delivery.accepted",
+      "to": ["TERMINAL", "COMPLETED", "NONE"]
+    },
+    {
+      "domain_fact": "project.delivery.rejected",
+      "transition_key": "delivery.rejected",
+      "to": ["EXECUTION", "READY", "NONE"]
+    }
+  ],
+  "version_policy": {
+    "domain_fact_advances_event_sequence": true,
+    "only_transition_advances_process_version": true,
+    "planner_stale_inputs": [
+      "process_version",
+      "last_event_sequence",
+      "graph_snapshot_digest"
+    ]
+  },
+  "execution_identity": {
+    "planner_executed_as": "service:project-orchestrator",
+    "task_executed_as_prefix": "team-agent:",
+    "automatic_run_requires_initiated_by": true,
+    "automatic_run_requires_executed_as": true
+  },
+  "rework_policy": {
+    "team_task_changes_requested_returns_to": "in_progress",
+    "deterministic_task_reopen_counts_as_replan": false,
+    "graph_or_scope_mutation_counts_as_replan": true
+  }
+}

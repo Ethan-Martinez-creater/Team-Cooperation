@@ -37,6 +37,15 @@
 | 0010 | Capability Directory Integration | 复用唯一能力/容量事实源 |
 | 0011 | Integration and Delivery | DeliveryManifest 接受后才允许完成 |
 
+## 规范性附录
+
+- `project-process-event-catalog-v1.md`：领域事实、迁移键和 Audit 事件分层；
+- `project-harness-fixture-contract-v1.md`：B2/B6 评测输入与观察协议；
+- `project-harness-contract-v1.json`：供实现和契约测试使用的机器可读枚举与映射。
+
+三份附录与 Accepted ADR 具有同等约束力。变更机器契约时必须同步更新
+对应 ADR、附录和契约测试。
+
 ## 全局不可破坏约束
 
 以下约束对全部 ADR 和实现阶段生效：
