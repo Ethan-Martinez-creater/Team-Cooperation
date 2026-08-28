@@ -33,6 +33,7 @@ runtime-data/
 *.log
 
 # Test, audit and Codex scratch workspaces
+/.agents/
 /.audit-*/
 /.codex*/
 /.codex_*/
