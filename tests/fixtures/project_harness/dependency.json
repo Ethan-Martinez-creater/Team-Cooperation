@@ -1,0 +1,465 @@
+{
+  "fixture_schema": "project-harness-fixture.v1",
+  "fixture_id": "dependency",
+  "title": "跨团队依赖：阻塞与确定性解锁，以及事务事件崩溃恢复",
+  "description": "覆盖 Eval 2（Frontend blocked by Backend）与 Eval 13（业务已提交、publisher 崩溃、Outbox 恢复后恰好一次唤醒）。世界设定见 simple_project.json 的 world。",
+  "eval_coverage": [
+    { "eval_id": "Eval 2", "scenario_id": "eval-02-dependency-blocking" },
+    { "eval_id": "Eval 13", "scenario_id": "eval-13-transactional-event-recovery" }
+  ],
+  "source_refs": {
+    "plan": "docs/plan/iteration/Team-Cooperation_Multi-Agent_Harness_Execution_Plan_v1.1_Audited.md#33-evaluation",
+    "spec": "docs/evaluation/project-harness-evaluation-spec.md"
+  },
+  "global_invariants": "docs/evaluation/project-harness-evaluation-spec.md 第 6 节 G-INV-01..G-INV-14 对所有场景生效",
+  "world": {
+    "project_ref": "project-harness-demo",
+    "goal": { "goal_ref": "goal-1", "title": "交付带后端 API 与前端界面的演示应用", "confirmed": true },
+    "teams": [
+      { "team_ref": "team-backend", "display_name": "后端团队" },
+      { "team_ref": "team-frontend", "display_name": "前端团队" }
+    ],
+    "capabilities": [
+      { "capability_ref": "backend-api", "team_ref": "team-backend", "capacity": 2 },
+      { "capability_ref": "frontend-ui", "team_ref": "team-frontend", "capacity": 2 }
+    ],
+    "principals": {
+      "human_owner": "human:user-project-owner",
+      "orchestrator": "service:project-orchestrator",
+      "team_agent_backend": "team-agent:team-backend",
+      "team_agent_frontend": "team-agent:team-frontend"
+    },
+    "default_execution_policy": {
+      "policy_ref": "policy-default",
+      "max_agent_runs": 50,
+      "max_total_tokens": 2000000,
+      "max_replans": 5,
+      "max_active_agent_runs": 4,
+      "max_active_runs_per_team": 2
+    },
+    "shared_relation": {
+      "relation_ref": "rel-dep-1",
+      "relation_type": "depends_on",
+      "source": "task-frontend-ui",
+      "target": "task-backend-api",
+      "note": "前端任务依赖后端任务"
+    }
+  },
+  "scenarios": [
+    {
+      "scenario_id": "eval-02-dependency-blocking",
+      "eval_ref": "Eval 2",
+      "summary": "Frontend blocked by Backend：依赖未满足时 Frontend 永不 dispatch；依赖解除由确定性规则完成，全程不调用 Planner。",
+      "initial_state": {
+        "process": {
+          "process_ref": "process-demo-1",
+          "phase": "EXECUTION",
+          "status": "BLOCKED",
+          "wait_reason": "TEAM_RESPONSE"
+        },
+        "process_version": "plan 批准迁移完成后（相对值）",
+        "work_graph": {
+          "nodes": [
+            { "node_ref": "task-backend-api", "node_type": "task", "team_ref": "team-backend", "task_status": "proposed" },
+            { "node_ref": "task-frontend-ui", "node_type": "task", "team_ref": "team-frontend", "task_status": "proposed" }
+          ],
+          "relations": [
+            { "relation_ref": "rel-dep-1", "relation_type": "depends_on", "source": "task-frontend-ui", "target": "task-backend-api" }
+          ]
+        },
+        "contracts": [
+          { "task_ref": "task-backend-api", "requested_capability": "backend-api", "task_status": "proposed" },
+          { "task_ref": "task-frontend-ui", "requested_capability": "frontend-ui", "task_status": "proposed", "input_manifest": { "work_nodes": ["task-backend-api"] } }
+        ],
+        "artifacts": [],
+        "active_runs": [],
+        "execution_usage": { "agent_runs_started": 0, "replan_count": 0 },
+        "open_gates": [],
+        "open_input_requests": [],
+        "notes": ["两个 contract 均待目标团队接受"]
+      },
+      "input_events": [
+        {
+          "event_ref": "e01",
+          "event_type": "team_task.accepted",
+          "actor": { "initiated_by": "team-agent:team-frontend" },
+          "payload": { "task_ref": "task-frontend-ui", "task_status": "accepted" },
+          "note": "前端先接受：因其依赖未满足，仍不可调度"
+        },
+        {
+          "event_ref": "e02",
+          "event_type": "team_task.accepted",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-backend-api", "task_status": "accepted" }
+        },
+        {
+          "event_ref": "e03",
+          "event_type": "work.dispatched",
+          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-backend-api", "run_ref": "run-backend-1" },
+          "note": "仅 backend 满足 readiness（依赖满足 + 容量预留）；frontend 不 dispatch"
+        },
+        {
+          "event_ref": "e04",
+          "event_type": "team_task.started",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-backend-api", "task_status": "in_progress" }
+        },
+        {
+          "event_ref": "e05",
+          "event_type": "team_task.submitted",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-backend-api", "artifact_refs": ["resource-api-spec"] }
+        },
+        {
+          "event_ref": "e06",
+          "event_type": "team_task.verified",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "task_ref": "task-backend-api", "passed": true },
+          "note": "依赖就此满足；frontend 可进入 readiness"
+        },
+        {
+          "event_ref": "e07",
+          "event_type": "work.dispatched",
+          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-frontend" },
+          "payload": { "task_ref": "task-frontend-ui", "run_ref": "run-frontend-1" },
+          "note": "确定性解锁：Rule A 判定依赖满足后直接 dispatch，不调用 Planner"
+        },
+        {
+          "event_ref": "e08",
+          "event_type": "team_task.started",
+          "actor": { "initiated_by": "team-agent:team-frontend" },
+          "payload": { "task_ref": "task-frontend-ui", "task_status": "in_progress" }
+        },
+        {
+          "event_ref": "e09",
+          "event_type": "team_task.submitted",
+          "actor": { "initiated_by": "team-agent:team-frontend" },
+          "payload": { "task_ref": "task-frontend-ui", "artifact_refs": ["resource-ui-build"] }
+        },
+        {
+          "event_ref": "e10",
+          "event_type": "team_task.verified",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "task_ref": "task-frontend-ui", "passed": true }
+        },
+        {
+          "event_ref": "e11",
+          "event_type": "all_required_work_submitted",
+          "actor": { "initiated_by": "service:project-orchestrator" }
+        },
+        {
+          "event_ref": "e12",
+          "event_type": "verification.passed",
+          "actor": { "initiated_by": "service:project-orchestrator" }
+        },
+        {
+          "event_ref": "e13",
+          "event_type": "integration.passed",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "integration_ref": "integration-1" }
+        },
+        {
+          "event_ref": "e14",
+          "event_type": "delivery.accepted",
+          "actor": { "initiated_by": "human:user-project-owner" },
+          "payload": { "delivery_ref": "delivery-1" }
+        }
+      ],
+      "expected_transitions": [
+        {
+          "step_ref": "t01",
+          "trigger_event_ref": "e01",
+          "from": { "phase": "EXECUTION", "status": "BLOCKED", "wait_reason": "TEAM_RESPONSE" },
+          "to": { "phase": "EXECUTION", "status": "BLOCKED", "wait_reason": "TEAM_RESPONSE" },
+          "process_version_change": "0",
+          "transition_event_type": "team_task.accepted",
+          "note": "frontend 已接受但被依赖阻塞；backend 未接受仍无 ready work（OPEN-Q4）"
+        },
+        {
+          "step_ref": "t02",
+          "trigger_event_ref": "e02",
+          "from": { "phase": "EXECUTION", "status": "BLOCKED", "wait_reason": "TEAM_RESPONSE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "work.dispatched",
+          "note": "backend 就绪即 dispatch（e02→e03 同一轮 orchestration 完成）"
+        },
+        {
+          "step_ref": "t03",
+          "trigger_event_ref": "e06",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "0",
+          "transition_event_type": "team_task.verified",
+          "note": "backend verified 本身不迁移三元组；随后 e07 的 dispatch 由依赖解除驱动"
+        },
+        {
+          "step_ref": "t04",
+          "trigger_event_ref": "e07",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "0",
+          "transition_event_type": "work.dispatched",
+          "note": "frontend dispatch，活跃 run 连续，三元组保持 RUNNING"
+        },
+        {
+          "step_ref": "t05",
+          "trigger_event_ref": "e11",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "all_required_work_submitted"
+        },
+        {
+          "step_ref": "t06",
+          "trigger_event_ref": "e12",
+          "from": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "verification.passed"
+        },
+        {
+          "step_ref": "t07",
+          "trigger_event_ref": "e13",
+          "from": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "integration.passed"
+        },
+        {
+          "step_ref": "t08",
+          "trigger_event_ref": "e14",
+          "from": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "TERMINAL", "status": "COMPLETED", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "delivery.accepted"
+        }
+      ],
+      "required_outputs": [
+        { "output_id": "ro-01", "kind": "dispatch", "statement": "在 e06（backend verified）之前的任何 orchestration 轮次中，task-frontend-ui 均未被 dispatch、未创建任何 frontend run", "subject_refs": ["task-frontend-ui"] },
+        { "output_id": "ro-02", "kind": "state", "statement": "e03 的 dispatch 决策由确定性规则产生：该轮无 Planner AgentRun 被创建（Rule A/C）", "subject_refs": ["process-demo-1"] },
+        { "output_id": "ro-03", "kind": "dispatch", "statement": "依赖解除后 task-frontend-ui 恰好被 dispatch 一次", "subject_refs": ["task-frontend-ui"] },
+        { "output_id": "ro-04", "kind": "state", "statement": "depends_on 关系（rel-dep-1）全程存在且未被绕过、修改或删除", "subject_refs": ["rel-dep-1"] },
+        { "output_id": "ro-05", "kind": "state", "statement": "frontend 的 input_manifest 引用的 work node（task-backend-api）在其 dispatch 前已处于可访问状态", "subject_refs": ["task-frontend-ui"] }
+      ],
+      "forbidden_outcomes": [
+        { "forbidden_id": "fo-01", "kind": "dispatch", "statement": "task-backend-api verified 之前 dispatch task-frontend-ui（任何理由）" },
+        { "forbidden_id": "fo-02", "kind": "dispatch", "statement": "为解决确定性依赖（Rule A）创建 Planner AgentRun" },
+        { "forbidden_id": "fo-03", "kind": "dispatch", "statement": "TEAM_RESPONSE 阻塞期间（尚无 accepted 且 ready 的工作）发生任何 dispatch" },
+        { "forbidden_id": "fo-04", "kind": "state", "statement": "依赖关系被跳过：frontend 未等 backend verified 即提交/验证通过" },
+        { "forbidden_id": "fo-05", "kind": "dispatch", "statement": "依赖解除后 frontend 被重复 dispatch 多于一次" }
+      ],
+      "safety_invariants": [
+        { "invariant_id": "si-01", "statement": "阻塞窗口内 wait_reason 恒为 TEAM_RESPONSE（等接受）或 DEPENDENCY（已接受待依赖），不出现无 reason 的 BLOCKED（ADR-0005）" }
+      ],
+      "crash_and_recovery": [],
+      "contract_assumptions": ["OPEN-Q1", "OPEN-Q3", "OPEN-Q4", "OPEN-Q11"]
+    },
+    {
+      "scenario_id": "eval-13-transactional-event-recovery",
+      "eval_ref": "Eval 13",
+      "summary": "team_task.verified 业务状态已提交，publisher 在事件发布前崩溃；Outbox 恢复重放（含重复投递）后 ProjectProcess 被恰好一次唤醒，Frontend 解锁恰好一次。",
+      "initial_state": {
+        "process": {
+          "process_ref": "process-demo-1",
+          "phase": "EXECUTION",
+          "status": "RUNNING",
+          "wait_reason": "NONE"
+        },
+        "process_version": "plan 批准后（相对值）",
+        "work_graph": {
+          "nodes": [
+            { "node_ref": "task-backend-api", "node_type": "task", "team_ref": "team-backend", "task_status": "in_progress" },
+            { "node_ref": "task-frontend-ui", "node_type": "task", "team_ref": "team-frontend", "task_status": "accepted" }
+          ],
+          "relations": [
+            { "relation_ref": "rel-dep-1", "relation_type": "depends_on", "source": "task-frontend-ui", "target": "task-backend-api" }
+          ]
+        },
+        "contracts": [
+          { "task_ref": "task-backend-api", "task_status": "in_progress" },
+          { "task_ref": "task-frontend-ui", "task_status": "accepted" }
+        ],
+        "active_runs": [
+          {
+            "run_ref": "run-backend-1",
+            "run_kind": "task_execution",
+            "team_ref": "team-backend",
+            "task_ref": "task-backend-api",
+            "initiated_by": "service:project-orchestrator",
+            "executed_as": "team-agent:team-backend"
+          }
+        ],
+        "transactional_outbox": { "pending_entries": [], "note": "outbox 初始为空" },
+        "execution_usage": { "agent_runs_started": 1, "replan_count": 0 },
+        "open_gates": [],
+        "open_input_requests": []
+      },
+      "input_events": [
+        {
+          "event_ref": "e01",
+          "event_type": "team_task.verified",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "task_ref": "task-backend-api", "passed": true, "outbox_entry_ref": "outbox-1" },
+          "note": "业务状态变更 + 权威事件 + outbox 条目在同一事务提交成功（G-INV-04）"
+        },
+        {
+          "event_ref": "e02",
+          "event_type": "harness.fault_injection",
+          "fault": {
+            "kind": "publisher_crash_after_commit_before_publish",
+            "target_ref": "outbox-1"
+          },
+          "note": "投递器崩溃：事务已提交，wakeup 未送达，outbox-1 停留在 PENDING"
+        },
+        {
+          "event_ref": "e03",
+          "event_type": "harness.fault_injection",
+          "fault": {
+            "kind": "outbox_replay",
+            "target_ref": "outbox-1",
+            "replay_count": 2
+          },
+          "note": "恢复后投递器对同一 outbox 条目重放两次（at-least-once 投递语义）"
+        },
+        {
+          "event_ref": "e04",
+          "event_type": "work.dispatched",
+          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-frontend" },
+          "payload": { "task_ref": "task-frontend-ui", "run_ref": "run-frontend-1" },
+          "note": "期望系统产出：wakeup 恰好生效一次后 frontend 恰好 dispatch 一次"
+        },
+        {
+          "event_ref": "e05",
+          "event_type": "team_task.started",
+          "actor": { "initiated_by": "team-agent:team-frontend" },
+          "payload": { "task_ref": "task-frontend-ui", "task_status": "in_progress" }
+        },
+        {
+          "event_ref": "e06",
+          "event_type": "team_task.submitted",
+          "actor": { "initiated_by": "team-agent:team-frontend" },
+          "payload": { "task_ref": "task-frontend-ui", "artifact_refs": ["resource-ui-build"] }
+        },
+        {
+          "event_ref": "e07",
+          "event_type": "team_task.verified",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "task_ref": "task-frontend-ui", "passed": true }
+        },
+        {
+          "event_ref": "e08",
+          "event_type": "all_required_work_submitted",
+          "actor": { "initiated_by": "service:project-orchestrator" }
+        },
+        {
+          "event_ref": "e09",
+          "event_type": "verification.passed",
+          "actor": { "initiated_by": "service:project-orchestrator" }
+        },
+        {
+          "event_ref": "e10",
+          "event_type": "integration.passed",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "integration_ref": "integration-1" }
+        },
+        {
+          "event_ref": "e11",
+          "event_type": "delivery.accepted",
+          "actor": { "initiated_by": "human:user-project-owner" },
+          "payload": { "delivery_ref": "delivery-1" }
+        }
+      ],
+      "expected_transitions": [
+        {
+          "step_ref": "t01",
+          "trigger_event_refs": ["e01", "e02"],
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "0",
+          "transition_event_type": null,
+          "note": "崩溃窗口断言：业务状态已提交（task verified、依赖满足），但 wakeup 未送达——process 未被唤醒，frontend 未 dispatch，三元组保持崩溃前取值"
+        },
+        {
+          "step_ref": "t02",
+          "trigger_event_ref": "e03",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "0",
+          "transition_event_type": null,
+          "note": "两次重放投递被 (process_id, source_event_id) 去重，orchestration 恰好执行一次；本步骤断言无重复 dispatch"
+        },
+        {
+          "step_ref": "t03",
+          "trigger_event_ref": "e04",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "0",
+          "transition_event_type": "work.dispatched",
+          "note": "恢复后正常推进；frontend run 活跃"
+        },
+        {
+          "step_ref": "t04",
+          "trigger_event_ref": "e08",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "all_required_work_submitted"
+        },
+        {
+          "step_ref": "t05",
+          "trigger_event_ref": "e09",
+          "from": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "verification.passed"
+        },
+        {
+          "step_ref": "t06",
+          "trigger_event_ref": "e10",
+          "from": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "integration.passed"
+        },
+        {
+          "step_ref": "t07",
+          "trigger_event_ref": "e11",
+          "from": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "TERMINAL", "status": "COMPLETED", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "delivery.accepted"
+        }
+      ],
+      "required_outputs": [
+        { "output_id": "ro-01", "kind": "state", "statement": "崩溃窗口内 task-backend-api 已是 verified（业务提交生效），且没有任何 frontend run 被创建", "subject_refs": ["task-backend-api", "task-frontend-ui"] },
+        { "output_id": "ro-02", "kind": "state", "statement": "outbox-1 从 PENDING 恢复到已投递终态；重放期间条目保持可查询、可重试（ADR-0008）", "subject_refs": ["outbox-1"] },
+        { "output_id": "ro-03", "kind": "event", "statement": "wakeup 按 (process_id, source_event_id) 去重：orchestration 对 outbox-1 恰好执行一次，两次重放不产生第二次编排效果", "subject_refs": ["process-demo-1"] },
+        { "output_id": "ro-04", "kind": "dispatch", "statement": "恢复后 task-frontend-ui 恰好 dispatch 一次，usage 恰好计一次", "subject_refs": ["task-frontend-ui", "process-demo-1"] },
+        { "output_id": "ro-05", "kind": "state", "statement": "恢复后的 orchestration 读到的是已提交状态（task verified），不出现基于未提交状态的决策（publish-before-commit 反向断言）", "subject_refs": ["process-demo-1"] }
+      ],
+      "forbidden_outcomes": [
+        { "forbidden_id": "fo-01", "kind": "state", "statement": "唤醒永久丢失：outbox 恢复后 process 仍无人唤醒，frontend 永不 dispatch（睡眠死锁）" },
+        { "forbidden_id": "fo-02", "kind": "dispatch", "statement": "重复投递导致 frontend 被 dispatch 两次或 run-frontend-1 被创建两个" },
+        { "forbidden_id": "fo-03", "kind": "usage", "statement": "重复编排导致 usage/replan 计数重复累计" },
+        { "forbidden_id": "fo-04", "kind": "event", "statement": "出现针对回滚状态的领域事件（业务提交与事件不在同一事务的反例）" },
+        { "forbidden_id": "fo-05", "kind": "dispatch", "statement": "崩溃窗口内（wakeup 送达前）frontend 被任何路径 dispatch" }
+      ],
+      "safety_invariants": [
+        { "invariant_id": "si-01", "statement": "team_task.verified 的业务提交与权威事件/outbox 条目处于同一原子提交：不存在\"事件已投递而业务未提交\"或反之的中间态对消费者可见" },
+        { "invariant_id": "si-02", "statement": "outbox 条目 payload 不含 prompt/secret/raw tool arguments（G-INV-13）" }
+      ],
+      "crash_and_recovery": [
+        {
+          "recovery_id": "cr-01",
+          "injected_fault": "publisher_crash_after_commit_before_publish(outbox-1)",
+          "expected_behavior": "业务提交生效、wakeup 暂缺、process 保持崩溃前状态；outbox-1 保持 PENDING 且可查询",
+          "recovery_signal": "durable dispatcher 重启后重放 PENDING 条目",
+          "idempotency_requirement": "重放 N 次与 1 次效果相同：orchestration 恰好一次、dispatch 恰好一次、usage 恰好一次"
+        }
+      ],
+      "contract_assumptions": ["OPEN-Q1", "OPEN-Q3", "OPEN-Q11", "OPEN-Q13"]
+    }
+  ]
+}

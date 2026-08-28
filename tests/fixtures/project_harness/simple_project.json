@@ -1,0 +1,587 @@
+{
+  "fixture_schema": "project-harness-fixture.v1",
+  "fixture_id": "simple_project",
+  "title": "简单双团队项目：正常执行全链与 AgentRun 崩溃恢复",
+  "description": "覆盖 Eval 1（两个 Team、无失败的参考轨迹）与 Eval 5（AgentRun checkpoint 恢复）。所有 *_ref 为 fixture 内语义引用，非数据库 ID。",
+  "eval_coverage": [
+    { "eval_id": "Eval 1", "scenario_id": "eval-01-simple-project" },
+    { "eval_id": "Eval 5", "scenario_id": "eval-05-worker-crash-checkpoint-recovery" }
+  ],
+  "source_refs": {
+    "plan": "docs/plan/iteration/Team-Cooperation_Multi-Agent_Harness_Execution_Plan_v1.1_Audited.md#33-evaluation",
+    "spec": "docs/evaluation/project-harness-evaluation-spec.md"
+  },
+  "global_invariants": "docs/evaluation/project-harness-evaluation-spec.md 第 6 节 G-INV-01..G-INV-14 对所有场景生效",
+  "world": {
+    "project_ref": "project-harness-demo",
+    "goal": {
+      "goal_ref": "goal-1",
+      "title": "交付带后端 API 与前端界面的演示应用",
+      "confirmed": false
+    },
+    "teams": [
+      { "team_ref": "team-backend", "display_name": "后端团队" },
+      { "team_ref": "team-frontend", "display_name": "前端团队" }
+    ],
+    "capabilities": [
+      { "capability_ref": "backend-api", "team_ref": "team-backend", "capacity": 2 },
+      { "capability_ref": "frontend-ui", "team_ref": "team-frontend", "capacity": 2 }
+    ],
+    "principals": {
+      "human_owner": "human:user-project-owner",
+      "orchestrator": "service:project-orchestrator",
+      "team_agent_backend": "team-agent:team-backend",
+      "team_agent_frontend": "team-agent:team-frontend"
+    },
+    "default_execution_policy": {
+      "policy_ref": "policy-default",
+      "max_agent_runs": 50,
+      "max_total_tokens": 2000000,
+      "max_model_cost_microusd": 5000000,
+      "max_replans": 5,
+      "max_generated_tasks": 20,
+      "max_active_agent_runs": 4,
+      "max_active_runs_per_team": 2
+    }
+  },
+  "scenarios": [
+    {
+      "scenario_id": "eval-01-simple-project",
+      "eval_ref": "Eval 1",
+      "summary": "两个团队、无失败：从 INTAKE 到 TERMINAL/COMPLETED 的参考轨迹，作为其他场景的收敛基线。",
+      "initial_state": {
+        "process": {
+          "process_ref": "process-demo-1",
+          "phase": "INTAKE",
+          "status": "WAITING",
+          "wait_reason": "HUMAN_INPUT"
+        },
+        "process_version": 1,
+        "work_graph": {
+          "nodes": [],
+          "relations": [],
+          "note": "计划尚未批准，Work Graph 待 plan 物化"
+        },
+        "contracts": [],
+        "artifacts": [],
+        "execution_usage": {
+          "agent_runs_started": 0,
+          "agent_runs_completed": 0,
+          "total_tokens": 0,
+          "model_cost_microusd": 0,
+          "replan_count": 0,
+          "active_agent_runs": 0
+        },
+        "active_runs": [],
+        "open_gates": [],
+        "open_input_requests": [],
+        "delivery": null,
+        "notes": [
+          "user-project-owner 为最近操作项目的真实用户；本场景所有 run 不得以其为执行主体"
+        ]
+      },
+      "input_events": [
+        {
+          "event_ref": "e01",
+          "event_type": "goal.confirmed",
+          "actor": { "initiated_by": "human:user-project-owner" },
+          "payload": { "goal_ref": "goal-1" },
+          "note": "人类确认目标草案"
+        },
+        {
+          "event_ref": "e02",
+          "event_type": "analysis.started",
+          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-backend" },
+          "note": "分析 AgentRun 启动（OPEN-Q2）"
+        },
+        {
+          "event_ref": "e03",
+          "event_type": "analysis.completed",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "plan_draft": "coifesp.project-plan.v2", "plan_local_ids": ["goal-1", "task-1", "task-2"] },
+          "note": "产出 plan draft v1（含 plan-local stable ID）"
+        },
+        {
+          "event_ref": "e04",
+          "event_type": "project.plan.approved",
+          "actor": { "initiated_by": "human:user-project-owner" },
+          "payload": {
+            "plan_draft_ref": "plan-v1",
+            "materializes": [
+              { "node_type": "task", "ref": "task-backend-api", "team_ref": "team-backend", "initial_status": "proposed", "requested_capability": "backend-api" },
+              { "node_type": "task", "ref": "task-frontend-ui", "team_ref": "team-frontend", "initial_status": "proposed", "requested_capability": "frontend-ui" }
+            ],
+            "relations": [
+              { "relation_ref": "rel-goal-1", "relation_type": "part_of", "source": "task-backend-api", "target": "goal-1" },
+              { "relation_ref": "rel-goal-2", "relation_type": "part_of", "source": "task-frontend-ui", "target": "goal-1" }
+            ],
+            "completion_contract_draft": { "required_delivery_accepted": true }
+          },
+          "note": "人类批准计划；Work Graph 物化（两任务并行，无依赖）；完成契约草稿创建"
+        },
+        {
+          "event_ref": "e05",
+          "event_type": "team_task.accepted",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-backend-api", "task_status": "accepted" },
+          "note": "team-backend 接受执行契约"
+        },
+        {
+          "event_ref": "e06",
+          "event_type": "team_task.accepted",
+          "actor": { "initiated_by": "team-agent:team-frontend" },
+          "payload": { "task_ref": "task-frontend-ui", "task_status": "accepted" }
+        },
+        {
+          "event_ref": "e07",
+          "event_type": "work.dispatched",
+          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-backend" },
+          "payload": {
+            "task_ref": "task-backend-api",
+            "run_ref": "run-backend-1",
+            "run_kind": "task_execution",
+            "initiated_by": "service:project-orchestrator",
+            "executed_as": "team-agent:team-backend"
+          },
+          "note": "确定性规则 Rule C：ready task 直接 dispatch，不调用 Planner"
+        },
+        {
+          "event_ref": "e08",
+          "event_type": "work.dispatched",
+          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-frontend" },
+          "payload": {
+            "task_ref": "task-frontend-ui",
+            "run_ref": "run-frontend-1",
+            "run_kind": "task_execution",
+            "initiated_by": "service:project-orchestrator",
+            "executed_as": "team-agent:team-frontend"
+          }
+        },
+        {
+          "event_ref": "e09",
+          "event_type": "team_task.started",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-backend-api", "task_status": "in_progress" }
+        },
+        {
+          "event_ref": "e10",
+          "event_type": "team_task.started",
+          "actor": { "initiated_by": "team-agent:team-frontend" },
+          "payload": { "task_ref": "task-frontend-ui", "task_status": "in_progress" }
+        },
+        {
+          "event_ref": "e11",
+          "event_type": "team_task.submitted",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-backend-api", "artifact_refs": ["resource-api-spec"], "artifact_visibility": "project_shared" }
+        },
+        {
+          "event_ref": "e12",
+          "event_type": "team_task.verified",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": {
+            "task_ref": "task-backend-api",
+            "task_status": "verified",
+            "verification_result_schema": "coifesp.verification-result.v1",
+            "passed": true
+          },
+          "note": "task 级复合验证（deterministic + agent review）通过"
+        },
+        {
+          "event_ref": "e13",
+          "event_type": "team_task.submitted",
+          "actor": { "initiated_by": "team-agent:team-frontend" },
+          "payload": { "task_ref": "task-frontend-ui", "artifact_refs": ["resource-ui-build"], "artifact_visibility": "project_shared" }
+        },
+        {
+          "event_ref": "e14",
+          "event_type": "team_task.verified",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "task_ref": "task-frontend-ui", "task_status": "verified", "passed": true }
+        },
+        {
+          "event_ref": "e15",
+          "event_type": "all_required_work_submitted",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "note": "Harness 聚合判定：全部必需工作已提交并通过 task 级验证"
+        },
+        {
+          "event_ref": "e16",
+          "event_type": "verification.passed",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "note": "项目级验证聚合通过"
+        },
+        {
+          "event_ref": "e17",
+          "event_type": "integration.passed",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": {
+            "integration_ref": "integration-1",
+            "input_artifact_refs": ["resource-api-spec", "resource-ui-build"],
+            "result_artifact_refs": ["resource-release-bundle"]
+          }
+        },
+        {
+          "event_ref": "e18",
+          "event_type": "delivery.accepted",
+          "actor": { "initiated_by": "human:user-project-owner" },
+          "payload": {
+            "delivery_ref": "delivery-1",
+            "artifact_refs": ["resource-release-bundle"],
+            "release_notes_resource_ref": "resource-release-notes"
+          },
+          "note": "acceptor（人类）接受 DeliveryManifest；此后 Completion Contract 才可满足"
+        }
+      ],
+      "expected_transitions": [
+        {
+          "step_ref": "t01",
+          "trigger_event_ref": "e01",
+          "from": { "phase": "INTAKE", "status": "WAITING", "wait_reason": "HUMAN_INPUT" },
+          "to": { "phase": "ANALYSIS", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "goal.confirmed"
+        },
+        {
+          "step_ref": "t02",
+          "trigger_event_ref": "e02",
+          "from": { "phase": "ANALYSIS", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "ANALYSIS", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "analysis.started"
+        },
+        {
+          "step_ref": "t03",
+          "trigger_event_ref": "e03",
+          "from": { "phase": "ANALYSIS", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "PLANNING", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "analysis.completed"
+        },
+        {
+          "step_ref": "t04",
+          "trigger_event_ref": "e04",
+          "from": { "phase": "PLANNING", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "project.plan.approved"
+        },
+        {
+          "step_ref": "t05",
+          "trigger_event_ref": "e05",
+          "from": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "0",
+          "transition_event_type": "team_task.accepted",
+          "note": "业务事件不改三元组，仅追加 process event（OPEN-Q11）"
+        },
+        {
+          "step_ref": "t06",
+          "trigger_event_ref": "e07",
+          "from": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "work.dispatched"
+        },
+        {
+          "step_ref": "t07",
+          "trigger_event_refs": ["e08", "e09", "e10", "e11", "e12", "e13", "e14"],
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "0",
+          "transition_event_type": null,
+          "note": "并行执行与 task 级提交/验证期间三元组稳定（OPEN-Q3/Open-Q5）"
+        },
+        {
+          "step_ref": "t08",
+          "trigger_event_ref": "e15",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "all_required_work_submitted"
+        },
+        {
+          "step_ref": "t09",
+          "trigger_event_ref": "e16",
+          "from": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "verification.passed"
+        },
+        {
+          "step_ref": "t10",
+          "trigger_event_ref": "e17",
+          "from": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "integration.passed"
+        },
+        {
+          "step_ref": "t11",
+          "trigger_event_ref": "e18",
+          "from": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "TERMINAL", "status": "COMPLETED", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "delivery.accepted"
+        }
+      ],
+      "required_outputs": [
+        { "output_id": "ro-01", "kind": "state", "statement": "Work Graph 物化成功：goal 节点 + 两个 task 节点 + part_of 关系；物化重放幂等（同 draft_id + plan-local id 收敛）", "subject_refs": ["goal-1", "task-backend-api", "task-frontend-ui"] },
+        { "output_id": "ro-02", "kind": "state", "statement": "每个 task 恰好一次 accepted → in_progress → submitted → verified，无重复 dispatch", "subject_refs": ["task-backend-api", "task-frontend-ui"] },
+        { "output_id": "ro-03", "kind": "artifact", "statement": "resource-api-spec、resource-ui-build 存在，并被 delivery-1 的 artifact 版本/digest manifest 引用", "subject_refs": ["resource-api-spec", "resource-ui-build", "delivery-1"] },
+        { "output_id": "ro-04", "kind": "state", "statement": "delivery-1 状态为 ACCEPTED，且仅在 ACCEPTED 之后 process 才到达 TERMINAL/COMPLETED（G-INV-12）", "subject_refs": ["delivery-1"] },
+        { "output_id": "ro-05", "kind": "audit", "statement": "run-backend-1 / run-frontend-1 的 audit 同时记录 initiated_by=service:project-orchestrator 与 executed_as=team-agent:team-*（G-INV-06）", "subject_refs": ["run-backend-1", "run-frontend-1"] },
+        { "output_id": "ro-06", "kind": "usage", "statement": "execution_usage 累计恰好一次：每个 run 的 token/cost 在其 terminal 时入账且不重复", "subject_refs": ["process-demo-1"] },
+        { "output_id": "ro-07", "kind": "state", "statement": "Completion Contract 全部条件满足；评估为确定性（无模型调用）且对同一快照结果稳定", "subject_refs": ["process-demo-1"] },
+        { "output_id": "ro-08", "kind": "event", "statement": "每个接受的迁移恰好产生一条权威 process event，sequence 单调连续、payload 无 prompt/secret/raw tool arguments（G-INV-13）", "subject_refs": ["process-demo-1"] }
+      ],
+      "forbidden_outcomes": [
+        { "forbidden_id": "fo-01", "kind": "state", "statement": "任何 Agent/Planner 输出直接把 process 置为 COMPLETED（G-INV-01/G-INV-12）" },
+        { "forbidden_id": "fo-02", "kind": "state", "statement": "delivery ACCEPTED 之前出现 TERMINAL/COMPLETED" },
+        { "forbidden_id": "fo-03", "kind": "dispatch", "statement": "task 处于 proposed（未被接受）时被 dispatch（契约接受与调度就绪分离）" },
+        { "forbidden_id": "fo-04", "kind": "event", "statement": "同一 task 出现两次 submitted 或两次 verified" },
+        { "forbidden_id": "fo-05", "kind": "data_flow", "statement": "任一 team private 内容出现在另一 team 的 context/输出/audit payload" },
+        { "forbidden_id": "fo-06", "kind": "identity", "statement": "自动 run 的 executed_as 为 human:user-project-owner" },
+        { "forbidden_id": "fo-07", "kind": "dispatch", "statement": "为可确定性决策（Rule C ready task）创建 Planner AgentRun" }
+      ],
+      "safety_invariants": [
+        { "invariant_id": "si-01", "statement": "全程无 open gate / open input request；WAITING 仅出现在 INTAKE 的 HUMAN_INPUT 初始态" },
+        { "invariant_id": "si-02", "statement": "两任务并行执行期间 max_active_agent_runs / max_active_runs_per_team 均未突破" }
+      ],
+      "crash_and_recovery": [],
+      "contract_assumptions": ["OPEN-Q1", "OPEN-Q2", "OPEN-Q3", "OPEN-Q5", "OPEN-Q7", "OPEN-Q11"]
+    },
+    {
+      "scenario_id": "eval-05-worker-crash-checkpoint-recovery",
+      "eval_ref": "Eval 5",
+      "summary": "AgentRun worker 在 checkpoint 持久化后、terminal 写入前崩溃；恢复 worker 从 checkpoint 续跑，旧 fencing token 写入被拒绝，任务收敛到与 Eval 1 相同的终态。",
+      "initial_state": {
+        "process": {
+          "process_ref": "process-demo-1",
+          "phase": "EXECUTION",
+          "status": "RUNNING",
+          "wait_reason": "NONE"
+        },
+        "process_version": "与 plan 批准后、dispatch 后一致（相对值）",
+        "work_graph": {
+          "nodes": [
+            { "node_ref": "task-backend-api", "node_type": "task", "team_ref": "team-backend", "task_status": "in_progress" },
+            { "node_ref": "task-frontend-ui", "node_type": "task", "team_ref": "team-frontend", "task_status": "in_progress" }
+          ],
+          "relations": [
+            { "relation_ref": "rel-goal-1", "relation_type": "part_of", "source": "task-backend-api", "target": "goal-1" },
+            { "relation_ref": "rel-goal-2", "relation_type": "part_of", "source": "task-frontend-ui", "target": "goal-1" }
+          ]
+        },
+        "contracts": [
+          { "task_ref": "task-backend-api", "requested_capability": "backend-api", "task_status": "in_progress" },
+          { "task_ref": "task-frontend-ui", "requested_capability": "frontend-ui", "task_status": "in_progress" }
+        ],
+        "active_runs": [
+          {
+            "run_ref": "run-backend-1",
+            "run_kind": "task_execution",
+            "team_ref": "team-backend",
+            "task_ref": "task-backend-api",
+            "initiated_by": "service:project-orchestrator",
+            "executed_as": "team-agent:team-backend",
+            "checkpoint": { "persisted": true, "note": "已完成部分工具调用且 checkpoint 已持久化" }
+          },
+          {
+            "run_ref": "run-frontend-1",
+            "run_kind": "task_execution",
+            "team_ref": "team-frontend",
+            "task_ref": "task-frontend-ui",
+            "initiated_by": "service:project-orchestrator",
+            "executed_as": "team-agent:team-frontend"
+          }
+        ],
+        "execution_usage": {
+          "agent_runs_started": 2,
+          "agent_runs_completed": 0,
+          "replan_count": 0
+        },
+        "open_gates": [],
+        "open_input_requests": [],
+        "notes": ["worker-A 持有 run-backend-1 的当前 lease 与 fencing token"]
+      },
+      "input_events": [
+        {
+          "event_ref": "e01",
+          "event_type": "harness.fault_injection",
+          "fault": {
+            "kind": "agent_worker_crash",
+            "target_ref": "run-backend-1",
+            "worker_ref": "worker-A",
+            "timing": "after_checkpoint_persisted_before_run_terminal"
+          },
+          "note": "worker-A 崩溃：checkpoint 已持久化，terminal 状态未写入"
+        },
+        {
+          "event_ref": "e02",
+          "event_type": "harness.fault_injection",
+          "fault": {
+            "kind": "stale_worker_resume_attempt",
+            "target_ref": "run-backend-1",
+            "worker_ref": "worker-A",
+            "detail": "lease 已过期后，worker-A 携旧 fencing token 尝试恢复写入"
+          }
+        },
+        {
+          "event_ref": "e03",
+          "event_type": "harness.fault_injection",
+          "fault": {
+            "kind": "orchestrator_worker_crash",
+            "detail": "占位：无 orchestrator 故障；此事件表示 lease 过期与恢复 worker 认领之间的自然间隙",
+            "noop": true
+          }
+        },
+        {
+          "event_ref": "e04",
+          "event_type": "team_task.submitted",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-backend-api", "artifact_refs": ["resource-api-spec"] },
+          "note": "恢复 worker（worker-B，新 lease + 新 fencing token）从 checkpoint 续跑后正常提交"
+        },
+        {
+          "event_ref": "e05",
+          "event_type": "team_task.verified",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "task_ref": "task-backend-api", "passed": true }
+        },
+        {
+          "event_ref": "e06",
+          "event_type": "team_task.submitted",
+          "actor": { "initiated_by": "team-agent:team-frontend" },
+          "payload": { "task_ref": "task-frontend-ui", "artifact_refs": ["resource-ui-build"] },
+          "note": "run-frontend-1 全程未受影响"
+        },
+        {
+          "event_ref": "e07",
+          "event_type": "team_task.verified",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "task_ref": "task-frontend-ui", "passed": true }
+        },
+        {
+          "event_ref": "e08",
+          "event_type": "all_required_work_submitted",
+          "actor": { "initiated_by": "service:project-orchestrator" }
+        },
+        {
+          "event_ref": "e09",
+          "event_type": "verification.passed",
+          "actor": { "initiated_by": "service:project-orchestrator" }
+        },
+        {
+          "event_ref": "e10",
+          "event_type": "integration.passed",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "integration_ref": "integration-1" }
+        },
+        {
+          "event_ref": "e11",
+          "event_type": "delivery.accepted",
+          "actor": { "initiated_by": "human:user-project-owner" },
+          "payload": { "delivery_ref": "delivery-1" }
+        }
+      ],
+      "expected_transitions": [
+        {
+          "step_ref": "t01",
+          "trigger_event_ref": "e01",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "0",
+          "transition_event_type": null,
+          "note": "crash 是 run 层故障：process 三元组不变、无新领域事件；task-backend-api 保持 in_progress（OPEN-Q3）"
+        },
+        {
+          "step_ref": "t02",
+          "trigger_event_ref": "e02",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "0",
+          "transition_event_type": null,
+          "note": "旧 fencing token 写入必须被拒绝，状态无任何变化（G-INV-14）"
+        },
+        {
+          "step_ref": "t03",
+          "trigger_event_ref": "e04",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "0",
+          "transition_event_type": "team_task.submitted",
+          "note": "恢复后正常推进"
+        },
+        {
+          "step_ref": "t04",
+          "trigger_event_ref": "e08",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "all_required_work_submitted"
+        },
+        {
+          "step_ref": "t05",
+          "trigger_event_ref": "e09",
+          "from": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "verification.passed"
+        },
+        {
+          "step_ref": "t06",
+          "trigger_event_ref": "e10",
+          "from": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "integration.passed"
+        },
+        {
+          "step_ref": "t07",
+          "trigger_event_ref": "e11",
+          "from": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "TERMINAL", "status": "COMPLETED", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "delivery.accepted"
+        }
+      ],
+      "required_outputs": [
+        { "output_id": "ro-01", "kind": "state", "statement": "run-backend-1 由 worker-B 携新 lease/fencing token 认领并从已持久化 checkpoint 续跑，checkpoint 之前的副作用不重复执行", "subject_refs": ["run-backend-1"] },
+        { "output_id": "ro-02", "kind": "state", "statement": "task-backend-api 恰好一次 submitted、一次 verified；resource-api-spec 恰好一个最终版本", "subject_refs": ["task-backend-api", "resource-api-spec"] },
+        { "output_id": "ro-03", "kind": "audit", "statement": "恢复产生独立 recovery 审计事件（记录恢复执行者），run 的 initiated_by/executed_as 保持原值不变（G-INV-06/G-INV-14）", "subject_refs": ["run-backend-1"] },
+        { "output_id": "ro-04", "kind": "usage", "statement": "run-backend-1 的 token/cost 恰好入账一次（崩溃前消耗计入同一 run，不产生第二条计费记录）", "subject_refs": ["process-demo-1"] },
+        { "output_id": "ro-05", "kind": "state", "statement": "终态与 Eval 1 收敛：TERMINAL/COMPLETED，且 delivery-1 为 ACCEPTED", "subject_refs": ["delivery-1"] }
+      ],
+      "forbidden_outcomes": [
+        { "forbidden_id": "fo-01", "kind": "state", "statement": "崩溃导致 run-backend-1 被记为 failed 终态或 task-backend-api 回退为 accepted/proposed" },
+        { "forbidden_id": "fo-02", "kind": "state", "statement": "崩溃触发整个项目 FAILED/CANCELLED" },
+        { "forbidden_id": "fo-03", "kind": "event", "statement": "旧 fencing token 的任何写入生效（G-INV-14）" },
+        { "forbidden_id": "fo-04", "kind": "dispatch", "statement": "为弥补崩溃新开第二个并行 run 执行同一 task（应恢复而非重派）" },
+        { "forbidden_id": "fo-05", "kind": "usage", "statement": "usage 双重计数（恢复路径重放已入账消耗）" },
+        { "forbidden_id": "fo-06", "kind": "artifact", "statement": "同一逻辑步骤产出两个提交版本的 resource-api-spec" }
+      ],
+      "safety_invariants": [
+        { "invariant_id": "si-01", "statement": "crash 窗口内 process 无三元组迁移、无新领域事件、version 不变" },
+        { "invariant_id": "si-02", "statement": "run-frontend-1 的执行与审计全程不受 run-backend-1 崩溃影响" }
+      ],
+      "crash_and_recovery": [
+        {
+          "recovery_id": "cr-01",
+          "injected_fault": "agent_worker_crash(after_checkpoint_persisted_before_run_terminal)",
+          "expected_behavior": "run 层崩溃不影响 process 三元组；task 保持 in_progress；无新领域事件",
+          "recovery_signal": "lease 过期后由恢复 worker 认领（新 fencing token）",
+          "idempotency_requirement": "checkpoint 后副作用不重复；提交/验证/计费恰好一次"
+        },
+        {
+          "recovery_id": "cr-02",
+          "injected_fault": "stale_worker_resume_attempt",
+          "expected_behavior": "持过期 fencing token 的写入被拒绝",
+          "recovery_signal": "拒绝即为预期结果，无需额外恢复",
+          "idempotency_requirement": "被拒绝的写入不产生任何持久痕迹（除安全审计）"
+        }
+      ],
+      "contract_assumptions": ["OPEN-Q3", "OPEN-Q13"]
+    }
+  ]
+}

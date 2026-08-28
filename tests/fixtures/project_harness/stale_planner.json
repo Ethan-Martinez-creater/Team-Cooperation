@@ -1,0 +1,320 @@
+{
+  "fixture_schema": "project-harness-fixture.v1",
+  "fixture_id": "stale_planner",
+  "title": "过期 Planner 决策被拒绝并重新规划",
+  "description": "覆盖 Eval 9（Planner 基于旧 process_version / graph_digest 返回合法但过期的 command，Harness 必须拒绝并重新规划）。世界设定见 simple_project.json 的 world。",
+  "eval_coverage": [
+    { "eval_id": "Eval 9", "scenario_id": "eval-09-stale-planner-decision" }
+  ],
+  "source_refs": {
+    "plan": "docs/plan/iteration/Team-Cooperation_Multi-Agent_Harness_Execution_Plan_v1.1_Audited.md#33-evaluation",
+    "spec": "docs/evaluation/project-harness-evaluation-spec.md"
+  },
+  "global_invariants": "docs/evaluation/project-harness-evaluation-spec.md 第 6 节 G-INV-01..G-INV-14 对所有场景生效",
+  "world": {
+    "project_ref": "project-harness-demo",
+    "goal": { "goal_ref": "goal-1", "title": "交付带后端 API 与前端界面的演示应用", "confirmed": true },
+    "teams": [
+      { "team_ref": "team-backend", "display_name": "后端团队" },
+      { "team_ref": "team-frontend", "display_name": "前端团队" }
+    ],
+    "capabilities": [
+      { "capability_ref": "backend-api", "team_ref": "team-backend", "capacity": 2 },
+      { "capability_ref": "frontend-ui", "team_ref": "team-frontend", "capacity": 2 }
+    ],
+    "principals": {
+      "human_owner": "human:user-project-owner",
+      "orchestrator": "service:project-orchestrator",
+      "team_agent_backend": "team-agent:team-backend",
+      "team_agent_frontend": "team-agent:team-frontend"
+    },
+    "default_execution_policy": {
+      "policy_ref": "policy-default",
+      "max_agent_runs": 50,
+      "max_total_tokens": 2000000,
+      "max_replans": 5,
+      "max_active_agent_runs": 4,
+      "max_active_runs_per_team": 2
+    }
+  },
+  "scenarios": [
+    {
+      "scenario_id": "eval-09-stale-planner-decision",
+      "eval_ref": "Eval 9",
+      "summary": "Planner run 绑定旧快照（version V / digest D1）启动；期间并发风险事件改变图状态（digest D2）；Planner 返回基于旧快照的合法决策 → Harness 判定 STALE，零命令应用，发出 decision_stale 并重新规划；同一 intent 去重保证崩溃不产生并行 Planner Run。",
+      "initial_state": {
+        "process": {
+          "process_ref": "process-demo-1",
+          "phase": "EXECUTION",
+          "status": "RUNNING",
+          "wait_reason": "NONE"
+        },
+        "process_version": "V（planner 启动时刻，相对值）",
+        "work_graph": {
+          "nodes": [
+            { "node_ref": "task-backend-api", "node_type": "task", "team_ref": "team-backend", "task_status": "in_progress" },
+            { "node_ref": "task-frontend-ui", "node_type": "task", "team_ref": "team-frontend", "task_status": "accepted" }
+          ],
+          "relations": [
+            { "relation_ref": "rel-dep-1", "relation_type": "depends_on", "source": "task-frontend-ui", "target": "task-backend-api" }
+          ],
+          "graph_snapshot_digest": "sha256:D1"
+        },
+        "active_runs": [
+          {
+            "run_ref": "run-backend-1",
+            "run_kind": "task_execution",
+            "team_ref": "team-backend",
+            "task_ref": "task-backend-api",
+            "initiated_by": "service:project-orchestrator",
+            "executed_as": "team-agent:team-backend"
+          },
+          {
+            "run_ref": "planner-run-1",
+            "run_kind": "replanning",
+            "initiated_by": "service:project-orchestrator",
+            "planner_intent": {
+              "planner_intent_ref": "intent-1",
+              "orchestration_reason": "blocking_risk_analysis",
+              "based_on_process_version": "process.version_at(planner_run_started)",
+              "based_on_event_sequence": "process.last_event_sequence_at(planner_run_started)",
+              "graph_snapshot_digest": "sha256:D1"
+            },
+            "note": "Planner 冻结其推理依据（计划 7.4 Planner Intent）"
+          }
+        ],
+        "execution_usage": { "agent_runs_started": 2, "replan_count": 1 },
+        "open_gates": [],
+        "open_input_requests": []
+      },
+      "input_events": [
+        {
+          "event_ref": "e01",
+          "event_type": "risk.created",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": {
+            "risk_ref": "risk-api-breaking-change",
+            "severity": "high",
+            "description": "上游平台将在交付窗口内变更认证协议，task-backend-api 交付物面临失效风险"
+          },
+          "note": "并发业务事件：不迁移三元组，但改变图内容 → digest D1 → D2（OPEN-Q11）"
+        },
+        {
+          "event_ref": "e02",
+          "event_type": "agent_run.completed",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": {
+            "run_ref": "planner-run-1",
+            "decision_schema": "coifesp.orchestration-decision.v1",
+            "based_on_process_version": "process.version_at(planner_run_started)",
+            "based_on_event_sequence": "process.last_event_sequence_at(planner_run_started)",
+            "graph_snapshot_digest": "sha256:D1",
+            "commands": [
+              { "type": "cancel_task", "task_ref": "task-frontend-ui" },
+              { "type": "propose_task", "team_ref": "team-frontend", "task_ref": "task-frontend-standalone", "title": "脱离后端先行交付静态版本" }
+            ]
+          },
+          "note": "Fake Planner 返回“合法但过期”的决策：内容本身可校验，但基于 D1 旧快照"
+        },
+        {
+          "event_ref": "e03",
+          "event_type": "agent_run.completed",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": {
+            "run_ref": "planner-run-2",
+            "planner_intent": { "planner_intent_ref": "intent-2", "orchestration_reason": "blocking_risk_analysis", "graph_snapshot_digest": "sha256:D2" },
+            "decision_schema": "coifesp.orchestration-decision.v1",
+            "based_on_process_version": "process.version_at(planner_run_2_started)",
+            "graph_snapshot_digest": "sha256:D2",
+            "commands": [
+              { "type": "register_risk_mitigation", "risk_ref": "risk-api-breaking-change", "action": "在 task-backend-api 验收标准中追加协议兼容检查" },
+              { "type": "propose_task", "team_ref": "team-backend", "task_ref": "task-api-compat-check", "title": "协议兼容性检查任务" }
+            ]
+          },
+          "note": "重新规划后的新决策：基于 D2，stale guard 通过后被幂等应用"
+        },
+        {
+          "event_ref": "e04",
+          "event_type": "team_task.accepted",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-api-compat-check", "task_status": "accepted" }
+        },
+        {
+          "event_ref": "e05",
+          "event_type": "work.dispatched",
+          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-api-compat-check", "run_ref": "run-compat-1" }
+        },
+        {
+          "event_ref": "e06",
+          "event_type": "team_task.submitted",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-api-compat-check", "artifact_refs": ["resource-compat-report"] }
+        },
+        {
+          "event_ref": "e07",
+          "event_type": "team_task.verified",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "task_ref": "task-api-compat-check", "passed": true }
+        },
+        {
+          "event_ref": "e08",
+          "event_type": "risk.resolved",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "risk_ref": "risk-api-breaking-change" }
+        },
+        {
+          "event_ref": "e09",
+          "event_type": "team_task.submitted",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-backend-api", "artifact_refs": ["resource-api-spec"] }
+        },
+        {
+          "event_ref": "e10",
+          "event_type": "team_task.verified",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "task_ref": "task-backend-api", "passed": true }
+        },
+        {
+          "event_ref": "e11",
+          "event_type": "work.dispatched",
+          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-frontend" },
+          "payload": { "task_ref": "task-frontend-ui", "run_ref": "run-frontend-1" },
+          "note": "依赖解除后 frontend 正常调度（压缩表述）"
+        },
+        {
+          "event_ref": "e12",
+          "event_type": "team_task.submitted",
+          "actor": { "initiated_by": "team-agent:team-frontend" },
+          "payload": { "task_ref": "task-frontend-ui", "artifact_refs": ["resource-ui-build"] }
+        },
+        {
+          "event_ref": "e13",
+          "event_type": "team_task.verified",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "task_ref": "task-frontend-ui", "passed": true }
+        },
+        {
+          "event_ref": "e14",
+          "event_type": "all_required_work_submitted",
+          "actor": { "initiated_by": "service:project-orchestrator" }
+        },
+        {
+          "event_ref": "e15",
+          "event_type": "verification.passed",
+          "actor": { "initiated_by": "service:project-orchestrator" }
+        },
+        {
+          "event_ref": "e16",
+          "event_type": "integration.passed",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "integration_ref": "integration-1" }
+        },
+        {
+          "event_ref": "e17",
+          "event_type": "delivery.accepted",
+          "actor": { "initiated_by": "human:user-project-owner" },
+          "payload": { "delivery_ref": "delivery-1" }
+        }
+      ],
+      "expected_transitions": [
+        {
+          "step_ref": "t01",
+          "trigger_event_ref": "e01",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "0",
+          "transition_event_type": "risk.created",
+          "note": "风险事件追加权威事件（last_event_sequence +1）并使 graph digest 变为 D2；三元组与 version 不变（OPEN-Q11）"
+        },
+        {
+          "step_ref": "t02",
+          "trigger_event_ref": "e02",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "0",
+          "transition_event_type": "orchestrator.decision_stale",
+          "note": "stale 判定：based_on digest D1 ≠ 当前 D2（若主线程冻结业务事件递增 version，则 version 条件同样不匹配；两条件 OR）→ 零命令应用 → 发出 decision_stale → 重新唤醒 orchestrator"
+        },
+        {
+          "step_ref": "t03",
+          "trigger_event_ref": "e03",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "0",
+          "transition_event_type": "plan.replanned",
+          "note": "intent-2（基于 D2）通过 stale guard，commands 幂等应用：追加验收标准与 compat-check 任务提案（迁移事件名为语义占位）"
+        },
+        {
+          "step_ref": "t04",
+          "trigger_event_refs": ["e04", "e05"],
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "0",
+          "transition_event_type": "work.dispatched",
+          "note": "compat-check 接受并 dispatch，活跃 run 连续"
+        },
+        {
+          "step_ref": "t05",
+          "trigger_event_ref": "e14",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "all_required_work_submitted"
+        },
+        {
+          "step_ref": "t06",
+          "trigger_event_ref": "e15",
+          "from": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "verification.passed"
+        },
+        {
+          "step_ref": "t07",
+          "trigger_event_ref": "e16",
+          "from": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "integration.passed"
+        },
+        {
+          "step_ref": "t08",
+          "trigger_event_ref": "e17",
+          "from": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "TERMINAL", "status": "COMPLETED", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "delivery.accepted"
+        }
+      ],
+      "required_outputs": [
+        { "output_id": "ro-01", "kind": "state", "statement": "planner-run-1 的决策被标记 STALE：其 commands（cancel task-frontend-ui、propose task-frontend-standalone）零应用，图内容因该决策无任何变化", "subject_refs": ["planner-run-1", "task-frontend-ui"] },
+        { "output_id": "ro-02", "kind": "event", "statement": "产生 orchestrator.decision_stale 权威事件（含 stale 原因：digest/version 不匹配），并触发重新唤醒与重新规划", "subject_refs": ["process-demo-1"] },
+        { "output_id": "ro-03", "kind": "state", "statement": "重新规划使用新 intent（intent-2，绑定 D2）；同一 (process_version, orchestration_reason, digest) 映射确定性 intent id", "subject_refs": ["intent-2"] },
+        { "output_id": "ro-04", "kind": "state", "statement": "intent-2 的决策通过 stale guard 后被幂等应用：验收标准追加 + task-api-compat-check 提案各恰好一次", "subject_refs": ["task-api-compat-check", "risk-api-breaking-change"] },
+        { "output_id": "ro-05", "kind": "state", "statement": "stale 处理不消耗任务：task-frontend-ui 保持 accepted 并在依赖解除后正常完成（未被 planner 的过期 cancel 影响）", "subject_refs": ["task-frontend-ui"] }
+      ],
+      "forbidden_outcomes": [
+        { "forbidden_id": "fo-01", "kind": "state", "statement": "stale 决策的任何 command 被应用（包括“看似无害”的 propose/cancel）——过期即整体拒绝，不允许部分应用" },
+        { "forbidden_id": "fo-02", "kind": "state", "statement": "Planner 或 Harness 侧对旧快照与新状态做自动 merge 后应用" },
+        { "forbidden_id": "fo-03", "kind": "event", "statement": "stale 决策被静默丢弃且不触发重新规划（项目因决策过期而停滞）" },
+        { "forbidden_id": "fo-04", "kind": "dispatch", "statement": "同一 intent 在 orchestrator 崩溃重启后产生第二个并行 Planner Run（G-INV-11）" },
+        { "forbidden_id": "fo-05", "kind": "usage", "statement": "intent-2 与 intent-1 的重复执行导致 replan_count/usage 重复累计" }
+      ],
+      "safety_invariants": [
+        { "invariant_id": "si-01", "statement": "stale 判定先于任何 policy/graph 校验：决策的新鲜性不满足即整体拒绝，不再评估其内容" },
+        { "invariant_id": "si-02", "statement": "并发事件（risk.created）在 Planner run 存活期间照常推进业务状态——Planner 延迟不得阻塞领域事实（计划 7.4：禁止 LLM 自行 merge 新旧状态）" }
+      ],
+      "crash_and_recovery": [
+        {
+          "recovery_id": "cr-01",
+          "injected_fault": "orchestrator_worker_crash（变体：在 decision_stale 事件写出后、intent-2 创建前崩溃）",
+          "expected_behavior": "重启后按确定性 intent 规则恢复：先补齐重新规划，而不是重复评估 stale 决策；intent-1 不会复活执行",
+          "recovery_signal": "orchestrator worker 重新认领 process lease 并重放未消费事件",
+          "idempotency_requirement": "decision_stale 事件与 intent 创建各恰好一次；重放后与单次执行状态一致"
+        }
+      ],
+      "contract_assumptions": ["OPEN-Q1", "OPEN-Q11", "OPEN-Q12", "OPEN-Q13"]
+    }
+  ]
+}

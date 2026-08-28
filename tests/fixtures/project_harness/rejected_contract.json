@@ -1,0 +1,249 @@
+{
+  "fixture_schema": "project-harness-fixture.v1",
+  "fixture_id": "rejected_contract",
+  "title": "Contract 被目标团队拒绝后由 Planner 重规划",
+  "description": "覆盖 Eval 3（目标 Team 拒绝任务，Planner 必须 replan）。世界设定见 simple_project.json 的 world。",
+  "eval_coverage": [
+    { "eval_id": "Eval 3", "scenario_id": "eval-03-rejected-contract-replan" }
+  ],
+  "source_refs": {
+    "plan": "docs/plan/iteration/Team-Cooperation_Multi-Agent_Harness_Execution_Plan_v1.1_Audited.md#33-evaluation",
+    "spec": "docs/evaluation/project-harness-evaluation-spec.md"
+  },
+  "global_invariants": "docs/evaluation/project-harness-evaluation-spec.md 第 6 节 G-INV-01..G-INV-14 对所有场景生效",
+  "world": {
+    "project_ref": "project-harness-demo",
+    "goal": { "goal_ref": "goal-1", "title": "交付带后端 API 与前端界面的演示应用", "confirmed": true },
+    "teams": [
+      { "team_ref": "team-backend", "display_name": "后端团队" }
+    ],
+    "capabilities": [
+      { "capability_ref": "backend-api", "team_ref": "team-backend", "capacity": 1 }
+    ],
+    "principals": {
+      "human_owner": "human:user-project-owner",
+      "orchestrator": "service:project-orchestrator",
+      "team_agent_backend": "team-agent:team-backend"
+    },
+    "default_execution_policy": {
+      "policy_ref": "policy-default",
+      "max_agent_runs": 50,
+      "max_total_tokens": 2000000,
+      "max_replans": 3,
+      "max_active_agent_runs": 2,
+      "max_active_runs_per_team": 1
+    }
+  },
+  "scenarios": [
+    {
+      "scenario_id": "eval-03-rejected-contract-replan",
+      "eval_ref": "Eval 3",
+      "summary": "team-backend 以“范围过大、本期无 backend-api 余量”拒绝 contract；确定性规则无法选择替代方案，Orchestrator 创建 Planner replan run；重规划产出缩小范围的新 contract（supersedes 旧任务），通过 stale guard 后应用，项目继续推进至完成。",
+      "initial_state": {
+        "process": {
+          "process_ref": "process-demo-1",
+          "phase": "EXECUTION",
+          "status": "BLOCKED",
+          "wait_reason": "TEAM_RESPONSE"
+        },
+        "process_version": "plan 批准后（相对值）",
+        "work_graph": {
+          "nodes": [
+            { "node_ref": "task-backend-api", "node_type": "task", "team_ref": "team-backend", "task_status": "proposed" }
+          ],
+          "relations": [
+            { "relation_ref": "rel-goal-1", "relation_type": "part_of", "source": "task-backend-api", "target": "goal-1" }
+          ]
+        },
+        "contracts": [
+          {
+            "task_ref": "task-backend-api",
+            "requested_capability": "backend-api",
+            "task_status": "proposed",
+            "note": "contract v1：范围包含认证 API + 管理 API"
+          }
+        ],
+        "artifacts": [],
+        "active_runs": [],
+        "execution_usage": { "agent_runs_started": 0, "agent_runs_completed": 0, "replan_count": 0, "generated_task_count": 1 },
+        "open_gates": [],
+        "open_input_requests": [],
+        "plans": [
+          { "plan_ref": "plan-v1", "status": "approved", "note": "当前生效计划" }
+        ]
+      },
+      "input_events": [
+        {
+          "event_ref": "e01",
+          "event_type": "team_task.rejected",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": {
+            "task_ref": "task-backend-api",
+            "declined_reason": "capability unavailable this quarter: requested scope exceeds remaining backend-api capacity",
+            "task_status": "rejected"
+          },
+          "note": "目标团队拒绝执行契约（wakeup 源事件，计划 8.2）"
+        },
+        {
+          "event_ref": "e02",
+          "event_type": "agent_run.completed",
+          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-backend" },
+          "payload": {
+            "run_ref": "planner-replan-run-1",
+            "run_kind": "replanning",
+            "decision_schema": "coifesp.orchestration-decision.v1",
+            "based_on_process_version": "process.version_at(planner_run_started)",
+            "graph_snapshot_digest": "sha256:of-graph-at(planner_run_started)",
+            "commands": [
+              { "type": "propose_task", "team_ref": "team-backend", "task_ref": "task-api-v2", "title": "仅认证 API（缩小范围）", "supersedes": "task-backend-api" },
+              { "type": "register_risk", "severity": "low", "description": "管理 API 推迟到后续迭代" }
+            ]
+          },
+          "note": "Fake Planner 产出决策 v2：缩小范围重提案；决策通过 stale guard（版本/digest 匹配）后被幂等应用"
+        },
+        {
+          "event_ref": "e03",
+          "event_type": "team_task.accepted",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-api-v2", "task_status": "accepted" },
+          "note": "新 contract 范围可接受，团队接受"
+        },
+        {
+          "event_ref": "e04",
+          "event_type": "work.dispatched",
+          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-api-v2", "run_ref": "run-api-v2-1", "run_kind": "task_execution" }
+        },
+        {
+          "event_ref": "e05",
+          "event_type": "team_task.started",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-api-v2", "task_status": "in_progress" }
+        },
+        {
+          "event_ref": "e06",
+          "event_type": "team_task.submitted",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-api-v2", "artifact_refs": ["resource-api-spec"] }
+        },
+        {
+          "event_ref": "e07",
+          "event_type": "team_task.verified",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "task_ref": "task-api-v2", "passed": true }
+        },
+        {
+          "event_ref": "e08",
+          "event_type": "all_required_work_submitted",
+          "actor": { "initiated_by": "service:project-orchestrator" }
+        },
+        {
+          "event_ref": "e09",
+          "event_type": "verification.passed",
+          "actor": { "initiated_by": "service:project-orchestrator" }
+        },
+        {
+          "event_ref": "e10",
+          "event_type": "integration.passed",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "integration_ref": "integration-1" }
+        },
+        {
+          "event_ref": "e11",
+          "event_type": "delivery.accepted",
+          "actor": { "initiated_by": "human:user-project-owner" },
+          "payload": { "delivery_ref": "delivery-1" }
+        }
+      ],
+      "expected_transitions": [
+        {
+          "step_ref": "t01",
+          "trigger_event_ref": "e01",
+          "from": { "phase": "EXECUTION", "status": "BLOCKED", "wait_reason": "TEAM_RESPONSE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "work.dispatched",
+          "note": "拒绝触发 wakeup；无确定性替代方案 → 创建 planner replan run（run_kind=replanning），活跃 run 使 process 进入 RUNNING"
+        },
+        {
+          "step_ref": "t02",
+          "trigger_event_ref": "e02",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "BLOCKED", "wait_reason": "TEAM_RESPONSE" },
+          "process_version_change": "+1",
+          "transition_event_type": "plan.replanned",
+          "note": "决策应用：task-api-v2 进入 proposed 待接受；旧 contract 无 ready work → 回到 TEAM_RESPONSE（迁移事件名为语义占位，OPEN-Q12）"
+        },
+        {
+          "step_ref": "t03",
+          "trigger_event_refs": ["e03", "e04"],
+          "from": { "phase": "EXECUTION", "status": "BLOCKED", "wait_reason": "TEAM_RESPONSE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "work.dispatched"
+        },
+        {
+          "step_ref": "t04",
+          "trigger_event_ref": "e08",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "all_required_work_submitted"
+        },
+        {
+          "step_ref": "t05",
+          "trigger_event_ref": "e09",
+          "from": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "verification.passed"
+        },
+        {
+          "step_ref": "t06",
+          "trigger_event_ref": "e10",
+          "from": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "integration.passed"
+        },
+        {
+          "step_ref": "t07",
+          "trigger_event_ref": "e11",
+          "from": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "TERMINAL", "status": "COMPLETED", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "delivery.accepted"
+        }
+      ],
+      "required_outputs": [
+        { "output_id": "ro-01", "kind": "state", "statement": "replan 恰好发生一次：execution_usage.replan_count 从 0 到 1，且低于 policy.max_replans", "subject_refs": ["process-demo-1"] },
+        { "output_id": "ro-02", "kind": "state", "statement": "plan-v2 以 supersedes 关系取代 plan-v1；task-backend-api（rejected）记录保留、未被删除或静默改写；新计划不覆盖已完成工作", "subject_refs": ["plan-v1", "task-backend-api", "task-api-v2"] },
+        { "output_id": "ro-03", "kind": "state", "statement": "planner decision 通过 stale guard（based_on_process_version 与 graph_snapshot_digest 均匹配当前值）后才被幂等应用（G-INV-11）", "subject_refs": ["planner-replan-run-1"] },
+        { "output_id": "ro-04", "kind": "event", "statement": "e01 拒绝事件产生一条 wakeup 且被消费一次；同一拒绝不触发多次 replan" },
+        { "output_id": "ro-05", "kind": "state", "statement": "task-api-v2 走完整生命周期 proposed → accepted → in_progress → submitted → verified，dispatch 前满足 readiness（已接受 + 依赖满足 + 容量预留）", "subject_refs": ["task-api-v2"] }
+      ],
+      "forbidden_outcomes": [
+        { "forbidden_id": "fo-01", "kind": "dispatch", "statement": "向 team-backend 自动重发同一 contract v1（拒绝后无人工/重规划介入的原样重试）" },
+        { "forbidden_id": "fo-02", "kind": "dispatch", "statement": "无限自动重试循环：拒绝后不经重规划反复触发 dispatch/negotiation" },
+        { "forbidden_id": "fo-03", "kind": "state", "statement": "planner 决策绕过 stale guard 直接应用，或 planner command 直接指定 task 状态为 accepted/verified（G-INV-01）" },
+        { "forbidden_id": "fo-04", "kind": "state", "statement": "replan 静默覆盖旧计划：plan-v1 或被拒 task 的记录消失（应 supersedes 保留）" },
+        { "forbidden_id": "fo-05", "kind": "usage", "statement": "replan_count 不增长，或达到 max_replans 后仍继续发起新 replan" },
+        { "forbidden_id": "fo-06", "kind": "state", "statement": "拒绝事件把 process 直接置为 FAILED（拒绝是重规划信号，不是项目失败）" }
+      ],
+      "safety_invariants": [
+        { "invariant_id": "si-01", "statement": "planner replan run 的 executed_as 为受验证服务/规划主体，而非真实用户；其输出仅为 command 草案，应用前经 schema/policy/graph 三重验证（计划 7.5）" },
+        { "invariant_id": "si-02", "statement": "同一 (process_version, orchestration_reason, graph_snapshot_digest) 只产生一个 replan intent；本场景崩溃重放不产生第二个并行 planner run（G-INV-11）" }
+      ],
+      "crash_and_recovery": [
+        {
+          "recovery_id": "cr-01",
+          "injected_fault": "orchestrator_worker_crash（可选变体：在 replan run 创建后、decision 应用前崩溃）",
+          "expected_behavior": "重启后按确定性 planner intent 恢复：不创建第二个并行 planner run；已应用的 command 幂等收敛",
+          "recovery_signal": "orchestrator worker 重新认领 process lease",
+          "idempotency_requirement": "decision/command 按 command_id、request_digest 去重；重放后状态与单次执行一致"
+        }
+      ],
+      "contract_assumptions": ["OPEN-Q1", "OPEN-Q3", "OPEN-Q4", "OPEN-Q11", "OPEN-Q12"]
+    }
+  ]
+}

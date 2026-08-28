@@ -1,0 +1,461 @@
+{
+  "fixture_schema": "project-harness-fixture.v1",
+  "fixture_id": "delivery_rejection",
+  "title": "Delivery 被拒后的返工闭环与人工输入挂起恢复",
+  "description": "覆盖 Eval 14（全部 Task verified 但 DeliveryManifest 被拒，Process 不得 COMPLETE，应进入 rework/replan）与 Eval 12（Agent 产生 InputRequest 后进入稳定 WAITING，进程重启后仍可由回答事件恢复）。世界设定见 simple_project.json 的 world。",
+  "eval_coverage": [
+    { "eval_id": "Eval 14", "scenario_id": "eval-14-delivery-rejection-rework" },
+    { "eval_id": "Eval 12", "scenario_id": "eval-12-human-input-suspension-restart" }
+  ],
+  "source_refs": {
+    "plan": "docs/plan/iteration/Team-Cooperation_Multi-Agent_Harness_Execution_Plan_v1.1_Audited.md#33-evaluation",
+    "spec": "docs/evaluation/project-harness-evaluation-spec.md"
+  },
+  "global_invariants": "docs/evaluation/project-harness-evaluation-spec.md 第 6 节 G-INV-01..G-INV-14 对所有场景生效",
+  "world": {
+    "project_ref": "project-harness-demo",
+    "goal": { "goal_ref": "goal-1", "title": "交付带后端 API 与前端界面的演示应用", "confirmed": true },
+    "teams": [
+      { "team_ref": "team-backend", "display_name": "后端团队" },
+      { "team_ref": "team-frontend", "display_name": "前端团队" }
+    ],
+    "capabilities": [
+      { "capability_ref": "backend-api", "team_ref": "team-backend", "capacity": 2 },
+      { "capability_ref": "frontend-ui", "team_ref": "team-frontend", "capacity": 2 }
+    ],
+    "principals": {
+      "human_owner": "human:user-project-owner",
+      "orchestrator": "service:project-orchestrator",
+      "team_agent_backend": "team-agent:team-backend",
+      "team_agent_frontend": "team-agent:team-frontend"
+    },
+    "default_execution_policy": {
+      "policy_ref": "policy-default",
+      "max_agent_runs": 50,
+      "max_total_tokens": 2000000,
+      "max_replans": 5,
+      "max_active_agent_runs": 4,
+      "max_active_runs_per_team": 2
+    },
+    "completion_contract": {
+      "contract_ref": "completion-contract-1",
+      "required_delivery_accepted": true,
+      "note": "完成条件引用 DeliveryManifest（计划 15.2 / 16.2）"
+    }
+  },
+  "scenarios": [
+    {
+      "scenario_id": "eval-14-delivery-rejection-rework",
+      "eval_ref": "Eval 14",
+      "summary": "所有 Task 已 verified、Integration 通过，但 acceptor 以“release notes 缺少风险章节”拒绝 DeliveryManifest；DELIVERY 经 delivery.rejected 回到 EXECUTION，Planner 决定返工范围，修订后重新走 验证 → 集成 → 交付 v2 被接受，项目才完成。",
+      "initial_state": {
+        "process": {
+          "process_ref": "process-demo-1",
+          "phase": "DELIVERY",
+          "status": "READY",
+          "wait_reason": "NONE"
+        },
+        "process_version": "integration.passed 迁移后（相对值）",
+        "work_graph": {
+          "nodes": [
+            { "node_ref": "task-backend-api", "node_type": "task", "team_ref": "team-backend", "task_status": "verified" },
+            { "node_ref": "task-frontend-ui", "node_type": "task", "team_ref": "team-frontend", "task_status": "verified" }
+          ],
+          "relations": [
+            { "relation_ref": "rel-dep-1", "relation_type": "depends_on", "source": "task-frontend-ui", "target": "task-backend-api" }
+          ]
+        },
+        "artifacts": [
+          { "resource_ref": "resource-api-spec", "version": 1, "visibility": "project_shared" },
+          { "resource_ref": "resource-ui-build", "version": 1, "visibility": "project_shared" },
+          { "resource_ref": "resource-release-notes", "version": 1, "visibility": "project_shared", "note": "缺少风险章节——被拒原因" }
+        ],
+        "integration": {
+          "integration_ref": "integration-1",
+          "status": "passed",
+          "input_artifact_refs": ["resource-api-spec", "resource-ui-build"]
+        },
+        "delivery": {
+          "delivery_ref": "delivery-1",
+          "status": "READY",
+          "artifact_refs": ["resource-release-bundle"],
+          "release_notes_resource_ref": "resource-release-notes",
+          "verification_refs": ["task-backend-api", "task-frontend-ui"]
+        },
+        "active_runs": [],
+        "execution_usage": { "agent_runs_started": 2, "replan_count": 0 },
+        "open_gates": [],
+        "open_input_requests": []
+      },
+      "input_events": [
+        {
+          "event_ref": "e01",
+          "event_type": "delivery.rejected",
+          "actor": { "initiated_by": "human:user-project-owner" },
+          "payload": {
+            "delivery_ref": "delivery-1",
+            "rejected_reason": "release notes missing required risk section",
+            "delivery_status": "REJECTED"
+          },
+          "note": "acceptor 拒绝交付（ADR-0005：DELIVERY→EXECUTION 仅可经 delivery.rejected / scope.changed 等显式事件；事件载荷为语义占位，OPEN-Q7）"
+        },
+        {
+          "event_ref": "e02",
+          "event_type": "agent_run.completed",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": {
+            "run_ref": "planner-rework-run-1",
+            "run_kind": "replanning",
+            "decision_schema": "coifesp.orchestration-decision.v1",
+            "graph_snapshot_digest": "sha256:post-rejection",
+            "commands": [
+              { "type": "propose_task", "team_ref": "team-backend", "task_ref": "task-release-notes-revision", "title": "补充 release notes 风险章节", "revises_resource": "resource-release-notes" }
+            ]
+          },
+          "note": "返工范围需判断（哪个产物、什么改动）→ Planner replan；决策过 stale guard 后应用；replan_count 0→1"
+        },
+        {
+          "event_ref": "e03",
+          "event_type": "team_task.accepted",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-release-notes-revision", "task_status": "accepted" }
+        },
+        {
+          "event_ref": "e04",
+          "event_type": "work.dispatched",
+          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-release-notes-revision", "run_ref": "run-rework-1" }
+        },
+        {
+          "event_ref": "e05",
+          "event_type": "team_task.started",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-release-notes-revision", "task_status": "in_progress" }
+        },
+        {
+          "event_ref": "e06",
+          "event_type": "team_task.submitted",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-release-notes-revision", "artifact_refs": ["resource-release-notes"], "artifact_version": 2 }
+        },
+        {
+          "event_ref": "e07",
+          "event_type": "team_task.verified",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "task_ref": "task-release-notes-revision", "passed": true }
+        },
+        {
+          "event_ref": "e07b",
+          "event_type": "all_required_work_submitted",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "note": "Harness 聚合判定：含返工任务在内的全部必需工作已验证"
+        },
+        {
+          "event_ref": "e08",
+          "event_type": "verification.passed",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "note": "项目级验证（含已 verified 的原任务聚合）再次通过"
+        },
+        {
+          "event_ref": "e09",
+          "event_type": "integration.passed",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "integration_ref": "integration-2", "input_artifact_refs": ["resource-api-spec", "resource-ui-build", "resource-release-notes#v2"] }
+        },
+        {
+          "event_ref": "e10",
+          "event_type": "delivery.accepted",
+          "actor": { "initiated_by": "human:user-project-owner" },
+          "payload": {
+            "delivery_ref": "delivery-2",
+            "artifact_refs": ["resource-release-bundle"],
+            "release_notes_resource_ref": "resource-release-notes"
+          },
+          "note": "delivery-2 READY 后被 acceptor 接受；Completion Contract 的 required_delivery_accepted 至此满足"
+        }
+      ],
+      "expected_transitions": [
+        {
+          "step_ref": "t01",
+          "trigger_event_ref": "e01",
+          "from": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "delivery.rejected",
+          "note": "交付被拒：合法回退路径（ADR-0005 主链外唯一 DELIVERY→EXECUTION 通道）；process 绝不进入 COMPLETED"
+        },
+        {
+          "step_ref": "t02",
+          "trigger_event_ref": "e02",
+          "from": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "0",
+          "transition_event_type": "plan.replanned",
+          "note": "rework 任务进入 proposed（待接受）；READY 保持到接受发生（本场景 planner run 快速完成，窗口内无活跃 run）"
+        },
+        {
+          "step_ref": "t03",
+          "trigger_event_refs": ["e03", "e04"],
+          "from": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "work.dispatched"
+        },
+        {
+          "step_ref": "t04",
+          "trigger_event_ref": "e07b",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "all_required_work_submitted"
+        },
+        {
+          "step_ref": "t05",
+          "trigger_event_ref": "e08",
+          "from": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "verification.passed"
+        },
+        {
+          "step_ref": "t06",
+          "trigger_event_ref": "e09",
+          "from": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "integration.passed",
+          "note": "integration-2 通过，delivery-2 就绪"
+        },
+        {
+          "step_ref": "t07",
+          "trigger_event_ref": "e10",
+          "from": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "TERMINAL", "status": "COMPLETED", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "delivery.accepted"
+        }
+      ],
+      "required_outputs": [
+        { "output_id": "ro-01", "kind": "state", "statement": "delivery-1 状态定格 REJECTED（终态、可追溯），不被复用或回改为 READY", "subject_refs": ["delivery-1"] },
+        { "output_id": "ro-02", "kind": "state", "statement": "从 e01 到 e10 之前，Completion Contract 始终不满足（required_delivery_accepted=false），process 未到达 TERMINAL/COMPLETED（G-INV-12）", "subject_refs": ["completion-contract-1"] },
+        { "output_id": "ro-03", "kind": "state", "statement": "delivery-2 引用 resource-release-notes v2 与新的集成结果；其版本/digest manifest 与 v1 不同", "subject_refs": ["delivery-2", "resource-release-notes"] },
+        { "output_id": "ro-04", "kind": "usage", "statement": "replan_count 从 0 到 1（delivery 拒绝驱动的重规划计入），且低于 max_replans", "subject_refs": ["process-demo-1"] },
+        { "output_id": "ro-05", "kind": "state", "statement": "rework 任务走完整生命周期并重新通过 task 级验证与项目级验证/集成，未绕过任何质量门" }
+      ],
+      "forbidden_outcomes": [
+        { "forbidden_id": "fo-01", "kind": "state", "statement": "delivery-1 处于 REJECTED 时（或其后任何未重新接受交付的时刻）process 到达 TERMINAL/COMPLETED（Eval 14 核心断言）" },
+        { "forbidden_id": "fo-02", "kind": "state", "statement": "不经 rework 直接对 delivery-1 二次 accept，或把 REJECTED 改回 READY" },
+        { "forbidden_id": "fo-03", "kind": "state", "statement": "delivery.rejected 之外的任何事件（如 admin 补丁、planner command）把 DELIVERY 拉回 EXECUTION 或推进 COMPLETED" },
+        { "forbidden_id": "fo-04", "kind": "state", "statement": "rework 产物（resource-release-notes v2）绕过 verification/integration 直接进入 delivery-2" },
+        { "forbidden_id": "fo-05", "kind": "state", "statement": "拒绝导致项目 FAILED/CANCELLED（拒绝是返工信号）" }
+      ],
+      "safety_invariants": [
+        { "invariant_id": "si-01", "statement": "DELIVERY→EXECUTION 回退只发生在 delivery.rejected / scope.changed 显式事件上，且每次回退 +1 version +1 权威事件（ADR-0005）" },
+        { "invariant_id": "si-02", "statement": "完成判定由确定性 CompletionEvaluator 做出：LLM/Agent 输出不能设置 COMPLETED（G-INV-12）" }
+      ],
+      "crash_and_recovery": [],
+      "contract_assumptions": ["OPEN-Q1", "OPEN-Q3", "OPEN-Q7", "OPEN-Q12"]
+    },
+    {
+      "scenario_id": "eval-12-human-input-suspension-restart",
+      "eval_ref": "Eval 12",
+      "summary": "Delivery 拒绝后的 rework 执行中，agent 发现缺少必要业务信息（合规阈值数值），以 input request 正常结束；process 进入稳定 WAITING/HUMAN_INPUT；注入进程重启后 request 与状态均持久；人类回答后项目恢复并完成。",
+      "initial_state": {
+        "process": {
+          "process_ref": "process-demo-1",
+          "phase": "EXECUTION",
+          "status": "RUNNING",
+          "wait_reason": "NONE"
+        },
+        "work_graph": {
+          "nodes": [
+            { "node_ref": "task-release-notes-revision", "node_type": "task", "team_ref": "team-backend", "task_status": "in_progress" }
+          ],
+          "relations": []
+        },
+        "active_runs": [
+          {
+            "run_ref": "run-rework-1",
+            "run_kind": "task_execution",
+            "team_ref": "team-backend",
+            "task_ref": "task-release-notes-revision",
+            "initiated_by": "service:project-orchestrator",
+            "executed_as": "team-agent:team-backend"
+          }
+        ],
+        "execution_usage": { "agent_runs_started": 3, "replan_count": 1 },
+        "open_gates": [],
+        "open_input_requests": []
+      },
+      "input_events": [
+        {
+          "event_ref": "e01",
+          "event_type": "input_request.created",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": {
+            "input_request_ref": "input-request-1",
+            "requested_by_run_ref": "run-rework-1",
+            "work_node_ref": "task-release-notes-revision",
+            "question": "风险章节所需的合规阈值数值是多少？",
+            "input_schema": { "compliance_threshold": "number" },
+            "status": "OPEN"
+          },
+          "note": "agent run 以 input request command 正常结束（计划 4.6 推荐行为）；事件名为语义占位（OPEN-Q9）"
+        },
+        {
+          "event_ref": "e02",
+          "event_type": "harness.fault_injection",
+          "fault": { "kind": "control_plane_restart" },
+          "note": "在 WAITING/HUMAN_INPUT 状态下重启：验证 input request 与 WAITING 均为持久状态"
+        },
+        {
+          "event_ref": "e03",
+          "event_type": "human.input.provided",
+          "actor": { "initiated_by": "human:user-project-owner" },
+          "payload": {
+            "input_request_ref": "input-request-1",
+            "response": { "compliance_threshold": 0.02 }
+          },
+          "note": "人类回答（wakeup 源事件，计划 8.2）"
+        },
+        {
+          "event_ref": "e04",
+          "event_type": "work.dispatched",
+          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-release-notes-revision", "run_ref": "run-rework-2", "note": "新 run 携带回答上下文继续返工" }
+        },
+        {
+          "event_ref": "e05",
+          "event_type": "team_task.submitted",
+          "actor": { "initiated_by": "team-agent:team-backend" },
+          "payload": { "task_ref": "task-release-notes-revision", "artifact_refs": ["resource-release-notes"], "artifact_version": 2 }
+        },
+        {
+          "event_ref": "e06",
+          "event_type": "team_task.verified",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "task_ref": "task-release-notes-revision", "passed": true }
+        },
+        {
+          "event_ref": "e06b",
+          "event_type": "all_required_work_submitted",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "note": "Harness 聚合判定：全部必需工作已验证"
+        },
+        {
+          "event_ref": "e07",
+          "event_type": "verification.passed",
+          "actor": { "initiated_by": "service:project-orchestrator" }
+        },
+        {
+          "event_ref": "e08",
+          "event_type": "integration.passed",
+          "actor": { "initiated_by": "service:project-orchestrator" },
+          "payload": { "integration_ref": "integration-2" }
+        },
+        {
+          "event_ref": "e09",
+          "event_type": "delivery.accepted",
+          "actor": { "initiated_by": "human:user-project-owner" },
+          "payload": { "delivery_ref": "delivery-2" }
+        }
+      ],
+      "expected_transitions": [
+        {
+          "step_ref": "t01",
+          "trigger_event_ref": "e01",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "WAITING", "wait_reason": "HUMAN_INPUT" },
+          "process_version_change": "+1",
+          "transition_event_type": "input_request.created",
+          "note": "run 正常 terminal（非挂起），request 持久 OPEN，orchestrator 睡眠（计划 4.6 第一版行为，OPEN-Q9）"
+        },
+        {
+          "step_ref": "t02",
+          "trigger_event_ref": "e02",
+          "from": { "phase": "EXECUTION", "status": "WAITING", "wait_reason": "HUMAN_INPUT" },
+          "to": { "phase": "EXECUTION", "status": "WAITING", "wait_reason": "HUMAN_INPUT" },
+          "process_version_change": "0",
+          "transition_event_type": null,
+          "note": "重启后：process 仍 WAITING/HUMAN_INPUT，input-request-1 仍 OPEN，无重复创建、无自动恢复执行"
+        },
+        {
+          "step_ref": "t03",
+          "trigger_event_ref": "e03",
+          "from": { "phase": "EXECUTION", "status": "WAITING", "wait_reason": "HUMAN_INPUT" },
+          "to": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "human.input.provided",
+          "note": "request 置为 ANSWERED（记录 answered_by/answered_at），orchestrator 被唤醒"
+        },
+        {
+          "step_ref": "t04",
+          "trigger_event_ref": "e04",
+          "from": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "work.dispatched"
+        },
+        {
+          "step_ref": "t05",
+          "trigger_event_ref": "e06b",
+          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
+          "to": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "all_required_work_submitted"
+        },
+        {
+          "step_ref": "t06",
+          "trigger_event_ref": "e07",
+          "from": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "verification.passed"
+        },
+        {
+          "step_ref": "t07",
+          "trigger_event_ref": "e08",
+          "from": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "integration.passed"
+        },
+        {
+          "step_ref": "t08",
+          "trigger_event_ref": "e09",
+          "from": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
+          "to": { "phase": "TERMINAL", "status": "COMPLETED", "wait_reason": "NONE" },
+          "process_version_change": "+1",
+          "transition_event_type": "delivery.accepted"
+        }
+      ],
+      "required_outputs": [
+        { "output_id": "ro-01", "kind": "state", "statement": "input-request-1 为持久对象：跨 control_plane_restart 存活，保持 OPEN 且内容（question/schema/请求 run）不变、不重复创建", "subject_refs": ["input-request-1"] },
+        { "output_id": "ro-02", "kind": "state", "statement": "run-rework-1 在发出 input request 时正常 terminal（记录于 run 历史），不以挂起/僵尸状态驻留", "subject_refs": ["run-rework-1"] },
+        { "output_id": "ro-03", "kind": "state", "statement": "回答后 run-rework-2 的 context 包含回答内容（compliance_threshold=0.02）；request 状态 ANSWERED 且记录回答者", "subject_refs": ["run-rework-2", "input-request-1"] },
+        { "output_id": "ro-04", "kind": "audit", "statement": "audit 完整记录 提问（由哪个 run 发起）→ 重启 → 回答（由谁）→ 恢复 dispatch 链路；身份全程符合 G-INV-06" }
+      ],
+      "forbidden_outcomes": [
+        { "forbidden_id": "fo-01", "kind": "state", "statement": "重启后 input request 丢失、被重复创建，或 WAITING 状态回退/漂移" },
+        { "forbidden_id": "fo-02", "kind": "dispatch", "statement": "WAITING/HUMAN_INPUT 期间 dispatch 新 run 或推进其他工作" },
+        { "forbidden_id": "fo-03", "kind": "state", "statement": "回答事件以 best-effort 方式丢失导致项目永久 WAITING（必须持久可恢复）" },
+        { "forbidden_id": "fo-04", "kind": "state", "statement": "run-rework-1 以 AWAITING 之类的挂起状态驻留（第一版不扩展 DurableRunStatus，见计划 4.6）" },
+        { "forbidden_id": "fo-05", "kind": "state", "statement": "未回答期间 task/process 被任何超时机制自动置为 FAILED（等待是稳定状态，不是失败）" }
+      ],
+      "safety_invariants": [
+        { "invariant_id": "si-01", "statement": "HUMAN_INPUT 等待是稳定可持久状态：进程重启、worker 更替均不改变其语义（Eval 12 核心）" },
+        { "invariant_id": "si-02", "statement": "input request 的 context projection 只包含回答所需的最小项目上下文，不泄露其他团队私有内容（G-INV-07）" }
+      ],
+      "crash_and_recovery": [
+        {
+          "recovery_id": "cr-01",
+          "injected_fault": "control_plane_restart(at WAITING/HUMAN_INPUT)",
+          "expected_behavior": "重启后状态与 request 均来自持久层；唯一推进路径是 human.input.provided",
+          "recovery_signal": "human.input.provided 事件唤醒 orchestrator",
+          "idempotency_requirement": "回答事件重复投递按 request_id 幂等：request 只置 ANSWERED 一次，恢复 dispatch 只发生一次"
+        }
+      ],
+      "contract_assumptions": ["OPEN-Q1", "OPEN-Q3", "OPEN-Q9", "OPEN-Q13"]
+    }
+  ]
+}
