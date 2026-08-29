@@ -34,11 +34,17 @@ def test_revision_47_upgrade_matches_runtime_tables_and_downgrades_cleanly():
         migration.upgrade()
 
     inspector = inspect(engine)
-    expected_tables = set(PROJECT_PROCESS_METADATA.tables)
+    expected_tables = set(PROJECT_PROCESS_METADATA.tables) - {
+        "project_orchestration_decisions"
+    }
     assert expected_tables.issubset(inspector.get_table_names())
-    for name, table in PROJECT_PROCESS_METADATA.tables.items():
+    for name in sorted(expected_tables):
+        table = PROJECT_PROCESS_METADATA.tables[name]
         migrated_columns = {column["name"] for column in inspector.get_columns(name)}
-        assert migrated_columns == set(table.columns.keys()), name
+        runtime_columns = set(table.columns.keys())
+        if name == "project_process_commands":
+            runtime_columns.remove("request_json")
+        assert migrated_columns == runtime_columns, name
         runtime_checks = {
             constraint.name
             for constraint in table.constraints
@@ -69,8 +75,8 @@ def test_revision_47_upgrade_matches_runtime_tables_and_downgrades_cleanly():
     assert not expected_tables.intersection(inspect(engine).get_table_names())
 
 
-def test_bootstrap_revision_includes_project_process_scheduler_head():
+def test_bootstrap_revision_includes_project_orchestration_decision_head():
     migration = _module()
     assert migration.revision == "20260829_47"
     assert migration.down_revision == "20260829_46"
-    assert SCHEMA_REVISION == "20260829_48"
+    assert SCHEMA_REVISION == "20260829_49"
