@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from fastapi import FastAPI
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
-from ..auth import OIDCVerifier
+from ..agent_runs import (
+    AgentCheckpointKeyring,
+    AgentControlKeyring,
+    AgentRunService,
+    SQLAlchemyAgentRunRepository,
+)
 from ..approvals import ApprovalService, SQLAlchemyApprovalRepository
 from ..artifacts import (
     ArtifactContentService,
@@ -16,28 +21,23 @@ from ..artifacts import (
     LocalImmutableArtifactStore,
     SQLAlchemyArtifactRepository,
 )
-from ..agent_runs import (
-    AgentCheckpointKeyring,
-    AgentControlKeyring,
-    AgentRunService,
-    SQLAlchemyAgentRunRepository,
-)
+from ..auth import OIDCVerifier
+from ..capabilities import CapabilityDirectoryService, SQLAlchemyCapabilityRepository
 from ..collaboration import (
     DurableCollaborationTransport,
     GovernanceService,
-    SQLAlchemyGovernanceRepository,
     SignedEnvelopeCodec,
+    SQLAlchemyGovernanceRepository,
 )
-from ..capabilities import CapabilityDirectoryService, SQLAlchemyCapabilityRepository
 from ..config import ConfigurationError, Settings
-from ..contracts import ContractCoordinationService, SQLAlchemyContractRepository
 from ..connectors import SQLAlchemyConnectorRegistry
 from ..context import SemanticCheckpointKeyring, SemanticCheckpointService
+from ..contracts import ContractCoordinationService, SQLAlchemyContractRepository
 from ..execution import SQLAlchemyTaskRepository, TaskExecutionService
 from ..memory import (
     MemoryAdmissionPolicy,
-    MemoryService,
     MemoryLifecycleService,
+    MemoryService,
     SQLAlchemyMemoryRepository,
     TenantMemoryKeyring,
 )
@@ -53,16 +53,25 @@ from ..product import (
     TeamCollaborationService,
 )
 from ..product.demo_bootstrap import ensure_local_demo
-from ..product.turn_projection import AgentTurnProjection
 from ..product.exchange import AgentExchangeService
 from ..product.planning import ProjectPlanningService
+from ..product.turn_projection import AgentTurnProjection
 from ..product.workspace import ProjectWorkspaceService
+from ..project_process import (
+    HumanGateService,
+    ProjectExecutionBudgetService,
+    ProjectProcessCommandService,
+    ProjectProcessOutboxService,
+    ProjectProcessService,
+    ProjectProcessShadowAdapter,
+    SQLAlchemyProjectProcessRepository,
+)
 from ..security import PolicyEngine
 from ..work_graph import ProjectWorkGraphService, SQLAlchemyWorkGraphRepository
 from .app import create_app
 from .session_lifecycle import SessionLifecycleService
 
-SCHEMA_REVISION = "20260829_46"
+SCHEMA_REVISION = "20260829_47"
 REQUIRED_RLS_TABLES = (
     "audit_events",
     "audit_heads",
@@ -314,7 +323,11 @@ def build_application(
             )
         connector_registry = SQLAlchemyConnectorRegistry(engine=runtime_engine, audit_log=audit)
         product_account_service = ProductAccountService(runtime_engine)
-        project_directory_service = ProjectDirectoryService(runtime_engine)
+        project_process_repository = SQLAlchemyProjectProcessRepository(runtime_engine)
+        project_process_shadow = ProjectProcessShadowAdapter(project_process_repository)
+        project_directory_service = ProjectDirectoryService(
+            runtime_engine, process_shadow=project_process_shadow
+        )
         project_resource_service = ProjectResourceService(
             runtime_engine, artifact_repository=artifact_repository
         )
@@ -327,13 +340,28 @@ def build_application(
         project_work_graph_service = ProjectWorkGraphService(
             SQLAlchemyWorkGraphRepository(runtime_engine)
         )
+        project_process_service = ProjectProcessService(project_process_repository)
+        project_execution_budget_service = ProjectExecutionBudgetService(
+            project_process_repository
+        )
+        human_gate_service = HumanGateService(project_process_repository)
+        project_process_command_service = ProjectProcessCommandService(
+            project_process_repository
+        )
+        project_process_outbox_service = ProjectProcessOutboxService(
+            project_process_repository
+        )
         project_planning_service = ProjectPlanningService(
             runtime_engine,
             collaboration=team_collaboration_service,
             work_graph=project_work_graph_service,
+            process_shadow=project_process_shadow,
         )
         if settings.auth_mode == "local":
-            ensure_local_demo(engine=runtime_engine)
+            ensure_local_demo(
+                engine=runtime_engine,
+                process_shadow=project_process_shadow,
+            )
         # Capability projection and the signed skill catalog come from
         # deployment configuration; invalid skill configuration fails closed
         # instead of silently exposing an empty catalog.
@@ -490,6 +518,13 @@ def build_application(
     app.state.agent_exchange_service = agent_exchange_service
     app.state.project_planning_service = project_planning_service
     app.state.project_work_graph_service = project_work_graph_service
+    app.state.project_process_repository = project_process_repository
+    app.state.project_process_service = project_process_service
+    app.state.project_execution_budget_service = project_execution_budget_service
+    app.state.human_gate_service = human_gate_service
+    app.state.project_process_command_service = project_process_command_service
+    app.state.project_process_outbox_service = project_process_outbox_service
+    app.state.project_process_shadow = project_process_shadow
     app.state.collaboration_transport = collaboration_transport
     app.state.code_workspace_service = code_workspace_service
     app.state.document_workspace_service = document_workspace_service

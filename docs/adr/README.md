@@ -40,6 +40,7 @@
 ## 规范性附录
 
 - `project-process-event-catalog-v1.md`：领域事实、迁移键和 Audit 事件分层；
+- `project-process-event-catalog-v2.md`：Human close 事实、非主链等待 selector 与预算耗尽事务；
 - `project-harness-fixture-contract-v1.md`：B2/B6 评测输入与观察协议；
 - `project-harness-contract-v1.json`：供实现和契约测试使用的机器可读枚举与映射。
 

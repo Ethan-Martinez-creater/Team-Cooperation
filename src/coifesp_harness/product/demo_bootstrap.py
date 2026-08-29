@@ -15,7 +15,7 @@ from sqlalchemy.engine import Engine
 
 from ..errors import GovernanceConflictError, PolicyDenied, ResourceNotFound
 from .models import ProjectTeamKind, TeamAccountRole
-from .repository import ACCOUNTS, CONTACTS, PROJECTS, PROJECT_TEAMS, TEAMS
+from .repository import ACCOUNTS, CONTACTS, PROJECT_TEAMS, PROJECTS, TEAMS
 from .service import ProductAccountService, ProjectDirectoryService
 from .workspace import ProjectWorkspaceService
 
@@ -47,9 +47,9 @@ class LocalDemoSummary:
     created: bool
 
 
-def ensure_local_demo(*, engine: Engine) -> LocalDemoSummary:
+def ensure_local_demo(*, engine: Engine, process_shadow=None) -> LocalDemoSummary:
     accounts = ProductAccountService(engine)
-    directory = ProjectDirectoryService(engine)
+    directory = ProjectDirectoryService(engine, process_shadow=process_shadow)
     workspace = ProjectWorkspaceService(engine)
 
     for team_id, handle, name in DEMO_TEAMS:

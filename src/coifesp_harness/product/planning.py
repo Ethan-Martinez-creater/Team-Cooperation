@@ -23,14 +23,14 @@ from .models import (
     ProjectPlanDraft,
     ProjectTeamRequirementDraft,
 )
+from .plan_schema import PLAN_V2, parse_project_plan
 from .repository import (
     PROJECT_PLAN_DRAFTS,
-    PROJECTS,
     PROJECT_TEAM_REQUIREMENT_DRAFTS,
     PROJECT_TEAMS,
+    PROJECTS,
 )
 from .service import ProductAccountService, TeamCollaborationService
-from .plan_schema import PLAN_V2, parse_project_plan
 
 _TEAM_CATEGORIES = frozenset(
     {"product", "engineering", "quality", "design", "operations", "custom"}
@@ -59,10 +59,12 @@ class ProjectPlanningService:
         *,
         collaboration: TeamCollaborationService | None = None,
         work_graph: ProjectWorkGraphService | None = None,
+        process_shadow=None,
     ) -> None:
         self.engine = engine
         self.collaboration = collaboration
         self.work_graph = work_graph
+        self.process_shadow = process_shadow
 
     def import_plan_draft(
         self,
@@ -238,6 +240,14 @@ class ProjectPlanningService:
                 )
                 .values(status=PlanDraftStatus.APPROVED.value, approved_at=now)
             )
+            if self.process_shadow is not None:
+                self.process_shadow.on_plan_approved(
+                    connection,
+                    project_id=project_id,
+                    draft_id=draft_id,
+                    actor_id=actor_id,
+                    goal_summary=draft.goals,
+                )
         return self._plan_row_with_engine(draft_id=draft_id)
 
     def reject_plan_draft(

@@ -4,11 +4,16 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
-from coifesp_harness.config import ConfigurationError, Settings
 from coifesp_harness.collaboration import GovernanceService
+from coifesp_harness.config import ConfigurationError, Settings
 from coifesp_harness.control_plane import DatabaseReadinessProbe, build_application
 from coifesp_harness.memory import MemoryService, SQLAlchemyMemoryRepository
 from coifesp_harness.postgres_audit import SQLAlchemyAuditLog
+from coifesp_harness.project_process import (
+    HumanGateService,
+    ProjectExecutionBudgetService,
+    ProjectProcessService,
+)
 
 
 class StubVerifier:
@@ -58,6 +63,9 @@ def test_bootstrap_wires_durable_memory_audit_and_readiness() -> None:
     assert app.state.memory_service.repository.engine is engine
     assert isinstance(app.state.audit_log, SQLAlchemyAuditLog)
     assert isinstance(app.state.governance_service, GovernanceService)
+    assert isinstance(app.state.project_process_service, ProjectProcessService)
+    assert isinstance(app.state.project_execution_budget_service, ProjectExecutionBudgetService)
+    assert isinstance(app.state.human_gate_service, HumanGateService)
     assert app.state.governance_service.repository.engine is engine
     assert app.state.audit_log.engine is engine
     assert app.state.database_engine is engine

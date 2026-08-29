@@ -12,8 +12,16 @@ from sqlalchemy import and_, func, insert, or_, select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
-from ..errors import AuthenticationError, GovernanceConflictError, PolicyDenied, ResourceNotFound
+from ..errors import (
+    AuthenticationError,
+    GovernanceConflictError,
+    PolicyDenied,
+    ResourceNotFound,
+)
 from .models import (
+    TASK_PRIORITY_RANK,
+    TASK_SCHEDULE_DUE_MAX_DAYS,
+    TASK_TERMINAL_STATUSES,
     Account,
     AccountRegistration,
     AccountRegistrationStatus,
@@ -29,25 +37,25 @@ from .models import (
     InboxAgentMode,
     InboxAgentRun,
     Project,
-    ProjectDetail,
     ProjectActivity,
+    ProjectAgentMode,
+    ProjectAgentRun,
+    ProjectDetail,
     ProjectMembership,
     ProjectMessage,
     ProjectNotificationSummary,
-    ProjectAgentMode,
-    ProjectAgentRun,
     ProjectResource,
     ProjectRole,
+    ProjectTeam,
+    ProjectTeamKind,
     ProjectTopic,
     ProjectTopicContribution,
     ProjectTopicStatus,
-    ProjectTeam,
-    ProjectTeamKind,
     ResourceAccess,
     ResourceAction,
-    TASK_PRIORITY_RANK,
-    TASK_SCHEDULE_DUE_MAX_DAYS,
-    TASK_TERMINAL_STATUSES,
+    TaskPriority,
+    TaskScheduleProposal,
+    TaskScheduleProposalStatus,
     Team,
     TeamAccountRole,
     TeamBootstrapAdmin,
@@ -58,16 +66,13 @@ from .models import (
     TeamRelationshipState,
     TeamTask,
     TeamTaskStatus,
-    TaskPriority,
-    TaskScheduleProposal,
-    TaskScheduleProposalStatus,
     compute_team_task_schedule,
     task_is_overdue,
 )
 from .repository import (
-    ACCOUNTS,
     ACCOUNT_REGISTRATIONS,
     ACCOUNT_SESSIONS,
+    ACCOUNTS,
     ALL_PRODUCT_TABLES,
     COLLABORATION_ACTION_DRAFTS,
     CONTACT_REQUESTS,
@@ -80,10 +85,10 @@ from .repository import (
     PROJECT_MEMBERSHIPS,
     PROJECT_MESSAGES,
     PROJECT_RESOURCES,
-    PROJECTS,
     PROJECT_TEAMS,
-    PROJECT_TOPICS,
     PROJECT_TOPIC_CONTRIBUTIONS,
+    PROJECT_TOPICS,
+    PROJECTS,
     RESOURCE_SHARES,
     TASK_SCHEDULE_PROPOSALS,
     TEAM_TASKS,
@@ -984,8 +989,9 @@ class ProductAccountService:
 
 
 class ProjectDirectoryService:
-    def __init__(self, engine: Engine) -> None:
+    def __init__(self, engine: Engine, *, process_shadow=None) -> None:
         self.engine = engine
+        self.process_shadow = process_shadow
 
     def create_project(
         self,
@@ -1028,6 +1034,13 @@ class ProjectDirectoryService:
                     created_at=now,
                 )
             )
+            if self.process_shadow is not None:
+                self.process_shadow.on_project_created(
+                    connection,
+                    project_id=project_id,
+                    actor_id=actor_id,
+                    description=description.strip(),
+                )
         return Project(
             project_id, name.strip(), description.strip(), actor["team_id"], actor_id, now
         )
