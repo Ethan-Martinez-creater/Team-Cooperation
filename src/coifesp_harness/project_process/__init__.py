@@ -18,6 +18,10 @@ from .capability_adapter import (
     ProjectOrchestratorCapabilityAdapter,
 )
 from .command_service import ProjectProcessCommandService, ProjectProcessOutboxService
+from .command_validator import (
+    ProjectOrchestrationCommandValidator,
+    ValidatedPlannerCommand,
+)
 from .commands import (
     ProjectOrchestrationDecision,
     ProjectOrchestrationDecisionStatus,
@@ -152,6 +156,7 @@ __all__ = [
     "ProjectGateType",
     "ProjectInputRequest",
     "ProjectInputRequestStatus",
+    "ProjectOrchestrationCommandValidator",
     "ProjectOrchestrationDecision",
     "ProjectOrchestrationDecisionStatus",
     "ProjectOrchestrationEffect",
@@ -202,6 +207,7 @@ __all__ = [
     "TaskReadinessFacts",
     "TaskReadinessSnapshot",
     "TeamReadinessSnapshot",
+    "ValidatedPlannerCommand",
     "WorkGraphReadinessSnapshot",
     "WorkItemSnapshot",
     "WorkItemStatus",
