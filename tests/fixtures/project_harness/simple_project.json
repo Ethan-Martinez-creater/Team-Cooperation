@@ -1,587 +1,1767 @@
 {
-  "fixture_schema": "project-harness-fixture.v1",
+  "fixture_schema": "project-harness-fixture.v2",
   "fixture_id": "simple_project",
-  "title": "简单双团队项目：正常执行全链与 AgentRun 崩溃恢复",
-  "description": "覆盖 Eval 1（两个 Team、无失败的参考轨迹）与 Eval 5（AgentRun checkpoint 恢复）。所有 *_ref 为 fixture 内语义引用，非数据库 ID。",
+  "title": "Simple two-team project: normal main chain and AgentRun crash recovery",
+  "description": "Eval 1 (two teams, no failures, reference trajectory) and Eval 5 (AgentRun checkpoint recovery). All refs are fixture-internal semantic identifiers.",
+  "contract_refs": {
+    "machine_contract": "docs/adr/project-harness-contract-v1.json",
+    "event_catalog": "docs/adr/project-process-event-catalog-v1.md",
+    "fixture_contract": "docs/adr/project-harness-fixture-contract-v1.md"
+  },
   "eval_coverage": [
-    { "eval_id": "Eval 1", "scenario_id": "eval-01-simple-project" },
-    { "eval_id": "Eval 5", "scenario_id": "eval-05-worker-crash-checkpoint-recovery" }
-  ],
-  "source_refs": {
-    "plan": "docs/plan/iteration/Team-Cooperation_Multi-Agent_Harness_Execution_Plan_v1.1_Audited.md#33-evaluation",
-    "spec": "docs/evaluation/project-harness-evaluation-spec.md"
-  },
-  "global_invariants": "docs/evaluation/project-harness-evaluation-spec.md 第 6 节 G-INV-01..G-INV-14 对所有场景生效",
-  "world": {
-    "project_ref": "project-harness-demo",
-    "goal": {
-      "goal_ref": "goal-1",
-      "title": "交付带后端 API 与前端界面的演示应用",
-      "confirmed": false
+    {
+      "eval_id": "Eval 1",
+      "scenario_id": "eval-01-simple-project"
     },
-    "teams": [
-      { "team_ref": "team-backend", "display_name": "后端团队" },
-      { "team_ref": "team-frontend", "display_name": "前端团队" }
-    ],
-    "capabilities": [
-      { "capability_ref": "backend-api", "team_ref": "team-backend", "capacity": 2 },
-      { "capability_ref": "frontend-ui", "team_ref": "team-frontend", "capacity": 2 }
-    ],
-    "principals": {
-      "human_owner": "human:user-project-owner",
-      "orchestrator": "service:project-orchestrator",
-      "team_agent_backend": "team-agent:team-backend",
-      "team_agent_frontend": "team-agent:team-frontend"
-    },
-    "default_execution_policy": {
-      "policy_ref": "policy-default",
-      "max_agent_runs": 50,
-      "max_total_tokens": 2000000,
-      "max_model_cost_microusd": 5000000,
-      "max_replans": 5,
-      "max_generated_tasks": 20,
-      "max_active_agent_runs": 4,
-      "max_active_runs_per_team": 2
+    {
+      "eval_id": "Eval 5",
+      "scenario_id": "eval-05-worker-crash-checkpoint-recovery"
     }
-  },
+  ],
   "scenarios": [
     {
       "scenario_id": "eval-01-simple-project",
       "eval_ref": "Eval 1",
-      "summary": "两个团队、无失败：从 INTAKE 到 TERMINAL/COMPLETED 的参考轨迹，作为其他场景的收敛基线。",
+      "summary": "Two teams, no failures: INTAKE to TERMINAL/COMPLETED reference trajectory. Dispatch, verification, delivery readiness and completion are observed outputs, never injected stimuli.",
       "initial_state": {
         "process": {
           "process_ref": "process-demo-1",
+          "project_ref": "project-harness-demo",
           "phase": "INTAKE",
           "status": "WAITING",
-          "wait_reason": "HUMAN_INPUT"
+          "wait_reason": "HUMAN_INPUT",
+          "process_version": 1,
+          "last_event_sequence": 1
         },
-        "process_version": 1,
-        "work_graph": {
-          "nodes": [],
+        "graph": {
+          "nodes": [
+            {
+              "node_ref": "node-goal-1",
+              "node_type": "goal",
+              "subject_ref": "goal-1"
+            }
+          ],
           "relations": [],
-          "note": "计划尚未批准，Work Graph 待 plan 物化"
+          "graph_snapshot_digest": {
+            "operand": "literal",
+            "value": "sha256:d0-initial"
+          }
         },
         "contracts": [],
         "artifacts": [],
-        "execution_usage": {
+        "verifications": [],
+        "integration": null,
+        "delivery": null,
+        "completion_contract": null,
+        "execution_policy": {
+          "policy_ref": "policy-default",
+          "max_agent_runs": 50,
+          "max_total_tokens": 2000000,
+          "max_model_cost_microusd": 5000000,
+          "max_replans": 5,
+          "max_generated_tasks": 20,
+          "max_active_agent_runs": 4,
+          "max_active_runs_per_team": 2,
+          "max_specialist_depth": 2,
+          "max_specialist_runs_per_task": 2,
+          "deadline_at": null,
+          "version": 1
+        },
+        "usage": {
+          "usage_ref": "usage-demo-1",
           "agent_runs_started": 0,
           "agent_runs_completed": 0,
           "total_tokens": 0,
           "model_cost_microusd": 0,
           "replan_count": 0,
+          "generated_task_count": 0,
           "active_agent_runs": 0
         },
-        "active_runs": [],
-        "open_gates": [],
-        "open_input_requests": [],
-        "delivery": null,
-        "notes": [
-          "user-project-owner 为最近操作项目的真实用户；本场景所有 run 不得以其为执行主体"
-        ]
+        "runs": [],
+        "tool_jobs": [],
+        "reservations": [],
+        "capabilities": [
+          {
+            "capability_ref": "backend-api",
+            "team_ref": "team-backend",
+            "capacity": 2
+          },
+          {
+            "capability_ref": "frontend-ui",
+            "team_ref": "team-frontend",
+            "capacity": 2
+          }
+        ],
+        "gates": [],
+        "input_requests": [],
+        "pending_events": [],
+        "outbox": []
       },
-      "input_events": [
+      "stimuli": [
         {
-          "event_ref": "e01",
-          "event_type": "goal.confirmed",
-          "actor": { "initiated_by": "human:user-project-owner" },
-          "payload": { "goal_ref": "goal-1" },
-          "note": "人类确认目标草案"
+          "source_event_id": "s01",
+          "event_type": "project.goal.confirmed",
+          "origin": "HUMAN",
+          "subject_ref": "goal-1",
+          "idempotency_key": "idem:goal-1:confirm",
+          "payload": {
+            "confirmed_by": "human:user-project-owner"
+          }
         },
         {
-          "event_ref": "e02",
-          "event_type": "analysis.started",
-          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-backend" },
-          "note": "分析 AgentRun 启动（OPEN-Q2）"
+          "source_event_id": "s02",
+          "event_type": "project.analysis.started",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-analysis-1",
+          "idempotency_key": "idem:run-analysis-1:start",
+          "payload": {}
         },
         {
-          "event_ref": "e03",
-          "event_type": "analysis.completed",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "payload": { "plan_draft": "coifesp.project-plan.v2", "plan_local_ids": ["goal-1", "task-1", "task-2"] },
-          "note": "产出 plan draft v1（含 plan-local stable ID）"
+          "source_event_id": "s03",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-analysis-1",
+          "idempotency_key": "idem:run-analysis-1:terminal",
+          "payload": {
+            "outcome": "PASS",
+            "usage": {
+              "tokens": 9000,
+              "model_cost_microusd": 4000
+            }
+          }
         },
         {
-          "event_ref": "e04",
+          "source_event_id": "s04",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-planning-1",
+          "idempotency_key": "idem:run-planning-1:terminal",
+          "payload": {
+            "outcome": "PASS",
+            "usage": {
+              "tokens": 12000,
+              "model_cost_microusd": 6000
+            }
+          }
+        },
+        {
+          "source_event_id": "s05",
           "event_type": "project.plan.approved",
-          "actor": { "initiated_by": "human:user-project-owner" },
+          "origin": "HUMAN",
+          "subject_ref": "plan-v1",
+          "idempotency_key": "idem:plan-v1:approve",
           "payload": {
-            "plan_draft_ref": "plan-v1",
+            "approved_by": "human:user-project-owner",
             "materializes": [
-              { "node_type": "task", "ref": "task-backend-api", "team_ref": "team-backend", "initial_status": "proposed", "requested_capability": "backend-api" },
-              { "node_type": "task", "ref": "task-frontend-ui", "team_ref": "team-frontend", "initial_status": "proposed", "requested_capability": "frontend-ui" }
-            ],
-            "relations": [
-              { "relation_ref": "rel-goal-1", "relation_type": "part_of", "source": "task-backend-api", "target": "goal-1" },
-              { "relation_ref": "rel-goal-2", "relation_type": "part_of", "source": "task-frontend-ui", "target": "goal-1" }
-            ],
-            "completion_contract_draft": { "required_delivery_accepted": true }
-          },
-          "note": "人类批准计划；Work Graph 物化（两任务并行，无依赖）；完成契约草稿创建"
-        },
-        {
-          "event_ref": "e05",
-          "event_type": "team_task.accepted",
-          "actor": { "initiated_by": "team-agent:team-backend" },
-          "payload": { "task_ref": "task-backend-api", "task_status": "accepted" },
-          "note": "team-backend 接受执行契约"
-        },
-        {
-          "event_ref": "e06",
-          "event_type": "team_task.accepted",
-          "actor": { "initiated_by": "team-agent:team-frontend" },
-          "payload": { "task_ref": "task-frontend-ui", "task_status": "accepted" }
-        },
-        {
-          "event_ref": "e07",
-          "event_type": "work.dispatched",
-          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-backend" },
-          "payload": {
-            "task_ref": "task-backend-api",
-            "run_ref": "run-backend-1",
-            "run_kind": "task_execution",
-            "initiated_by": "service:project-orchestrator",
-            "executed_as": "team-agent:team-backend"
-          },
-          "note": "确定性规则 Rule C：ready task 直接 dispatch，不调用 Planner"
-        },
-        {
-          "event_ref": "e08",
-          "event_type": "work.dispatched",
-          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-frontend" },
-          "payload": {
-            "task_ref": "task-frontend-ui",
-            "run_ref": "run-frontend-1",
-            "run_kind": "task_execution",
-            "initiated_by": "service:project-orchestrator",
-            "executed_as": "team-agent:team-frontend"
+              {
+                "task_ref": "task-backend-api",
+                "team_ref": "team-backend",
+                "requested_capability": "backend-api"
+              },
+              {
+                "task_ref": "task-frontend-ui",
+                "team_ref": "team-frontend",
+                "requested_capability": "frontend-ui"
+              }
+            ]
           }
         },
         {
-          "event_ref": "e09",
-          "event_type": "team_task.started",
-          "actor": { "initiated_by": "team-agent:team-backend" },
-          "payload": { "task_ref": "task-backend-api", "task_status": "in_progress" }
-        },
-        {
-          "event_ref": "e10",
-          "event_type": "team_task.started",
-          "actor": { "initiated_by": "team-agent:team-frontend" },
-          "payload": { "task_ref": "task-frontend-ui", "task_status": "in_progress" }
-        },
-        {
-          "event_ref": "e11",
-          "event_type": "team_task.submitted",
-          "actor": { "initiated_by": "team-agent:team-backend" },
-          "payload": { "task_ref": "task-backend-api", "artifact_refs": ["resource-api-spec"], "artifact_visibility": "project_shared" }
-        },
-        {
-          "event_ref": "e12",
-          "event_type": "team_task.verified",
-          "actor": { "initiated_by": "service:project-orchestrator" },
+          "source_event_id": "s06",
+          "event_type": "team_task.accepted",
+          "origin": "TEAM",
+          "subject_ref": "task-backend-api",
+          "idempotency_key": "idem:task-backend-api:accept",
           "payload": {
-            "task_ref": "task-backend-api",
-            "task_status": "verified",
-            "verification_result_schema": "coifesp.verification-result.v1",
-            "passed": true
-          },
-          "note": "task 级复合验证（deterministic + agent review）通过"
-        },
-        {
-          "event_ref": "e13",
-          "event_type": "team_task.submitted",
-          "actor": { "initiated_by": "team-agent:team-frontend" },
-          "payload": { "task_ref": "task-frontend-ui", "artifact_refs": ["resource-ui-build"], "artifact_visibility": "project_shared" }
-        },
-        {
-          "event_ref": "e14",
-          "event_type": "team_task.verified",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "payload": { "task_ref": "task-frontend-ui", "task_status": "verified", "passed": true }
-        },
-        {
-          "event_ref": "e15",
-          "event_type": "all_required_work_submitted",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "note": "Harness 聚合判定：全部必需工作已提交并通过 task 级验证"
-        },
-        {
-          "event_ref": "e16",
-          "event_type": "verification.passed",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "note": "项目级验证聚合通过"
-        },
-        {
-          "event_ref": "e17",
-          "event_type": "integration.passed",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "payload": {
-            "integration_ref": "integration-1",
-            "input_artifact_refs": ["resource-api-spec", "resource-ui-build"],
-            "result_artifact_refs": ["resource-release-bundle"]
+            "accepted_by": "team-agent:team-backend",
+            "contract_version": 1
           }
         },
         {
-          "event_ref": "e18",
-          "event_type": "delivery.accepted",
-          "actor": { "initiated_by": "human:user-project-owner" },
+          "source_event_id": "s07",
+          "event_type": "team_task.accepted",
+          "origin": "TEAM",
+          "subject_ref": "task-frontend-ui",
+          "idempotency_key": "idem:task-frontend-ui:accept",
           "payload": {
-            "delivery_ref": "delivery-1",
-            "artifact_refs": ["resource-release-bundle"],
-            "release_notes_resource_ref": "resource-release-notes"
-          },
-          "note": "acceptor（人类）接受 DeliveryManifest；此后 Completion Contract 才可满足"
+            "accepted_by": "team-agent:team-frontend",
+            "contract_version": 1
+          }
+        },
+        {
+          "source_event_id": "s08",
+          "event_type": "team_task.started",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "task-backend-api",
+          "idempotency_key": "idem:task-backend-api:start",
+          "payload": {
+            "run_ref": "run-backend-1"
+          }
+        },
+        {
+          "source_event_id": "s09",
+          "event_type": "team_task.submitted",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "task-backend-api",
+          "idempotency_key": "idem:task-backend-api:submit:v1",
+          "payload": {
+            "artifact_refs": [
+              "resource-api-spec"
+            ],
+            "artifact_version": 1
+          }
+        },
+        {
+          "source_event_id": "s10",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-backend-1",
+          "idempotency_key": "idem:run-backend-1:terminal",
+          "payload": {
+            "outcome": "PASS",
+            "usage": {
+              "tokens": 40000,
+              "model_cost_microusd": 20000
+            }
+          }
+        },
+        {
+          "source_event_id": "s11",
+          "event_type": "team_task.started",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "task-frontend-ui",
+          "idempotency_key": "idem:task-frontend-ui:start",
+          "payload": {
+            "run_ref": "run-frontend-1"
+          }
+        },
+        {
+          "source_event_id": "s12",
+          "event_type": "team_task.submitted",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "task-frontend-ui",
+          "idempotency_key": "idem:task-frontend-ui:submit:v1",
+          "payload": {
+            "artifact_refs": [
+              "resource-ui-build"
+            ],
+            "artifact_version": 1
+          }
+        },
+        {
+          "source_event_id": "s13",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-frontend-1",
+          "idempotency_key": "idem:run-frontend-1:terminal",
+          "payload": {
+            "outcome": "PASS",
+            "usage": {
+              "tokens": 35000,
+              "model_cost_microusd": 17000
+            }
+          }
+        },
+        {
+          "source_event_id": "s14",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-verification-1",
+          "idempotency_key": "idem:run-verification-1:terminal",
+          "payload": {
+            "outcome": "PASS",
+            "usage": {
+              "tokens": 8000,
+              "model_cost_microusd": 3000
+            }
+          }
+        },
+        {
+          "source_event_id": "s15",
+          "event_type": "project.integration.completed",
+          "origin": "TOOL_WORKER",
+          "subject_ref": "integration-1",
+          "idempotency_key": "idem:integration-1:complete",
+          "payload": {
+            "outcome": "PASS",
+            "input_artifact_refs": [
+              "resource-api-spec",
+              "resource-ui-build"
+            ]
+          }
+        },
+        {
+          "source_event_id": "s16",
+          "event_type": "approval.decided",
+          "origin": "HUMAN",
+          "subject_ref": "delivery-1",
+          "idempotency_key": "idem:delivery-1:accept",
+          "payload": {
+            "decision": "ACCEPT",
+            "decided_by": "human:user-project-owner",
+            "role": "delivery_acceptor"
+          }
         }
       ],
-      "expected_transitions": [
+      "expected_steps": [
         {
-          "step_ref": "t01",
-          "trigger_event_ref": "e01",
-          "from": { "phase": "INTAKE", "status": "WAITING", "wait_reason": "HUMAN_INPUT" },
-          "to": { "phase": "ANALYSIS", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "goal.confirmed"
+          "step_id": "t01",
+          "stimulus_ref": "s01",
+          "expected_process": {
+            "phase": "ANALYSIS",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "project.goal.confirmed",
+              "subject_ref": "goal-1",
+              "transition_key": "goal.confirmed",
+              "transition": {
+                "from": {
+                  "phase": "INTAKE",
+                  "status": "WAITING",
+                  "wait_reason": "HUMAN_INPUT"
+                },
+                "to": {
+                  "phase": "ANALYSIS",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "agent_run",
+              "object_ref": "run-analysis-1",
+              "note": "queued; run_kind=planning; orchestration_reason=ANALYSIS",
+              "idempotency_key": "idem:intent:process-demo-1:ANALYSIS"
+            }
+          ],
+          "commands": [],
+          "observations": [
+            "Orchestrator wakes on goal.confirmed and queues the analysis run; process rests in ANALYSIS/READY (next action eligible, no execution responsible)."
+          ]
         },
         {
-          "step_ref": "t02",
-          "trigger_event_ref": "e02",
-          "from": { "phase": "ANALYSIS", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "ANALYSIS", "status": "RUNNING", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "analysis.started"
+          "step_id": "t02",
+          "stimulus_ref": "s02",
+          "expected_process": {
+            "phase": "ANALYSIS",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "project.analysis.started",
+              "subject_ref": "run-analysis-1",
+              "transition_key": "analysis.started",
+              "transition": {
+                "from": {
+                  "phase": "ANALYSIS",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "ANALYSIS",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [
+            "run-analysis-1"
+          ],
+          "created_or_updated": [],
+          "commands": [],
+          "observations": [
+            "run-analysis-1 executed_as=service:project-orchestrator (planner identity per execution_identity.planner_executed_as)."
+          ]
         },
         {
-          "step_ref": "t03",
-          "trigger_event_ref": "e03",
-          "from": { "phase": "ANALYSIS", "status": "RUNNING", "wait_reason": "NONE" },
-          "to": { "phase": "PLANNING", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "analysis.completed"
+          "step_id": "t03",
+          "stimulus_ref": "s03",
+          "expected_process": {
+            "phase": "PLANNING",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 2,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-analysis-1"
+            },
+            {
+              "event_type": "project.analysis.completed",
+              "subject_ref": "process-demo-1",
+              "transition_key": "analysis.completed",
+              "transition": {
+                "from": {
+                  "phase": "ANALYSIS",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "PLANNING",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "agent_run",
+              "object_ref": "run-planning-1",
+              "note": "queued; run_kind=planning; orchestration_reason=INITIAL_PLANNING",
+              "idempotency_key": "idem:intent:process-demo-1:INITIAL_PLANNING"
+            }
+          ],
+          "commands": [],
+          "observations": [
+            "usage.agent_runs_completed increments exactly once via idem:run-analysis-1:terminal."
+          ]
         },
         {
-          "step_ref": "t04",
-          "trigger_event_ref": "e04",
-          "from": { "phase": "PLANNING", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "project.plan.approved"
+          "step_id": "t04",
+          "stimulus_ref": "s04",
+          "expected_process": {
+            "phase": "PLANNING",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-planning-1"
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "plan_draft",
+              "object_ref": "plan-v1",
+              "note": "schema coifesp.project-plan.v2 with plan-local stable ids goal-1/task-1/task-2"
+            }
+          ],
+          "commands": [],
+          "observations": [
+            "Plan draft awaits human approval; PLANNING/READY is the matrix-defined waiting state for approval."
+          ]
         },
         {
-          "step_ref": "t05",
-          "trigger_event_ref": "e05",
-          "from": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "0",
-          "transition_event_type": "team_task.accepted",
-          "note": "业务事件不改三元组，仅追加 process event（OPEN-Q11）"
+          "step_id": "t05",
+          "stimulus_ref": "s05",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "project.plan.approved",
+              "subject_ref": "plan-v1",
+              "transition_key": "plan.approved",
+              "transition": {
+                "from": {
+                  "phase": "PLANNING",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "EXECUTION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "work_node",
+              "object_ref": "node-task-backend-api",
+              "note": "node_type=task, subject task-backend-api, task_status=proposed"
+            },
+            {
+              "object_type": "work_node",
+              "object_ref": "node-task-frontend-ui",
+              "note": "node_type=task, subject task-frontend-ui, task_status=proposed"
+            },
+            {
+              "object_type": "work_relation",
+              "object_ref": "rel-goal-backend",
+              "note": "part_of task-backend-api -> goal-1; materialization retry-safe via draft_id+plan-local id"
+            },
+            {
+              "object_type": "work_relation",
+              "object_ref": "rel-goal-frontend",
+              "note": "part_of task-frontend-ui -> goal-1"
+            },
+            {
+              "object_type": "completion_contract",
+              "object_ref": "completion-contract-1",
+              "note": "draft; required_delivery_accepted=true"
+            }
+          ],
+          "commands": [],
+          "observations": [
+            "Graph materialization is idempotent under retry (deterministic ids from plan draft + local ids)."
+          ]
         },
         {
-          "step_ref": "t06",
-          "trigger_event_ref": "e07",
-          "from": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "work.dispatched"
+          "step_id": "t06",
+          "stimulus_ref": "s06",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 4,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.accepted",
+              "subject_ref": "task-backend-api"
+            },
+            {
+              "event_type": "project.capability.matched",
+              "subject_ref": "task-backend-api",
+              "note": "CapabilityDirectoryService.match backend-api -> team-backend"
+            },
+            {
+              "event_type": "project.capacity.reserved",
+              "subject_ref": "reservation-backend-1"
+            },
+            {
+              "event_type": "project.work.dispatched",
+              "subject_ref": "run-backend-1",
+              "transition_key": "work.dispatched",
+              "transition": {
+                "from": {
+                  "phase": "EXECUTION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "EXECUTION",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [
+            "run-backend-1"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "capacity_reservation",
+              "object_ref": "reservation-backend-1",
+              "note": "capability=backend-api, team=team-backend, task=task-backend-api, state=reserved",
+              "idempotency_key": "idem:reserve:task-backend-api:v1"
+            },
+            {
+              "object_type": "agent_run",
+              "object_ref": "run-backend-1",
+              "note": "run_kind=task_execution; initiated_by=service:project-orchestrator; executed_as=team-agent:team-backend; dispatch command id cmd-dispatch-backend-1"
+            }
+          ],
+          "commands": [
+            {
+              "command_id": "cmd-dispatch-backend-1",
+              "command_type": "propose_task",
+              "note": "deterministic Rule C dispatch; no Planner AgentRun created"
+            }
+          ],
+          "observations": [
+            "Readiness = accepted AND dependencies_satisfied AND inputs_accessible AND capacity_reserved AND no_open_gate AND budget_available AND process_allows_dispatch."
+          ]
         },
         {
-          "step_ref": "t07",
-          "trigger_event_refs": ["e08", "e09", "e10", "e11", "e12", "e13", "e14"],
-          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "process_version_change": "0",
-          "transition_event_type": null,
-          "note": "并行执行与 task 级提交/验证期间三元组稳定（OPEN-Q3/Open-Q5）"
+          "step_id": "t07",
+          "stimulus_ref": "s07",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 3,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.accepted",
+              "subject_ref": "task-frontend-ui"
+            },
+            {
+              "event_type": "project.capability.matched",
+              "subject_ref": "task-frontend-ui"
+            },
+            {
+              "event_type": "project.capacity.reserved",
+              "subject_ref": "reservation-frontend-1"
+            }
+          ],
+          "active_operations": [
+            "run-backend-1"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "capacity_reservation",
+              "object_ref": "reservation-frontend-1",
+              "note": "capability=frontend-ui, state=reserved",
+              "idempotency_key": "idem:reserve:task-frontend-ui:v1"
+            }
+          ],
+          "commands": [],
+          "observations": [
+            "Both tasks are independent (no depends_on); frontend dispatch waits for the next orchestration cycle, no dispatch occurs in this window (no project.work.dispatched fact)."
+          ]
         },
         {
-          "step_ref": "t08",
-          "trigger_event_ref": "e15",
-          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "to": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "all_required_work_submitted"
+          "step_id": "t08",
+          "stimulus_ref": "s08",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.started",
+              "subject_ref": "task-backend-api"
+            }
+          ],
+          "active_operations": [
+            "run-backend-1"
+          ],
+          "created_or_updated": [],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t09",
-          "trigger_event_ref": "e16",
-          "from": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "verification.passed"
+          "step_id": "t09",
+          "stimulus_ref": "s09",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.submitted",
+              "subject_ref": "task-backend-api"
+            }
+          ],
+          "active_operations": [
+            "run-backend-1"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "artifact",
+              "object_ref": "resource-api-spec",
+              "note": "version=1, propagation=portable, produced_by=task-backend-api"
+            }
+          ],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t10",
-          "trigger_event_ref": "e17",
-          "from": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "integration.passed"
+          "step_id": "t10",
+          "stimulus_ref": "s10",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 3,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-backend-1"
+            },
+            {
+              "event_type": "team_task.verified",
+              "subject_ref": "task-backend-api",
+              "note": "Harness composite verification output (deterministic + review); observed, never injected"
+            },
+            {
+              "event_type": "project.work.dispatched",
+              "subject_ref": "run-frontend-1",
+              "transition_key": null,
+              "transition": {
+                "from": {
+                  "phase": "EXECUTION",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "EXECUTION",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                }
+              },
+              "note": "Re-entrant transition: the fact is consumed while RUNNING; the transient READY gap after the run terminal is internal to the orchestration cycle."
+            }
+          ],
+          "active_operations": [
+            "run-frontend-1"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "verification",
+              "object_ref": "verif-task-backend-api-1",
+              "note": "checks: schema-valid(DETERMINISTIC)=PASS, semantic-consistency(AGENT_REVIEW)=PASS; outcome=PASS"
+            },
+            {
+              "object_type": "agent_run",
+              "object_ref": "run-frontend-1",
+              "note": "run_kind=task_execution; initiated_by=service:project-orchestrator; executed_as=team-agent:team-frontend; command id cmd-dispatch-frontend-1"
+            }
+          ],
+          "commands": [
+            {
+              "command_id": "cmd-dispatch-frontend-1",
+              "command_type": "propose_task",
+              "note": "deterministic dispatch after readiness"
+            }
+          ],
+          "observations": [
+            "transition from is the interim EXECUTION/READY after backend run terminal; exactly one migration in this step."
+          ]
         },
         {
-          "step_ref": "t11",
-          "trigger_event_ref": "e18",
-          "from": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "TERMINAL", "status": "COMPLETED", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "delivery.accepted"
+          "step_id": "t11",
+          "stimulus_ref": "s11",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.started",
+              "subject_ref": "task-frontend-ui"
+            }
+          ],
+          "active_operations": [
+            "run-frontend-1"
+          ],
+          "created_or_updated": [],
+          "commands": [],
+          "observations": []
+        },
+        {
+          "step_id": "t12",
+          "stimulus_ref": "s12",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.submitted",
+              "subject_ref": "task-frontend-ui"
+            }
+          ],
+          "active_operations": [
+            "run-frontend-1"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "artifact",
+              "object_ref": "resource-ui-build",
+              "note": "version=1, propagation=portable"
+            }
+          ],
+          "commands": [],
+          "observations": []
+        },
+        {
+          "step_id": "t13",
+          "stimulus_ref": "s13",
+          "expected_process": {
+            "phase": "VERIFICATION",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 3,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-frontend-1"
+            },
+            {
+              "event_type": "team_task.verified",
+              "subject_ref": "task-frontend-ui"
+            },
+            {
+              "event_type": "project.work.required_submitted",
+              "subject_ref": "process-demo-1",
+              "transition_key": "all_required_work_submitted",
+              "transition": {
+                "from": {
+                  "phase": "EXECUTION",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "VERIFICATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "verification",
+              "object_ref": "verif-task-frontend-ui-1",
+              "note": "outcome=PASS"
+            },
+            {
+              "object_type": "agent_run",
+              "object_ref": "run-verification-1",
+              "note": "queued; run_kind=verification; initiated_by/executed_as=service:project-orchestrator"
+            }
+          ],
+          "commands": [],
+          "observations": []
+        },
+        {
+          "step_id": "t14",
+          "stimulus_ref": "s14",
+          "expected_process": {
+            "phase": "INTEGRATION",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 2,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-verification-1"
+            },
+            {
+              "event_type": "project.verification.completed",
+              "subject_ref": "process-demo-1",
+              "outcome": "PASS",
+              "transition_key": "verification.passed",
+              "transition": {
+                "from": {
+                  "phase": "VERIFICATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "INTEGRATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "integration_run",
+              "object_ref": "integration-1",
+              "note": "assembling input artifact set resource-api-spec + resource-ui-build"
+            }
+          ],
+          "commands": [],
+          "observations": []
+        },
+        {
+          "step_id": "t15",
+          "stimulus_ref": "s15",
+          "expected_process": {
+            "phase": "DELIVERY",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "project.integration.completed",
+              "subject_ref": "integration-1",
+              "outcome": "PASS",
+              "transition_key": "integration.passed",
+              "transition": {
+                "from": {
+                  "phase": "INTEGRATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "DELIVERY",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "delivery_manifest",
+              "object_ref": "delivery-1",
+              "note": "status ASSEMBLING->READY (Harness output); artifact digest manifest covers resource-api-spec#1 + resource-ui-build#1"
+            }
+          ],
+          "commands": [],
+          "observations": [
+            "Only Integration PASS makes the manifest READY (ADR-0011 decision 5)."
+          ]
+        },
+        {
+          "step_id": "t16",
+          "stimulus_ref": "s16",
+          "expected_process": {
+            "phase": "TERMINAL",
+            "status": "COMPLETED",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 3,
+          "emitted_domain_facts": [
+            {
+              "event_type": "approval.decided",
+              "subject_ref": "delivery-1"
+            },
+            {
+              "event_type": "project.delivery.accepted",
+              "subject_ref": "delivery-1",
+              "transition_key": "delivery.accepted",
+              "transition": {
+                "from": {
+                  "phase": "DELIVERY",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "TERMINAL",
+                  "status": "COMPLETED",
+                  "wait_reason": "NONE"
+                }
+              }
+            },
+            {
+              "event_type": "project.completion.evaluated",
+              "subject_ref": "completion-contract-1",
+              "outcome": "PASS",
+              "note": "deterministic evaluator PASS precedes the terminal transition"
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "delivery_manifest",
+              "object_ref": "delivery-1",
+              "note": "status=ACCEPTED by authorized role delivery_acceptor"
+            }
+          ],
+          "commands": [],
+          "observations": [
+            "required_delivery_accepted=true satisfied only at this step; TERMINAL/COMPLETED never occurs earlier (G-INV-12)."
+          ]
         }
       ],
       "required_outputs": [
-        { "output_id": "ro-01", "kind": "state", "statement": "Work Graph 物化成功：goal 节点 + 两个 task 节点 + part_of 关系；物化重放幂等（同 draft_id + plan-local id 收敛）", "subject_refs": ["goal-1", "task-backend-api", "task-frontend-ui"] },
-        { "output_id": "ro-02", "kind": "state", "statement": "每个 task 恰好一次 accepted → in_progress → submitted → verified，无重复 dispatch", "subject_refs": ["task-backend-api", "task-frontend-ui"] },
-        { "output_id": "ro-03", "kind": "artifact", "statement": "resource-api-spec、resource-ui-build 存在，并被 delivery-1 的 artifact 版本/digest manifest 引用", "subject_refs": ["resource-api-spec", "resource-ui-build", "delivery-1"] },
-        { "output_id": "ro-04", "kind": "state", "statement": "delivery-1 状态为 ACCEPTED，且仅在 ACCEPTED 之后 process 才到达 TERMINAL/COMPLETED（G-INV-12）", "subject_refs": ["delivery-1"] },
-        { "output_id": "ro-05", "kind": "audit", "statement": "run-backend-1 / run-frontend-1 的 audit 同时记录 initiated_by=service:project-orchestrator 与 executed_as=team-agent:team-*（G-INV-06）", "subject_refs": ["run-backend-1", "run-frontend-1"] },
-        { "output_id": "ro-06", "kind": "usage", "statement": "execution_usage 累计恰好一次：每个 run 的 token/cost 在其 terminal 时入账且不重复", "subject_refs": ["process-demo-1"] },
-        { "output_id": "ro-07", "kind": "state", "statement": "Completion Contract 全部条件满足；评估为确定性（无模型调用）且对同一快照结果稳定", "subject_refs": ["process-demo-1"] },
-        { "output_id": "ro-08", "kind": "event", "statement": "每个接受的迁移恰好产生一条权威 process event，sequence 单调连续、payload 无 prompt/secret/raw tool arguments（G-INV-13）", "subject_refs": ["process-demo-1"] }
+        {
+          "output_id": "ro-01",
+          "statement": "Both tasks traverse accepted -> in_progress -> submitted -> verified exactly once; stable ids: task-backend-api, task-frontend-api submits keyed idem:task-*:submit:v1."
+        },
+        {
+          "output_id": "ro-02",
+          "statement": "delivery-1 ACCEPTED precedes TERMINAL/COMPLETED; manifest idempotency key idem:delivery-1:accept."
+        },
+        {
+          "output_id": "ro-03",
+          "statement": "run-backend-1 and run-frontend-1 audit records carry initiated_by=service:project-orchestrator and executed_as=team-agent:team-*."
+        },
+        {
+          "output_id": "ro-04",
+          "statement": "usage-demo-1 aggregates each run terminal usage exactly once (keys idem:run-*-1:terminal); total tokens 104000."
+        },
+        {
+          "output_id": "ro-05",
+          "statement": "Every accepted transition appends exactly one durable event; seq deltas match emitted fact counts per step."
+        }
       ],
       "forbidden_outcomes": [
-        { "forbidden_id": "fo-01", "kind": "state", "statement": "任何 Agent/Planner 输出直接把 process 置为 COMPLETED（G-INV-01/G-INV-12）" },
-        { "forbidden_id": "fo-02", "kind": "state", "statement": "delivery ACCEPTED 之前出现 TERMINAL/COMPLETED" },
-        { "forbidden_id": "fo-03", "kind": "dispatch", "statement": "task 处于 proposed（未被接受）时被 dispatch（契约接受与调度就绪分离）" },
-        { "forbidden_id": "fo-04", "kind": "event", "statement": "同一 task 出现两次 submitted 或两次 verified" },
-        { "forbidden_id": "fo-05", "kind": "data_flow", "statement": "任一 team private 内容出现在另一 team 的 context/输出/audit payload" },
-        { "forbidden_id": "fo-06", "kind": "identity", "statement": "自动 run 的 executed_as 为 human:user-project-owner" },
-        { "forbidden_id": "fo-07", "kind": "dispatch", "statement": "为可确定性决策（Rule C ready task）创建 Planner AgentRun" }
+        {
+          "forbidden_id": "fo-01",
+          "statement": "Any agent/planner output sets process to TERMINAL/COMPLETED directly."
+        },
+        {
+          "forbidden_id": "fo-02",
+          "statement": "TERMINAL/COMPLETED before delivery-1 is ACCEPTED."
+        },
+        {
+          "forbidden_id": "fo-03",
+          "statement": "A proposed (unaccepted) contract is dispatched."
+        },
+        {
+          "forbidden_id": "fo-04",
+          "statement": "Duplicate team_task.submitted or team_task.verified for either task."
+        },
+        {
+          "forbidden_id": "fo-05",
+          "statement": "Any team_private content appears in the other team's context or audit payload."
+        },
+        {
+          "forbidden_id": "fo-06",
+          "statement": "Any automatic run has executed_as=human:user-project-owner."
+        },
+        {
+          "forbidden_id": "fo-07",
+          "statement": "A Planner AgentRun is created for the deterministic Rule C dispatch."
+        }
       ],
       "safety_invariants": [
-        { "invariant_id": "si-01", "statement": "全程无 open gate / open input request；WAITING 仅出现在 INTAKE 的 HUMAN_INPUT 初始态" },
-        { "invariant_id": "si-02", "statement": "两任务并行执行期间 max_active_agent_runs / max_active_runs_per_team 均未突破" }
+        {
+          "invariant_id": "si-01",
+          "statement": "No open gate or input request exists at any step; WAITING occurs only as the INTAKE/HUMAN_INPUT initial state."
+        },
+        {
+          "invariant_id": "si-02",
+          "statement": "Parallel execution never exceeds max_active_agent_runs=4 or max_active_runs_per_team=2 (usage-demo-1)."
+        }
       ],
       "crash_and_recovery": [],
-      "contract_assumptions": ["OPEN-Q1", "OPEN-Q2", "OPEN-Q3", "OPEN-Q5", "OPEN-Q7", "OPEN-Q11"]
+      "notes": [
+        "Reference trajectory reused by other fixtures for convergence comparisons."
+      ]
     },
     {
       "scenario_id": "eval-05-worker-crash-checkpoint-recovery",
       "eval_ref": "Eval 5",
-      "summary": "AgentRun worker 在 checkpoint 持久化后、terminal 写入前崩溃；恢复 worker 从 checkpoint 续跑，旧 fencing token 写入被拒绝，任务收敛到与 Eval 1 相同的终态。",
+      "summary": "Agent worker crashes after checkpoint persistence, before run terminal. A recovery worker claims the run with a new fencing token, stale-token writes are rejected, and the trajectory converges to the same terminal state as Eval 1.",
       "initial_state": {
         "process": {
           "process_ref": "process-demo-1",
+          "project_ref": "project-harness-demo",
           "phase": "EXECUTION",
           "status": "RUNNING",
-          "wait_reason": "NONE"
+          "wait_reason": "NONE",
+          "process_version": 8,
+          "last_event_sequence": 14
         },
-        "process_version": "与 plan 批准后、dispatch 后一致（相对值）",
-        "work_graph": {
+        "graph": {
           "nodes": [
-            { "node_ref": "task-backend-api", "node_type": "task", "team_ref": "team-backend", "task_status": "in_progress" },
-            { "node_ref": "task-frontend-ui", "node_type": "task", "team_ref": "team-frontend", "task_status": "in_progress" }
+            {
+              "node_ref": "node-goal-1",
+              "node_type": "goal",
+              "subject_ref": "goal-1"
+            },
+            {
+              "node_ref": "node-task-backend-api",
+              "node_type": "task",
+              "subject_ref": "task-backend-api",
+              "team_ref": "team-backend",
+              "task_status": "in_progress"
+            },
+            {
+              "node_ref": "node-task-frontend-ui",
+              "node_type": "task",
+              "subject_ref": "task-frontend-ui",
+              "team_ref": "team-frontend",
+              "task_status": "in_progress"
+            }
           ],
           "relations": [
-            { "relation_ref": "rel-goal-1", "relation_type": "part_of", "source": "task-backend-api", "target": "goal-1" },
-            { "relation_ref": "rel-goal-2", "relation_type": "part_of", "source": "task-frontend-ui", "target": "goal-1" }
-          ]
+            {
+              "relation_ref": "rel-goal-backend",
+              "relation_type": "part_of",
+              "source": "task-backend-api",
+              "target": "goal-1"
+            },
+            {
+              "relation_ref": "rel-goal-frontend",
+              "relation_type": "part_of",
+              "source": "task-frontend-ui",
+              "target": "goal-1"
+            }
+          ],
+          "graph_snapshot_digest": {
+            "operand": "literal",
+            "value": "sha256:d5-exec"
+          }
         },
         "contracts": [
-          { "task_ref": "task-backend-api", "requested_capability": "backend-api", "task_status": "in_progress" },
-          { "task_ref": "task-frontend-ui", "requested_capability": "frontend-ui", "task_status": "in_progress" }
+          {
+            "contract_ref": "contract-backend-1",
+            "task_ref": "task-backend-api",
+            "requester_team_ref": "team-frontend",
+            "provider_team_ref": "team-backend",
+            "requested_capability": "backend-api",
+            "task_status": "in_progress",
+            "contract_version": 1,
+            "input_manifest": {
+              "resources": []
+            },
+            "output_contract": {
+              "artifact_types": [
+                "application/openapi+yaml"
+              ],
+              "required": true
+            }
+          },
+          {
+            "contract_ref": "contract-frontend-1",
+            "task_ref": "task-frontend-ui",
+            "requester_team_ref": "team-backend",
+            "provider_team_ref": "team-frontend",
+            "requested_capability": "frontend-ui",
+            "task_status": "in_progress",
+            "contract_version": 1,
+            "input_manifest": {
+              "resources": []
+            },
+            "output_contract": {
+              "artifact_types": [
+                "application/zip"
+              ],
+              "required": true
+            }
+          }
         ],
-        "active_runs": [
+        "artifacts": [],
+        "verifications": [],
+        "integration": null,
+        "delivery": null,
+        "completion_contract": {
+          "contract_ref": "completion-contract-1",
+          "required_delivery_accepted": true
+        },
+        "execution_policy": {
+          "policy_ref": "policy-default",
+          "max_agent_runs": 50,
+          "max_total_tokens": 2000000,
+          "max_model_cost_microusd": 5000000,
+          "max_replans": 5,
+          "max_generated_tasks": 20,
+          "max_active_agent_runs": 4,
+          "max_active_runs_per_team": 2,
+          "max_specialist_depth": 2,
+          "max_specialist_runs_per_task": 2,
+          "deadline_at": null,
+          "version": 1
+        },
+        "usage": {
+          "usage_ref": "usage-demo-1",
+          "agent_runs_started": 2,
+          "agent_runs_completed": 0,
+          "total_tokens": 30000,
+          "model_cost_microusd": 15000,
+          "replan_count": 0,
+          "generated_task_count": 2,
+          "active_agent_runs": 2
+        },
+        "runs": [
           {
             "run_ref": "run-backend-1",
             "run_kind": "task_execution",
-            "team_ref": "team-backend",
             "task_ref": "task-backend-api",
+            "team_ref": "team-backend",
             "initiated_by": "service:project-orchestrator",
             "executed_as": "team-agent:team-backend",
-            "checkpoint": { "persisted": true, "note": "已完成部分工具调用且 checkpoint 已持久化" }
+            "execution_state": "running",
+            "checkpoint": {
+              "persisted": true
+            }
           },
           {
             "run_ref": "run-frontend-1",
             "run_kind": "task_execution",
-            "team_ref": "team-frontend",
             "task_ref": "task-frontend-ui",
+            "team_ref": "team-frontend",
             "initiated_by": "service:project-orchestrator",
-            "executed_as": "team-agent:team-frontend"
+            "executed_as": "team-agent:team-frontend",
+            "execution_state": "running"
           }
         ],
-        "execution_usage": {
-          "agent_runs_started": 2,
-          "agent_runs_completed": 0,
-          "replan_count": 0
-        },
-        "open_gates": [],
-        "open_input_requests": [],
-        "notes": ["worker-A 持有 run-backend-1 的当前 lease 与 fencing token"]
-      },
-      "input_events": [
-        {
-          "event_ref": "e01",
-          "event_type": "harness.fault_injection",
-          "fault": {
-            "kind": "agent_worker_crash",
-            "target_ref": "run-backend-1",
-            "worker_ref": "worker-A",
-            "timing": "after_checkpoint_persisted_before_run_terminal"
+        "tool_jobs": [],
+        "reservations": [
+          {
+            "reservation_ref": "reservation-backend-1",
+            "capability_ref": "backend-api",
+            "team_ref": "team-backend",
+            "task_ref": "task-backend-api",
+            "state": "reserved"
           },
-          "note": "worker-A 崩溃：checkpoint 已持久化，terminal 状态未写入"
-        },
+          {
+            "reservation_ref": "reservation-frontend-1",
+            "capability_ref": "frontend-ui",
+            "team_ref": "team-frontend",
+            "task_ref": "task-frontend-ui",
+            "state": "reserved"
+          }
+        ],
+        "capabilities": [
+          {
+            "capability_ref": "backend-api",
+            "team_ref": "team-backend",
+            "capacity": 2
+          },
+          {
+            "capability_ref": "frontend-ui",
+            "team_ref": "team-frontend",
+            "capacity": 2
+          }
+        ],
+        "gates": [],
+        "input_requests": [],
+        "pending_events": [],
+        "outbox": []
+      },
+      "stimuli": [
         {
-          "event_ref": "e02",
-          "event_type": "harness.fault_injection",
-          "fault": {
-            "kind": "stale_worker_resume_attempt",
-            "target_ref": "run-backend-1",
-            "worker_ref": "worker-A",
-            "detail": "lease 已过期后，worker-A 携旧 fencing token 尝试恢复写入"
+          "source_event_id": "s01",
+          "event_type": "fixture.fault_injection",
+          "origin": "FIXTURE_FAULT",
+          "subject_ref": "run-backend-1",
+          "idempotency_key": "fault:s01:agent_worker_crash",
+          "payload": {
+            "fault": {
+              "kind": "agent_worker_crash",
+              "timing": "after_checkpoint_persisted_before_run_terminal",
+              "worker_ref": "worker-A"
+            }
           }
         },
         {
-          "event_ref": "e03",
-          "event_type": "harness.fault_injection",
-          "fault": {
-            "kind": "orchestrator_worker_crash",
-            "detail": "占位：无 orchestrator 故障；此事件表示 lease 过期与恢复 worker 认领之间的自然间隙",
-            "noop": true
+          "source_event_id": "s02",
+          "event_type": "fixture.fault_injection",
+          "origin": "FIXTURE_FAULT",
+          "subject_ref": "run-backend-1",
+          "idempotency_key": "fault:s02:stale_resume",
+          "payload": {
+            "fault": {
+              "kind": "stale_worker_resume_attempt",
+              "worker_ref": "worker-A",
+              "detail": "expired lease, old fencing token"
+            }
           }
         },
         {
-          "event_ref": "e04",
+          "source_event_id": "s03",
           "event_type": "team_task.submitted",
-          "actor": { "initiated_by": "team-agent:team-backend" },
-          "payload": { "task_ref": "task-backend-api", "artifact_refs": ["resource-api-spec"] },
-          "note": "恢复 worker（worker-B，新 lease + 新 fencing token）从 checkpoint 续跑后正常提交"
+          "origin": "AGENT_WORKER",
+          "subject_ref": "task-backend-api",
+          "idempotency_key": "idem:task-backend-api:submit:v1",
+          "payload": {
+            "artifact_refs": [
+              "resource-api-spec"
+            ],
+            "artifact_version": 1,
+            "note": "submitted by recovery worker worker-B after checkpoint resume"
+          }
         },
         {
-          "event_ref": "e05",
-          "event_type": "team_task.verified",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "payload": { "task_ref": "task-backend-api", "passed": true }
+          "source_event_id": "s04",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-backend-1",
+          "idempotency_key": "idem:run-backend-1:terminal",
+          "payload": {
+            "outcome": "PASS",
+            "usage": {
+              "tokens": 40000,
+              "model_cost_microusd": 20000
+            }
+          }
         },
         {
-          "event_ref": "e06",
+          "source_event_id": "s05",
           "event_type": "team_task.submitted",
-          "actor": { "initiated_by": "team-agent:team-frontend" },
-          "payload": { "task_ref": "task-frontend-ui", "artifact_refs": ["resource-ui-build"] },
-          "note": "run-frontend-1 全程未受影响"
+          "origin": "AGENT_WORKER",
+          "subject_ref": "task-frontend-ui",
+          "idempotency_key": "idem:task-frontend-ui:submit:v1",
+          "payload": {
+            "artifact_refs": [
+              "resource-ui-build"
+            ],
+            "artifact_version": 1
+          }
         },
         {
-          "event_ref": "e07",
-          "event_type": "team_task.verified",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "payload": { "task_ref": "task-frontend-ui", "passed": true }
+          "source_event_id": "s06",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-frontend-1",
+          "idempotency_key": "idem:run-frontend-1:terminal",
+          "payload": {
+            "outcome": "PASS",
+            "usage": {
+              "tokens": 35000,
+              "model_cost_microusd": 17000
+            }
+          }
         },
         {
-          "event_ref": "e08",
-          "event_type": "all_required_work_submitted",
-          "actor": { "initiated_by": "service:project-orchestrator" }
+          "source_event_id": "s07",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-verification-1",
+          "idempotency_key": "idem:run-verification-1:terminal",
+          "payload": {
+            "outcome": "PASS"
+          }
         },
         {
-          "event_ref": "e09",
-          "event_type": "verification.passed",
-          "actor": { "initiated_by": "service:project-orchestrator" }
+          "source_event_id": "s08",
+          "event_type": "project.integration.completed",
+          "origin": "TOOL_WORKER",
+          "subject_ref": "integration-1",
+          "idempotency_key": "idem:integration-1:complete",
+          "payload": {
+            "outcome": "PASS"
+          }
         },
         {
-          "event_ref": "e10",
-          "event_type": "integration.passed",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "payload": { "integration_ref": "integration-1" }
-        },
-        {
-          "event_ref": "e11",
-          "event_type": "delivery.accepted",
-          "actor": { "initiated_by": "human:user-project-owner" },
-          "payload": { "delivery_ref": "delivery-1" }
+          "source_event_id": "s09",
+          "event_type": "approval.decided",
+          "origin": "HUMAN",
+          "subject_ref": "delivery-1",
+          "idempotency_key": "idem:delivery-1:accept",
+          "payload": {
+            "decision": "ACCEPT",
+            "decided_by": "human:user-project-owner",
+            "role": "delivery_acceptor"
+          }
         }
       ],
-      "expected_transitions": [
+      "expected_steps": [
         {
-          "step_ref": "t01",
-          "trigger_event_ref": "e01",
-          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "process_version_change": "0",
-          "transition_event_type": null,
-          "note": "crash 是 run 层故障：process 三元组不变、无新领域事件；task-backend-api 保持 in_progress（OPEN-Q3）"
+          "step_id": "t01",
+          "stimulus_ref": "s01",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 0,
+          "emitted_domain_facts": [],
+          "active_operations": [
+            "run-frontend-1"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "agent_run",
+              "object_ref": "run-backend-1",
+              "note": "execution_state running->interrupted; crash is a run-level fault: no domain fact, no process transition, task stays in_progress"
+            }
+          ],
+          "commands": [],
+          "observations": [
+            "run-frontend-1 unaffected; RUNNING remains valid via run-frontend-1."
+          ]
         },
         {
-          "step_ref": "t02",
-          "trigger_event_ref": "e02",
-          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "process_version_change": "0",
-          "transition_event_type": null,
-          "note": "旧 fencing token 写入必须被拒绝，状态无任何变化（G-INV-14）"
+          "step_id": "t02",
+          "stimulus_ref": "s02",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 0,
+          "emitted_domain_facts": [],
+          "active_operations": [
+            "run-frontend-1"
+          ],
+          "created_or_updated": [],
+          "commands": [],
+          "observations": [
+            "Stale fencing write rejected (G-INV-14); only a security audit row is produced, no durable domain effect."
+          ]
         },
         {
-          "step_ref": "t03",
-          "trigger_event_ref": "e04",
-          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "process_version_change": "0",
-          "transition_event_type": "team_task.submitted",
-          "note": "恢复后正常推进"
+          "step_id": "t03",
+          "stimulus_ref": "s03",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.submitted",
+              "subject_ref": "task-backend-api"
+            }
+          ],
+          "active_operations": [
+            "run-frontend-1"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "artifact",
+              "object_ref": "resource-api-spec",
+              "note": "version=1 exactly one final version despite crash"
+            }
+          ],
+          "commands": [],
+          "observations": [
+            "Recovery worker worker-B claims run-backend-1 with a new lease and fencing token; pre-checkpoint side effects are not repeated."
+          ]
         },
         {
-          "step_ref": "t04",
-          "trigger_event_ref": "e08",
-          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "to": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "all_required_work_submitted"
+          "step_id": "t04",
+          "stimulus_ref": "s04",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 2,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-backend-1"
+            },
+            {
+              "event_type": "team_task.verified",
+              "subject_ref": "task-backend-api"
+            }
+          ],
+          "active_operations": [
+            "run-frontend-1"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "verification",
+              "object_ref": "verif-task-backend-api-1",
+              "note": "outcome=PASS"
+            }
+          ],
+          "commands": [],
+          "observations": [
+            "Recovery audit event records the recovery executor separately; initiated_by/executed_as of run-backend-1 unchanged (G-INV-06)."
+          ]
         },
         {
-          "step_ref": "t05",
-          "trigger_event_ref": "e09",
-          "from": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "verification.passed"
+          "step_id": "t05",
+          "stimulus_ref": "s05",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.submitted",
+              "subject_ref": "task-frontend-ui"
+            }
+          ],
+          "active_operations": [
+            "run-frontend-1"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "artifact",
+              "object_ref": "resource-ui-build",
+              "note": "version=1"
+            }
+          ],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t06",
-          "trigger_event_ref": "e10",
-          "from": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "integration.passed"
+          "step_id": "t06",
+          "stimulus_ref": "s06",
+          "expected_process": {
+            "phase": "VERIFICATION",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 3,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-frontend-1"
+            },
+            {
+              "event_type": "team_task.verified",
+              "subject_ref": "task-frontend-ui"
+            },
+            {
+              "event_type": "project.work.required_submitted",
+              "subject_ref": "process-demo-1",
+              "transition_key": "all_required_work_submitted",
+              "transition": {
+                "from": {
+                  "phase": "EXECUTION",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "VERIFICATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "verification",
+              "object_ref": "verif-task-frontend-ui-1",
+              "note": "outcome=PASS"
+            },
+            {
+              "object_type": "agent_run",
+              "object_ref": "run-verification-1",
+              "note": "queued; executed_as=service:project-orchestrator"
+            }
+          ],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t07",
-          "trigger_event_ref": "e11",
-          "from": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "TERMINAL", "status": "COMPLETED", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "delivery.accepted"
+          "step_id": "t07",
+          "stimulus_ref": "s07",
+          "expected_process": {
+            "phase": "INTEGRATION",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 2,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-verification-1"
+            },
+            {
+              "event_type": "project.verification.completed",
+              "subject_ref": "process-demo-1",
+              "outcome": "PASS",
+              "transition_key": "verification.passed",
+              "transition": {
+                "from": {
+                  "phase": "VERIFICATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "INTEGRATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "integration_run",
+              "object_ref": "integration-1",
+              "note": "created"
+            }
+          ],
+          "commands": [],
+          "observations": []
+        },
+        {
+          "step_id": "t08",
+          "stimulus_ref": "s08",
+          "expected_process": {
+            "phase": "DELIVERY",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "project.integration.completed",
+              "subject_ref": "integration-1",
+              "outcome": "PASS",
+              "transition_key": "integration.passed",
+              "transition": {
+                "from": {
+                  "phase": "INTEGRATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "DELIVERY",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "delivery_manifest",
+              "object_ref": "delivery-1",
+              "note": "ASSEMBLING->READY"
+            }
+          ],
+          "commands": [],
+          "observations": []
+        },
+        {
+          "step_id": "t09",
+          "stimulus_ref": "s09",
+          "expected_process": {
+            "phase": "TERMINAL",
+            "status": "COMPLETED",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 3,
+          "emitted_domain_facts": [
+            {
+              "event_type": "approval.decided",
+              "subject_ref": "delivery-1"
+            },
+            {
+              "event_type": "project.delivery.accepted",
+              "subject_ref": "delivery-1",
+              "transition_key": "delivery.accepted",
+              "transition": {
+                "from": {
+                  "phase": "DELIVERY",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "TERMINAL",
+                  "status": "COMPLETED",
+                  "wait_reason": "NONE"
+                }
+              }
+            },
+            {
+              "event_type": "project.completion.evaluated",
+              "subject_ref": "completion-contract-1",
+              "outcome": "PASS"
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [],
+          "commands": [],
+          "observations": [
+            "Terminal state converges with eval-01-simple-project."
+          ]
         }
       ],
       "required_outputs": [
-        { "output_id": "ro-01", "kind": "state", "statement": "run-backend-1 由 worker-B 携新 lease/fencing token 认领并从已持久化 checkpoint 续跑，checkpoint 之前的副作用不重复执行", "subject_refs": ["run-backend-1"] },
-        { "output_id": "ro-02", "kind": "state", "statement": "task-backend-api 恰好一次 submitted、一次 verified；resource-api-spec 恰好一个最终版本", "subject_refs": ["task-backend-api", "resource-api-spec"] },
-        { "output_id": "ro-03", "kind": "audit", "statement": "恢复产生独立 recovery 审计事件（记录恢复执行者），run 的 initiated_by/executed_as 保持原值不变（G-INV-06/G-INV-14）", "subject_refs": ["run-backend-1"] },
-        { "output_id": "ro-04", "kind": "usage", "statement": "run-backend-1 的 token/cost 恰好入账一次（崩溃前消耗计入同一 run，不产生第二条计费记录）", "subject_refs": ["process-demo-1"] },
-        { "output_id": "ro-05", "kind": "state", "statement": "终态与 Eval 1 收敛：TERMINAL/COMPLETED，且 delivery-1 为 ACCEPTED", "subject_refs": ["delivery-1"] }
+        {
+          "output_id": "ro-01",
+          "statement": "run-backend-1 resumes from the persisted checkpoint under worker-B with a new fencing token; pre-crash side effects are not repeated."
+        },
+        {
+          "output_id": "ro-02",
+          "statement": "task-backend-api has exactly one submitted (idem:task-backend-api:submit:v1) and one verified; resource-api-spec has exactly one final version."
+        },
+        {
+          "output_id": "ro-03",
+          "statement": "A separate recovery audit event exists; initiated_by/executed_as and delegation scope digest of run-backend-1 are unchanged across recovery."
+        },
+        {
+          "output_id": "ro-04",
+          "statement": "Usage for run-backend-1 counted exactly once under idem:run-backend-1:terminal despite the crash window."
+        },
+        {
+          "output_id": "ro-05",
+          "statement": "Final state matches eval-01-simple-project: TERMINAL/COMPLETED with delivery-1 ACCEPTED."
+        }
       ],
       "forbidden_outcomes": [
-        { "forbidden_id": "fo-01", "kind": "state", "statement": "崩溃导致 run-backend-1 被记为 failed 终态或 task-backend-api 回退为 accepted/proposed" },
-        { "forbidden_id": "fo-02", "kind": "state", "statement": "崩溃触发整个项目 FAILED/CANCELLED" },
-        { "forbidden_id": "fo-03", "kind": "event", "statement": "旧 fencing token 的任何写入生效（G-INV-14）" },
-        { "forbidden_id": "fo-04", "kind": "dispatch", "statement": "为弥补崩溃新开第二个并行 run 执行同一 task（应恢复而非重派）" },
-        { "forbidden_id": "fo-05", "kind": "usage", "statement": "usage 双重计数（恢复路径重放已入账消耗）" },
-        { "forbidden_id": "fo-06", "kind": "artifact", "statement": "同一逻辑步骤产出两个提交版本的 resource-api-spec" }
+        {
+          "forbidden_id": "fo-01",
+          "statement": "The crash marks run-backend-1 failed-terminal or reverts task-backend-api to accepted/proposed."
+        },
+        {
+          "forbidden_id": "fo-02",
+          "statement": "The crash fails or cancels the project process."
+        },
+        {
+          "forbidden_id": "fo-03",
+          "statement": "Any write performed with worker-A's stale fencing token takes effect."
+        },
+        {
+          "forbidden_id": "fo-04",
+          "statement": "A second parallel run is created for task-backend-api instead of resuming run-backend-1."
+        },
+        {
+          "forbidden_id": "fo-05",
+          "statement": "Usage double-counted via the recovery replay."
+        },
+        {
+          "forbidden_id": "fo-06",
+          "statement": "Two submitted versions of resource-api-spec exist."
+        }
       ],
       "safety_invariants": [
-        { "invariant_id": "si-01", "statement": "crash 窗口内 process 无三元组迁移、无新领域事件、version 不变" },
-        { "invariant_id": "si-02", "statement": "run-frontend-1 的执行与审计全程不受 run-backend-1 崩溃影响" }
+        {
+          "invariant_id": "si-01",
+          "statement": "Crash window steps t01-t02 produce no domain fact, no transition, and version/sequence deltas of zero."
+        },
+        {
+          "invariant_id": "si-02",
+          "statement": "run-frontend-1 execution and audit are unaffected by the backend crash."
+        }
       ],
       "crash_and_recovery": [
         {
           "recovery_id": "cr-01",
-          "injected_fault": "agent_worker_crash(after_checkpoint_persisted_before_run_terminal)",
-          "expected_behavior": "run 层崩溃不影响 process 三元组；task 保持 in_progress；无新领域事件",
-          "recovery_signal": "lease 过期后由恢复 worker 认领（新 fencing token）",
-          "idempotency_requirement": "checkpoint 后副作用不重复；提交/验证/计费恰好一次"
+          "fault_kind": "agent_worker_crash",
+          "expected_behavior": "Run-level crash leaves the process triple unchanged; task stays in_progress; no domain fact.",
+          "recovery_signal": "Lease expiry allows worker-B to claim run-backend-1 with a new fencing token and resume from checkpoint.",
+          "idempotency_requirement": "Post-checkpoint side effects not repeated; submit/verify/usage exactly once under stable keys."
         },
         {
           "recovery_id": "cr-02",
-          "injected_fault": "stale_worker_resume_attempt",
-          "expected_behavior": "持过期 fencing token 的写入被拒绝",
-          "recovery_signal": "拒绝即为预期结果，无需额外恢复",
-          "idempotency_requirement": "被拒绝的写入不产生任何持久痕迹（除安全审计）"
+          "fault_kind": "stale_worker_resume_attempt",
+          "expected_behavior": "Write with the expired fencing token is rejected.",
+          "recovery_signal": "Rejection is the expected outcome; only a security audit row remains.",
+          "idempotency_requirement": "No durable domain effect from the rejected write."
         }
-      ],
-      "contract_assumptions": ["OPEN-Q3", "OPEN-Q13"]
+      ]
     }
   ]
 }

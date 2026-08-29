@@ -1,227 +1,222 @@
-# Project Harness Evaluation 规格与确定性 Fixture（B2）
+# Project Harness Evaluation 规格与确定性 Fixture（B2，v2）
 
-- 状态：Proposed（供主线程评审；Eval 场景语义与全局不变量以主线程冻结版本为准）
-- 任务来源：`docs/plan/iteration/Multi-Agent-Harness-Parallel-Execution-Coordination.md` B2
-- 语义来源：
-  - `docs/plan/iteration/Team-Cooperation_Multi-Agent_Harness_Execution_Plan_v1.1_Audited.md` 第 32–34 章（测试计划 / Evaluation / Definition of Done），以及第 4–17、27–28 章的领域语义；
-  - `docs/adr/0005-project-process-transition-matrix.md`（迁移矩阵与 Guard）、
-    `docs/adr/0006-project-budget-and-concurrency.md`（预算与并发）、
-    `docs/adr/0007-agent-execution-identity.md`（执行身份）、
-    `docs/adr/0008-transactional-process-events.md`（事务事件）。
-- 交付物：本规格 + `tests/fixtures/project_harness/*.json`（8 个文件，14 个场景，覆盖 Eval 1–14）。
-- 边界：本任务**只定义评测输入、期望状态和安全不变量**，不实现 ProjectProcess；不修改任何源码、迁移、现有测试；不猜测尚未冻结的数据库字段、Python 类名或 API 路径。
+- 状态：Aligned to Gate 0 contracts（`project-harness-contract-v1.json`、`project-process-event-catalog-v1.md`、`project-harness-fixture-contract-v1.md` 及 ADR-0002…0011，均 Accepted）。本文件不再保留任何 OPEN-Q；fixture 与测试是契约的符合性实现，不做独立裁决。
+- 任务来源：`docs/plan/iteration/Multi-Agent-Harness-Parallel-Execution-Coordination.md` B2。
+- 交付物：本规格 + `tests/fixtures/project_harness/*.json`（8 文件、14 场景，覆盖 Eval 1–14）+ `tests/test_project_harness_evaluation_fixtures.py`（符合性与负向验证）。
+- 边界：只定义评测输入、期望状态和安全不变量；不实现 ProjectProcess；不修改源码、迁移或既有测试。
 
----
+## 1. 规范来源与优先级
 
-## 1. 目的
+1. `docs/adr/project-harness-contract-v1.json`（机器契约）：全部枚举、主链迁移、版本策略、身份规则、rework 策略的唯一来源。
+2. `docs/adr/project-process-event-catalog-v1.md`（事件目录）：domain fact / transition key / audit event 三层命名。
+3. `docs/adr/project-harness-fixture-contract-v1.md`（fixture 契约）：场景结构、stimulus/观察边界、expected step、身份与状态规则、loader 义务。
+4. ADR-0002…0011：领域决策（Work Graph、Contract、Orchestrator、迁移矩阵、预算、身份、事务事件、Gate/Input、能力目录、集成交付）。
 
-为未来的 Harness Eval 执行器（协调方案 B6）提供一组**确定性、离线、可重放**的场景定义：
+fixture 中出现的每一个 event_type、枚举值、策略字段名都可在机器契约中逐字找到；transition key 仅使用主链迁移表冻结的 key（其余迁移不锁定 key，见 §5）。
 
-1. 每个场景给出完整七要素：initial state、输入事件序列、expected transitions、required outputs、forbidden outcomes、安全不变量、崩溃与恢复预期；
-2. 全部期望只用**领域语义名称**表达（阶段/状态/等待原因枚举、任务生命周期、领域事件名、语义对象引用），不绑定任何具体存储字段或代码符号；
-3. 把专家计划第 33 章 Eval 1–14 的简短描述展开成可执行验收规格，并把过程中发现的**未冻结契约决策**显式记录在第 10 节，供主线程裁定。
+## 2. 场景覆盖矩阵
 
-## 2. 语义名称使用规则（防猜测约束）
-
-Fixture 与本规格遵守以下规则：
-
-| 类别 | 允许 | 不允许 |
+| Fixture | Scenario | Eval |
 | --- | --- | --- |
-| 过程状态 | 计划 4.2 / ADR-0005 发布的 `Phase`/`Status`/`WaitReason` 枚举值 | 自造状态值、数据库列名、约束名 |
-| 任务生命周期 | 计划 5.2 的 `proposed/accepted/in_progress/submitted/verified/changes_requested/rejected` | 新增任务状态枚举值 |
-| Delivery / InputRequest / Gate 状态 | 计划 15.2 / 4.6 的枚举（`ASSEMBLING/READY/ACCEPTED/REJECTED`；`OPEN/ANSWERED/CANCELLED/EXPIRED`） | 猜测其他状态值 |
-| 领域事件名 | 计划 8.2 wakeup 源清单 + ADR-0005 主链迁移事件（见第 5.3 节分层约定） | 猜测消息队列 topic、API 路径 |
-| 策略字段 | 计划 4.5 / ADR-0006 "at least" 字段清单的语义名（`max_total_tokens` 等） | 具体类型、精度、表名 |
-| 对象标识 | fixture 内部语义引用（`team-backend`、`task-backend-api`、`resource-api-spec`） | UUID、主键、外键名 |
-| 引用表达式 | `process.version_at(planner_run_started)` 这类语义表达式 | 具体版本号数值 |
+| simple_project.json | eval-01-simple-project / eval-05-worker-crash-checkpoint-recovery | 1 / 5 |
+| dependency.json | eval-02-dependency-blocking / eval-13-transactional-event-recovery | 2 / 13 |
+| rejected_contract.json | eval-03-rejected-contract-replan | 3 |
+| verification_failure.json | eval-04-verification-failure-rework | 4 |
+| budget_exhaustion.json | eval-07-project-budget-exhaustion-gate / eval-11-capability-capacity-exhaustion | 7 / 11 |
+| cross_team_disclosure.json | eval-06-malicious-context-injection / eval-08-cross-team-disclosure-isolation / eval-10-agent-execution-identity | 6 / 8 / 10 |
+| stale_planner.json | eval-09-stale-planner-decision | 9 |
+| delivery_rejection.json | eval-14-delivery-rejection-rework / eval-12-human-input-suspension-restart | 14 / 12 |
 
-场景 schema（`coifesp.orchestration-decision.v1`、`coifesp.verification-result.v1`、`coifesp.project-plan.v2`）仅按计划 7.4 / 14.3 / 6.1 的文本引用其存在与关键字段语义，不扩展未定义字段。
+与第 32 章 Recovery E2E（32.6）的组合：Eval 1 的正常主链段 + Eval 5 的崩溃恢复段 + Eval 4 的返工段 + Eval 14 的交付接受段拼接成完整故障长链；Tool worker 崩溃片段由执行器层将 Eval 5 的 `agent_worker_crash` 替换为 durable tool job 故障复用同一断言骨架（B6 实现细节）。
 
-## 3. Fixture 文件与场景覆盖矩阵
-
-协调方案 B2 固定了 8 个 JSON 文件名。本规格将 Eval 1–14 按主题域分组落入 8 个文件，每个文件含 1–3 个 scenario，共 14 个 scenario，一一覆盖 Eval 1–14。
-
-| # | Fixture 文件 | Scenario | 覆盖 Eval | 主题 |
-| --- | --- | --- | --- | --- |
-| 1 | `simple_project.json` | `eval-01-simple-project` | Eval 1 | 双团队正常执行全链（参考轨迹） |
-| 2 | `simple_project.json` | `eval-05-worker-crash-checkpoint-recovery` | Eval 5 | AgentRun 崩溃后 checkpoint 恢复 |
-| 3 | `dependency.json` | `eval-02-dependency-blocking` | Eval 2 | 跨团队依赖阻塞与确定性解锁 |
-| 4 | `dependency.json` | `eval-13-transactional-event-recovery` | Eval 13 | Outbox 崩溃窗口后恰好一次唤醒 |
-| 5 | `rejected_contract.json` | `eval-03-rejected-contract-replan` | Eval 3 | Contract 被拒 → Planner replan |
-| 6 | `verification_failure.json` | `eval-04-verification-failure-rework` | Eval 4 | 语义审查失败 → 确定性返工 |
-| 7 | `budget_exhaustion.json` | `eval-07-project-budget-exhaustion-gate` | Eval 7 | 项目预算触顶 → 人工预算 Gate |
-| 8 | `budget_exhaustion.json` | `eval-11-capability-capacity-exhaustion` | Eval 11 | capacity=0 → 不 dispatch → 协商 |
-| 9 | `cross_team_disclosure.json` | `eval-06-malicious-context-injection` | Eval 6 | 项目资源 prompt injection 失效 |
-| 10 | `cross_team_disclosure.json` | `eval-08-cross-team-disclosure-isolation` | Eval 8 | Team private 数据隔离 |
-| 11 | `cross_team_disclosure.json` | `eval-10-agent-execution-identity` | Eval 10 | 执行身份 / 不冒用真实用户 |
-| 12 | `stale_planner.json` | `eval-09-stale-planner-decision` | Eval 9 | 过期 Planner 决策被拒绝 |
-| 13 | `delivery_rejection.json` | `eval-14-delivery-rejection-rework` | Eval 14 | Delivery 被拒 → rework |
-| 14 | `delivery_rejection.json` | `eval-12-human-input-suspension-restart` | Eval 12 | InputRequest 稳定 WAITING + 重启恢复 |
-
-与第 32 章测试计划的对应关系：Eval 1–14 是端到端行为场景；32.1–32.5 的单元级断言（guard 拒绝、乐观并发、lease/fencing、去重、payload 卫生等）作为**全局不变量**（第 6 节）注入每个场景；32.6 的 Recovery E2E 长链由 Eval 1（正常段）+ Eval 5 + Eval 4 + Eval 14 的片段组合覆盖，B6 执行器实现时可按第 9 节组合。
-
-## 4. Fixture JSON 结构约定
-
-每个文件顶层：
+## 3. Fixture 文件结构
 
 ```text
-fixture_schema      固定 "project-harness-fixture.v1"（仅描述本文件格式，不是领域 schema）
+fixture_schema   "project-harness-fixture.v2"
 fixture_id / title / description
-eval_coverage       [{eval_id, scenario_id}]
-source_refs         指向专家计划与本规格
-world               跨 scenario 共享的领域设定（teams / capabilities / principals / 默认策略）
-scenarios           scenario 对象数组
+contract_refs    指向三个 Gate 0 契约文件
+eval_coverage    [{eval_id, scenario_id}]
+scenarios        场景数组（无跨文件继承；world 语义并入各场景 initial_state）
 ```
 
-scenario 对象七要素：
+scenario 结构（fixture 契约 §Executable scenario structure）：
 
 ```text
 scenario_id / eval_ref / summary
-initial_state         process 三元组、work graph、contracts、artifacts、策略、usage、活跃 run、开放 gate/input
-input_events          按序输入事件（领域事件或 harness.fault_injection 故障注入）
-expected_transitions  process (phase,status,wait_reason) 迁移步骤；无迁移的窗口也显式断言
-required_outputs      必须出现的可观察产物（状态/事件/artifact/audit/usage/context 断言）
-forbidden_outcomes    一票否决结果
-safety_invariants     场景特定安全不变量（叠加第 6 节全局不变量）
-crash_and_recovery    故障注入点与恢复预期（无故障时为空数组）
-contract_assumptions  该场景依赖、但尚未冻结的语义决策（对应第 10 节 OPEN-Q 编号）
+initial_state       自包含规范化状态（见 §4）
+stimuli             输入事实序列（见 §5）
+expected_steps      与 stimuli 一一对应、按序（见 §6）
+required_outputs    场景级必达断言（引用稳定 ID / 幂等键）
+forbidden_outcomes  一票否决结果
+safety_invariants   场景附加不变量（叠加 §8 全局不变量）
+crash_and_recovery  故障注入点与恢复预期（无故障为空数组）
+```
+
+## 4. initial_state 规范化（自包含）
+
+每个场景的 `initial_state` 显式包含以下集合与标量；缺失集合由 loader 规范化为空，缺失标量无效（fixture 契约 §initial_state）：
+
+| 键 | 内容 |
+| --- | --- |
+| `process` | `process_ref`、`project_ref`、`phase/status/wait_reason`（契约枚举）、`process_version`（相对整数）、`last_event_sequence`（相对整数） |
+| `graph` | `nodes`（node_type ∈ work_node_type）、`relations`（relation_type ∈ work_relation_type）、`graph_snapshot_digest`（结构化操作数） |
+| `contracts` | 请求方/提供方团队、requested_capability、task_status ∈ team_task_status、input_manifest、output_contract、contract_version |
+| `artifacts` | `propagation` ∈ resource_propagation（`team_private` / `project_readonly` / `portable`）、version |
+| `verifications` | verification 记录（subject、checks、outcome PASS/FAIL） |
+| `integration` / `delivery` | IntegrationRun、DeliveryManifest（status ∈ delivery_status）；`completion_contract` |
+| `execution_policy` | 机器契约 `project_execution_policy_fields` 全部 11 字段，含 `version` |
+| `usage` | runs started/completed、tokens、cost、replans、generated tasks、active runs |
+| `runs` / `tool_jobs` | 自动 Run 必含 `initiated_by` 与 `executed_as`；`execution_state` ∈ fixture 内部词表 `running/queued/terminal/interrupted` |
+| `reservations` | reservation 状态 ∈ fixture 内部词表 `reserved/released/failed` |
+| `capabilities` | 能力与容量（供 ADR-0010 match/reserve 语义） |
+| `gates` / `input_requests` | status ∈ gate_status / input_request_status |
+| `pending_events` / `outbox` | 未消费 wakeup 与待投递 outbox 条目 |
+
+禁止跨文件隐式继承：任何场景不得引用其他 fixture 文件的内容。
+
+**结构化版本操作数**：版本/序列/摘要引用使用 `{"operand": ..., "ref"/"value": ...}` 结构，不允许 prose 字符串。本规格冻结三个操作数（fixture 内部词表）：
+
+```text
+{"operand": "initial_state"}                     场景初始值
+{"operand": "process_version_at_run_creation", "ref": "<run_ref>"}
+{"operand": "graph_digest_at_run_creation",    "ref": "<run_ref>"}
+{"operand": "literal", "value": "sha256:..."}  显式摘要
+```
+
+## 5. Stimulus（输入事实）与观察边界
+
+每个 stimulus：
+
+```text
+source_event_id   场景内稳定 ID
+event_type        ∈ 机器契约 domain_fact（fault 除外）
+origin            ∈ fixture_stimulus_origin：HUMAN / TEAM / AGENT_WORKER / TOOL_WORKER / TIMER / FIXTURE_FAULT
+subject_ref       事件主体
+idempotency_key   幂等键（稳定、可复放）
+payload           有界载荷（无 prompt/secret/raw tool arguments）
+```
+
+**观察边界**（fixture 契约 §Stimulus versus observation）。以下 Harness 生成结果只能出现在 `expected_steps` 的 emitted facts / created objects 中，禁止作为 stimulus 注入：
+
+- 迁移事实与 dispatch 成功：`project.work.dispatched`、`project.work.required_submitted`、`project.analysis.completed` 的迁移效应；
+- 验证结果：`team_task.verified`、`team_task.changes_requested`、`project.verification.completed`；
+- 交付就绪与完成：DeliveryManifest `READY`、`project.delivery.accepted` / `project.delivery.rejected` 的迁移效应、`project.completion.evaluated`；
+- Gate/Input 创建：`project.gate.opened`、`project.input.requested`、`project.budget.exhausted`；
+- 容量事实：`project.capability.matched`、`project.capacity.reserved`、`project.capacity.reservation_failed`（dispatch 流程的 Harness 输出）。
+
+**允许的 stimulus 词表**（origin → event_type）：
+
+| origin | event_type | 语义 |
+| --- | --- | --- |
+| HUMAN | `project.goal.confirmed` | 目标确认 |
+| HUMAN | `project.plan.approved` | 计划批准 |
+| HUMAN | `approval.decided` | Gate / 交付接受决定（decision ∈ budget_gate_decision / delivery_decision） |
+| HUMAN | `human.input.provided` | InputRequest 回答 |
+| HUMAN | `project.capacity.negotiation_resolved` | 容量协商由授权人解除 |
+| TEAM | `team_task.accepted` | 授权目标团队接受契约（ADR-0003 决策 5） |
+| TEAM | `team_task.rejected` | 授权目标团队拒绝契约 |
+| AGENT_WORKER | `project.analysis.started` | 分析 run 认领并开始 |
+| AGENT_WORKER | `agent_run.completed` | run 终止（planner 决策随 run 产出，由 Orchestrator 校验应用） |
+| AGENT_WORKER | `team_task.started` / `team_task.submitted` | 团队 agent 开始 / 提交 |
+| AGENT_WORKER | `risk.created` / `risk.resolved` | run 执行中的风险事实 |
+| TOOL_WORKER | `project.integration.completed` | IntegrationRun 执行完成（结构化 PASS/FAIL 由 IntegrationRun 记录，迁移判定仍属 Harness） |
+| FIXTURE_FAULT | `fixture.fault_injection` | 控制输入，非领域事件；`fault.kind` ∈ fixture_fault_kind |
+
+`project.verification.completed`、`team_task.verified`、`team_task.changes_requested`、`project.work.dispatched` 等 Harness 判定结果**永远不作为 stimulus**，只出现在 emitted facts。
+
+## 6. Expected steps
+
+**恰好一个 expected_step 对应一个 stimulus，按序**（fixture 契约 §Expected steps）。每 step：
+
+```text
+step_id                 场景内稳定 ID
+stimulus_ref            对应 stimulus 的 source_event_id
+expected_process        窗口结束三元组 {phase, status, wait_reason}
+process_version_change  0 或 1（每 step 至多一次迁移）
+event_sequence_change   == len(emitted_domain_facts)（每条权威 fact 恰好 +1 sequence）
+emitted_domain_facts    [{event_type, subject_ref, outcome?, transition_key?, transition?{from,to}}]
+active_operations       活跃 run/job/verification/integration 引用；expected_process.status == RUNNING 时必须非空
+created_or_updated      持久对象创建/更新（含稳定 ID 与幂等键）
+commands                Orchestrator command（type ∈ planner_command_type）及其稳定 command ID
+observations            引用稳定 ID 的机器断言（自然语言仅作说明）
 ```
 
 约定：
 
-- 所有 `*_ref` 是 fixture 内部语义引用，不是数据库 ID；
-- `process_version_change` 只用 `"+1"` / `"0"`（相对断言，不用绝对值）；
-- `input_events` 中 `event_type` 为 `harness.fault_injection` 的是**评测器注入指令**（不是领域事件），执行器据此在指定时机注入故障，`fault.kind` 词表见第 7 节；
-- `expected_transitions` 中 `from == to` 的步骤表示"此窗口内状态必须不变"的负断言；
-- 数值（token、金额、容量）均为示意值，只用于相对比较。
+- `event_sequence_change == len(emitted_domain_facts)` 由测试强制（version_policy.domain_fact_advances_event_sequence）；
+- `process_version_change == len(facts with transition)` 由测试强制（only_transition_advances_process_version）；
+- 迁移链连通性：每条 transition 的 `from` 必须等于前窗末三元组（即 fact 消费时刻的实际三元组），`to` 必须等于本窗 expected_process。允许 `from == to` 的**再入迁移**（re-entrant transition）：fact 在 RUNNING 状态被消费、窗口内部经历 READY 间隙后回到 RUNNING（如 run terminal 后同轮 dispatch），间隙作为 note 说明，不锁定主链 key；
+- transition 的 `transition_key` 仅在主链迁移表冻结 key 时填写（`goal.confirmed`、`analysis.started`、`analysis.completed`、`plan.approved`、`work.dispatched`、`all_required_work_submitted`、`verification.failed`、`verification.passed`、`integration.passed`、`delivery.accepted`、`delivery.rejected`）；其余迁移（进入 WAITING/BLOCKED、sleep/wake、gate/input/budget/capacity）不锁定 key（内部矩阵 selector，非公共契约）；
+- “恰好一次”断言必须落在稳定 ID / 幂等键上：run ref、command id、reservation id、manifest id、input request id、negotiation id、usage 计数器、wakeup 去重键 `(process_ref, source_event_id)`；
+- 无迁移窗口使用显式不变三元组（from == to 的负断言语义）。
 
-## 5. 领域语义约定
+## 7. 身份与状态规则（fixture 契约 §Identity and state rules）
 
-### 5.1 共享世界（world）
+- Planner / analysis / planning / verification / replanning run：`initiated_by = service:project-orchestrator`、`executed_as = service:project-orchestrator`（execution_identity.planner_executed_as）；
+- 任务执行 run：`initiated_by = service:project-orchestrator`、`executed_as = team-agent:<team-id>`；
+- 所有自动 run 双身份必填；`initiated_by` 是 provenance 不是授权（ADR-0007）；
+- `RUNNING` ⟹ `active_operations` 非空（测试强制）；排队/仅恢复中的 run 不支撑 RUNNING（ADR-0005 决策 3）；
+- 契约接受、容量预留、readiness 是相互独立的事实（ADR-0010 决策 7）；
+- rework：`team_task.changes_requested` 将任务回到 `in_progress`；确定性任务返工不计 replan；图/范围变更计 replan（rework_policy）；
+- Planner stale guard 输入：process version、last_event_sequence、graph digest（version_policy.planner_stale_inputs）。
 
-所有场景共享同一演示项目，便于执行器复用与对比：
+## 8. 全局安全不变量（每场景默认生效）
 
-- 项目 `project-harness-demo`，根目标 `goal-1`（交付带后端 API 与前端界面的演示应用）；
-- 团队：`team-backend`（能力 `backend-api`）、`team-frontend`（能力 `frontend-ui`）；
-- 任务：`task-backend-api`（实现认证 API，输出 OpenAPI artifact `resource-api-spec`）、
-  `task-frontend-ui`（实现前端界面，输出 `resource-ui-build`），后者 `depends_on` 前者；
-- 人类：`user-project-owner`（项目负责人，同时是 goal 确认 / plan 批准 / delivery 接受者）；
-- 服务主体：`service:project-orchestrator`；团队执行主体：`team-agent:team-backend`、`team-agent:team-frontend`（计划 9.4 的 principal 书写格式）；
-- 资源可见性语义枚举（待冻结，OPEN-Q10）：`team_private` / `project_shared` / `project_readonly`。
+- **G-INV-01 唯一迁移入口**：一切三元组变化经迁移矩阵；Planner command 不得指定 phase/status。
+- **G-INV-02 版本原子性**：一次迁移恰好 +1 version +1 权威事件；同 expected_version 竞争只有一个赢家。
+- **G-INV-03 Terminal 不可变**：TERMINAL 后不回到非 terminal。
+- **G-INV-04 事务一致性**：推进 process 的业务变更与权威事件同一原子提交或经 Transactional Outbox（ADR-0008）。
+- **G-INV-05 幂等收敛**：重复事件/命令/投递按 event_id、(process, sequence)、command_id、request_digest、wakeup 键收敛；副作用与 usage 恰好一次。
+- **G-INV-06 双身份**：自动 run 记录不可变 initiated_by/executed_as；不冒用真实用户；恢复不重写执行者。
+- **G-INV-07 团队隔离**：team_private 内容不进入其他 team context/输出/audit；跨团队需显式 grant；契约不得引用不可访问 artifact。
+- **G-INV-08 Context 数据非指令**：资源正文仅是数据；agent 工具面无 process 状态写。
+- **G-INV-09 预算与并发**：dispatch 前固定顺序（项目预算 → 团队并发 → run 预算）；触顶 → WAITING/HUMAN_APPROVAL + 持久 Gate；Planner 不能提预算；无自动重试循环。
+- **G-INV-10 能力与容量**：唯一能力事实源（ADR-0010）；容量耗尽不 dispatch，process 为 WAITING/SCHEDULE。
+- **G-INV-11 Planner stale guard**：三输入（version/sequence/digest）任一不匹配 → 整体拒绝零命令应用 + `project.orchestrator.decision_stale`；intent 确定性派生（ADR-0004 决策 8）。
+- **G-INV-12 完成判定**：仅成功 evaluator 经 `delivery.accepted` 到 TERMINAL/COMPLETED；无接受交付不得完成（ADR-0011）。
+- **G-INV-13 Payload 卫生**：fact/audit 载荷无 prompt、secret、raw tool arguments。
+- **G-INV-14 恢复语义**：checkpoint/lease+fencing/outbox 恢复；旧 fencing 写入被拒；恢复另记事件不改身份。
 
-### 5.2 ProjectProcess 状态使用约定（fixture 侧，待主线程确认）
+## 9. BLOCKED wait reason 选择约定
 
-ADR-0005 冻结了主链迁移与三元组约束（`WAITING`/`BLOCKED` 必须有非 `NONE` 的 wait reason；`READY`/`RUNNING`/terminal 必须 `NONE`）。在此之上，fixture 采用以下细化约定（均为 OPEN-Q3 / OPEN-Q4）：
+ADR-0005 冻结了语义（契约接受等待 → TEAM_RESPONSE；图前置未满足 → DEPENDENCY；等返工 → VERIFICATION；容量/调度延迟 → WAITING/SCHEDULE）。当多个条件并存时，fixture 采用固定优先级 **TEAM_RESPONSE > DEPENDENCY > VERIFICATION**（仍有未决契约时以契约为准）。这是 fixture 断言约定，不改变 ADR 语义；若 B6 实现矩阵采取不同优先级，仅需同步更新对应场景的期望三元组。
 
-1. `EXECUTION/RUNNING`：本 process 至少有一个活跃 AgentRun 或 ToolJob；
-2. `EXECUTION/READY`：计划已批准、存在可调度工作、但当前无活跃 run（轮次间隙）；
-3. `EXECUTION/BLOCKED/TEAM_RESPONSE`：存在未完成工作但全部处于 `proposed` 待接受；
-4. `EXECUTION/BLOCKED/DEPENDENCY`：存在已接受工作但依赖未满足且无其他可调度工作；
-5. `EXECUTION/WAITING/HUMAN_INPUT`：存在 OPEN 的 input request；
-6. `EXECUTION/WAITING/HUMAN_APPROVAL`：存在 OPEN 的 gate（预算、审批）；
-7. `EXECUTION/WAITING/SCHEDULE`：工作其余条件满足但容量/调度资源未就绪；
-8. 崩溃窗口内 process 三元组保持崩溃前取值不变，恢复由事件驱动重新推进。
+## 10. 主链尾部统一模式
 
-### 5.3 事件分层约定
-
-- **领域事件（input_events 主用）**：采用计划 8.2 wakeup 源命名风格（`team_task.accepted`、`team_task.verified`、`human.input.provided`、`approval.decided`、`risk.created` 等），是业务侧发生的事实；
-- **过程迁移事件（expected_transitions.transition_event_type）**：采用 ADR-0005 主链命名（`goal.confirmed`、`analysis.started`、`plan.approved`、`work.dispatched`、`all_required_work_submitted`、`verification.failed`、`verification.passed`、`integration.passed`、`delivery.accepted`、`delivery.rejected`）；
-- 两层命名在前缀上的差异（`project.goal.confirmed` vs `goal.confirmed` 等）是**未冻结契约**，见 OPEN-Q1 / OPEN-Q2；
-- fixture 中少量事件名在两层清单中均未出现（如 `team_task.changes_requested`、`contract.manifest_revised`、`capacity.negotiation.*`），以语义占位并在场景 `contract_assumptions` 中标注对应 OPEN-Q。
-
-### 5.4 计数器约定
-
-- `process.version`：仅被**接受的 process 迁移**递增（ADR-0005 第 6 条）；
-- 事件流水：每次业务事实（含未改变三元组的 wakeup 源事件）追加权威 process event，`last_event_sequence` 递增；
-- Planner stale guard 同时检查 `based_on_process_version` 与 `graph_snapshot_digest`：业务事件不改 version 时由 digest 捕捉并发变化（OPEN-Q11）。
-
-## 6. 全局安全不变量（适用于所有场景）
-
-以下不变量来自计划 32.5 与 ADR-0005/0006/0007/0008 的 "Enforced invariants"，在每个场景中默认生效；fixture 的 `safety_invariants` 只列场景**追加**项。
-
-- **G-INV-01 唯一迁移入口**：所有 phase/status/wait_reason 变更必须经统一迁移矩阵；任何 route/service/orchestrator/recovery/admin 路径不得直接赋值三元组；Planner command 不得指定任意 phase/status。
-- **G-INV-02 版本原子性**：每个接受的迁移恰好 +1 version 并在同一次提交中追加一条权威事件；同一 expected_version 的两个竞争迁移只有一个成功。
-- **G-INV-03 Terminal 不可变**：`TERMINAL` 之后不得回到非 terminal；特权恢复迁移（若存在）必须显式 reason + Audit。
-- **G-INV-04 事务一致性**：推进 process 的业务变更与权威事件必须同一原子提交，或经 Transactional Outbox 由持久投递器重放；禁止业务成功后 best-effort 补发。
-- **G-INV-05 幂等收敛**：重复事件 / 重复命令 / 重复投递按 event_id、(process_id, sequence)、command_id、request_digest 收敛；副作用与 usage 恰好计一次。
-- **G-INV-06 双身份**：自动执行记录不可变的 `initiated_by` 与 `executed_as`；自动 run 不得以真实用户为执行主体；retry/replay/recovery 身份不变；Audit 能区分"人发起 / Harness 派发 / Team Agent 执行 / 人批准"。
-- **G-INV-07 团队隔离**：team private 内容不得进入其他 team 的 context、输出或 audit payload；跨团队访问需要显式 grant；contract 不得引用不可访问 artifact。
-- **G-INV-08 Context 数据非指令**：项目资源内容一律作为数据处理；Agent 工具面不包含直接写 process 状态的能力。
-- **G-INV-09 预算与并发**：dispatch 前固定顺序（项目预算 → 团队并发 → run 预算派生 → dispatch）；预算触顶 → `WAITING/HUMAN_APPROVAL` + 持久 Gate；Planner command 不能提高项目预算；禁止自动重试循环。
-- **G-INV-10 能力与容量**：dispatch 前必须经能力目录 match + capacity reserve 成功；不创建平行的能力注册表。
-- **G-INV-11 Planner stale guard**：决策绑定 process version / event sequence / graph digest；过期决策零命令应用并触发重新规划；同一 (process_version, orchestration_reason, digest) 映射确定性 planner intent，崩溃不产生并行 Planner Run。
-- **G-INV-12 完成判定**：`COMPLETED` 只能由 Harness 依据 Completion Contract 判定；`required_delivery_accepted` 未满足时不得完成；LLM 不得直接设置完成。
-- **G-INV-13 Payload 卫生**：process event payload 不含模型 prompt、secret、raw tool arguments；audit 保留身份与摘要、脱敏正文。
-- **G-INV-14 恢复语义**：崩溃后经 checkpoint / lease+fencing / outbox 恢复；旧 fencing token 的写入被拒绝；恢复另记 recovery 事件，不重写领域执行者身份。
-
-## 7. 故障注入词表（crash_and_recovery 语义）
-
-`harness.fault_injection` 的 `fault.kind` 词表（B6 执行器按此实现；词表本身为 OPEN-Q13）：
-
-| fault.kind | 注入点语义 |
-| --- | --- |
-| `agent_worker_crash` | AgentRun worker 进程崩溃；`timing` 说明相对 checkpoint / terminal 写入的位置 |
-| `orchestrator_worker_crash` | Orchestrator worker 在 command 应用 / 事件发布前后崩溃 |
-| `publisher_crash_after_commit_before_publish` | 业务事务已提交、outbox 条目 PENDING、投递器崩溃 |
-| `outbox_replay` | 恢复后对同一 outbox 条目重放 N 次（at-least-once 验证） |
-| `stale_worker_resume_attempt` | 持过期 lease/fencing token 的旧 worker 尝试继续写 |
-| `control_plane_restart` | 进程级重启；内存态全部丢失，仅持久态可依赖 |
-
-恢复判定统一要求（每个含故障场景的 `crash_and_recovery` 共同语义）：
-
-1. 故障不产生非法迁移、不产生新领域事件；
-2. 恢复后状态收敛到与"未注入故障"的同一轨迹（除恢复本身的事件）；
-3. 所有副作用与 usage 计数恰好一次（G-INV-05）；
-4. 身份与 provenance 在恢复前后不变（G-INV-06、G-INV-14）。
-
-## 8. 评测协议（执行器视角）
-
-1. 执行器加载 fixture，按 `initial_state` 构造领域世界（可注入 fake 实现：Fake Planner、fake capability directory、fake 时钟）；
-2. 按 `input_events` 顺序投递领域事件；遇 `harness.fault_injection` 按第 7 节注入；
-3. 每个事件后对照 `expected_transitions` 断言三元组、version 相对变化与 transition 事件；
-4. 场景结束时校验 `required_outputs` 全部成立、`forbidden_outcomes` 全部未发生、全局不变量（第 6 节）未违反；
-5. 所有断言基于公共持久状态与审计投影，不读取会话正文、prompt 或模型私有输出。
-
-评测必须完全离线：不依赖真实 LLM、网络、OAuth 或 `.env`；Planner 一律以 Fake Planner（脚本化 `coifesp.orchestration-decision.v1` 输出）替代。
-
-## 9. 与 Recovery E2E（32.6）的组合
-
-32.6 的完整故障长链可由场景片段按序拼接：
+所有以交付接受收尾的场景使用同一观察模式（减少 fixture 重复并保持一致）：
 
 ```text
-Eval 1 e01–e07（create→dispatch）
-→ Eval 5（Agent worker crash→recover）
-→ Eval 4（submit→verification fail→返工）
-→ Eval 1 e13–e17（revise→submit→verify→integration）
-→ Eval 14 e08（human approve/delivery accept→complete）
+[agent_run.completed(最后任务 run)]
+  → emitted: agent_run.completed + team_task.verified + project.work.required_submitted
+  → VERIFICATION/READY，创建 verification run（queued）
+[agent_run.completed(verification run, executed_as=service:project-orchestrator)]
+  → emitted: agent_run.completed + project.verification.completed{outcome PASS}
+  → INTEGRATION/READY，创建 IntegrationRun
+[TOOL_WORKER project.integration.completed{outcome PASS}]
+  → DELIVERY/READY，DeliveryManifest ASSEMBLING→READY（Harness 输出）
+[HUMAN approval.decided{decision ACCEPT, 授权角色}]
+  → emitted: approval.decided + project.delivery.accepted + project.completion.evaluated
+  → TERMINAL/COMPLETED
 ```
 
-Tool worker crash 片段未单独设 Eval，可在执行器层把 Eval 5 的 `agent_worker_crash` 换成 durable tool job 崩溃复用同一断言骨架（属于 B6 实现细节）。
+项目级验证确定性聚合（deterministic）通过 verification run 承载；IntegrationRun 执行由 tool worker 完成，其完成事实（含结构化结果）是 TOOL_WORKER 输入，迁移判定与 manifest READY 属 Harness 输出。
 
-## 10. 未冻结契约问题清单（需主线程裁定）
+## 11. 验证与测试
 
-Fixture 刻意只使用专家计划 / ADR 文本中已出现的语义名称。以下是设计过程中暴露、需要主线程冻结后回填 fixture 的决策点：
+`tests/test_project_harness_evaluation_fixtures.py`（完全离线、无 LLM/网络/Docker/OAuth/.env）提供：
 
-- **OPEN-Q1 事件命名前缀不一致**：计划 4.4 主链用 `goal.confirmed` / `plan.approved` / `verification.passed`，计划 8.2 wakeup 源用 `project.goal.confirmed` / `project.plan.approved` / `verification.completed`。fixture 按 5.3 两层约定使用；需主线程发布统一事件表。
-- **OPEN-Q2 analysis 阶段事件**：`analysis.started` / `analysis.completed` 在主链中存在，但不在 8.2 wakeup 源清单。fixture 假设它们唤醒 orchestrator。
-- **OPEN-Q3 RUNNING 与 WAITING 的边界**：等待活跃 AgentRun / ToolJob 完成时 process 是 `EXECUTION/RUNNING` 还是 `EXECUTION/WAITING/AGENT_RUN`？fixture 采用第 5.2 节约定（有活跃 run 即 RUNNING）。
-- **OPEN-Q4 BLOCKED 的 wait_reason 选择**：等团队接受 contract 用 `TEAM_RESPONSE`、依赖未满足用 `DEPENDENCY`、容量未就绪用 `SCHEDULE`，为 fixture 约定，需冻结确认（尤其容量等待是否用 `SCHEDULE`）。
-- **OPEN-Q5 task 级验证失败事件**：fixture 用 `verification.failed`（payload 引用 `coifesp.verification-result.v1`，`passed=false`）；`team_task.changes_requested` 领域事件名未在 8.2 清单出现，为语义占位。
-- **OPEN-Q6 reopen 语义**：`changes_requested` 后 task 回到哪个状态（fixture 表述为"可由同一团队再次执行/提交"，不新增枚举值）；"确定性 reopen 不计入 replan 计数"是否成立。
-- **OPEN-Q7 delivery 拒绝事件与 acceptor**：`delivery.rejected` 的领域事件形式、payload（拒绝原因）与 acceptor 角色（人工 gate / `required_human_approvers`）未定义；fixture 用语义占位。
-- **OPEN-Q8 Gate decision 取值**：预算 Gate 的决定值（fixture 用 `increase_budget` / `scope_reduction` / `terminate`）与 policy 版本升级规则未冻结。
-- **OPEN-Q9 InputRequest 回答事件**：`human.input.provided` 在 8.2 清单中存在；request→ANSWERED 的字段语义（answered_by/answered_at）取自计划 4.6 文本，需随 Gate/InputRequest 契约一并冻结。
-- **OPEN-Q10 资源可见性枚举**：fixture 用 `team_private` / `project_shared` / `project_readonly`（由计划 10.2 / 12.2 / 28.1 的语义归纳），完整枚举需冻结。
-- **OPEN-Q11 process.version 与 stale guard**：业务事件是否递增 process.version？fixture 约定仅迁移递增、并发变化由 graph digest 捕捉；若主线程决定业务事件也递增 version，fixture 的 stale 断言同样成立（两条件为 OR），但需明确。
-- **OPEN-Q12 planner intent 去重键**：`(process_version, orchestration_reason, graph_snapshot_digest) → planner_intent_id` 来自计划 7.4/27.6；`orchestration_reason` 的取值域未定义。
-- **OPEN-Q13 故障注入词表**：第 7 节 `fault.kind` / `timing` 为 B2 提议，需 B6 执行器与主线程评审冻结。
-- **OPEN-Q14 容量协商事件**：`capacity.negotiation.*` 为语义占位；现有 Capability/Negotiation 领域的真实事件名以主线程冻结为准（fixture 只断言"协商请求恰好创建一次"与"未决前不 dispatch"）。
+1. **加载**：8 个 JSON 可解析、无重复键；
+2. **覆盖**：Eval 1–14 恰好完整、scenario 与 eval_coverage 一致；
+3. **结构**：七要素齐全；stimuli 与 expected_steps 一一对应且按序；
+4. **契约符合**：event_type/origin/枚举/策略字段全部来自机器契约；transition key 仅来自主链表；
+5. **一致性**：`event_sequence_change == len(emitted facts)`；`process_version_change == len(迁移 facts)`；RUNNING ⟹ active_operations 非空；
+6. **身份**：planner/analysis/planning/verification run `executed_as=service:project-orchestrator`；任务 run `team-agent:` 前缀；自动 run 双身份；
+7. **引用**：所有 `*_ref` 可解析；无跨文件继承（initial_state 必需集合齐全）；
+8. **负向**：对每类违规（未知事件、未知枚举、缺 step、身份矛盾、状态矛盾、seq 等式破坏、policy 缺字段、未知 Gate decision、未知 origin、跨文件继承）以变异 fixture 断言 validator 拒绝。
 
-## 11. 校验与验收
+运行：
 
-- 全部 8 个 fixture 通过 JSON 解析（UTF-8、无重复键、无注释）；
-- 每个 scenario 七要素齐全（`crash_and_recovery` 允许为空数组，其余必非空）；
-- 覆盖矩阵（第 3 节）与各文件 `eval_coverage` 一致，Eval 1–14 无遗漏；
-- 不含：数据库表/列名、Python 类名、API 路径、UUID、绝对本机路径、真实凭据、`.env` 引用。
-
-校验方式：`python -c "import json,glob;[json.load(open(p,encoding='utf-8')) for p in glob.glob('tests/fixtures/project_harness/*.json')]"`（或等价脚本）。
+```powershell
+python -m pytest tests/test_project_harness_evaluation_fixtures.py -q
+python -m pytest tests/test_project_harness_architecture_contract.py -q   # 相关既有契约测试
+```

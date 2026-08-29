@@ -1,447 +1,1410 @@
 {
-  "fixture_schema": "project-harness-fixture.v1",
+  "fixture_schema": "project-harness-fixture.v2",
   "fixture_id": "budget_exhaustion",
-  "title": "项目预算触顶与能力容量耗尽",
-  "description": "覆盖 Eval 7（Planner/Team Agent 达到 token/cost 预算 → 人工预算 Gate）与 Eval 11（capability 存在但 capacity=0 → 不得 dispatch → 协商）。世界设定见 simple_project.json 的 world。",
+  "title": "Project budget exhaustion gate and capability capacity exhaustion",
+  "description": "Eval 7 (token budget reached -> durable human budget gate) and Eval 11 (capacity=0 -> no dispatch -> WAITING/SCHEDULE + negotiation).",
+  "contract_refs": {
+    "machine_contract": "docs/adr/project-harness-contract-v1.json",
+    "event_catalog": "docs/adr/project-process-event-catalog-v1.md",
+    "fixture_contract": "docs/adr/project-harness-fixture-contract-v1.md"
+  },
   "eval_coverage": [
-    { "eval_id": "Eval 7", "scenario_id": "eval-07-project-budget-exhaustion-gate" },
-    { "eval_id": "Eval 11", "scenario_id": "eval-11-capability-capacity-exhaustion" }
-  ],
-  "source_refs": {
-    "plan": "docs/plan/iteration/Team-Cooperation_Multi-Agent_Harness_Execution_Plan_v1.1_Audited.md#33-evaluation",
-    "spec": "docs/evaluation/project-harness-evaluation-spec.md"
-  },
-  "global_invariants": "docs/evaluation/project-harness-evaluation-spec.md 第 6 节 G-INV-01..G-INV-14 对所有场景生效",
-  "world": {
-    "project_ref": "project-harness-demo",
-    "goal": { "goal_ref": "goal-1", "title": "交付带后端 API 与前端界面的演示应用", "confirmed": true },
-    "teams": [
-      { "team_ref": "team-backend", "display_name": "后端团队" },
-      { "team_ref": "team-frontend", "display_name": "前端团队" }
-    ],
-    "capabilities": [
-      { "capability_ref": "backend-api", "team_ref": "team-backend", "capacity": 2 },
-      { "capability_ref": "frontend-ui", "team_ref": "team-frontend", "capacity": 2 }
-    ],
-    "principals": {
-      "human_owner": "human:user-project-owner",
-      "orchestrator": "service:project-orchestrator",
-      "team_agent_backend": "team-agent:team-backend",
-      "team_agent_frontend": "team-agent:team-frontend"
+    {
+      "eval_id": "Eval 7",
+      "scenario_id": "eval-07-project-budget-exhaustion-gate"
+    },
+    {
+      "eval_id": "Eval 11",
+      "scenario_id": "eval-11-capability-capacity-exhaustion"
     }
-  },
+  ],
   "scenarios": [
     {
       "scenario_id": "eval-07-project-budget-exhaustion-gate",
       "eval_ref": "Eval 7",
-      "summary": "max_total_tokens 极小的项目：backend run terminal 入账后 usage 逼近上限，orchestrator 在 dispatch frontend 前的项目预算检查失败 → WAITING/HUMAN_APPROVAL + 持久预算 Gate；重启后 Gate 仍在；人类批准提高预算（policy v2）后恢复执行。",
+      "summary": "After the backend run settles its usage the project token budget is nearly exhausted; the pre-dispatch project budget check fails, the process enters WAITING/HUMAN_APPROVAL with a durable gate, survives a control-plane restart, and resumes only after INCREASE_BUDGET.",
       "initial_state": {
         "process": {
           "process_ref": "process-demo-1",
+          "project_ref": "project-harness-demo",
           "phase": "EXECUTION",
           "status": "RUNNING",
-          "wait_reason": "NONE"
+          "wait_reason": "NONE",
+          "process_version": 8,
+          "last_event_sequence": 13
         },
-        "process_version": "plan 批准后（相对值）",
-        "work_graph": {
+        "graph": {
           "nodes": [
-            { "node_ref": "task-backend-api", "node_type": "task", "team_ref": "team-backend", "task_status": "in_progress" },
-            { "node_ref": "task-frontend-ui", "node_type": "task", "team_ref": "team-frontend", "task_status": "accepted" }
+            {
+              "node_ref": "node-goal-1",
+              "node_type": "goal",
+              "subject_ref": "goal-1"
+            },
+            {
+              "node_ref": "node-task-backend-api",
+              "node_type": "task",
+              "subject_ref": "task-backend-api",
+              "team_ref": "team-backend",
+              "task_status": "in_progress"
+            },
+            {
+              "node_ref": "node-task-frontend-ui",
+              "node_type": "task",
+              "subject_ref": "task-frontend-ui",
+              "team_ref": "team-frontend",
+              "task_status": "accepted"
+            }
           ],
           "relations": [
-            { "relation_ref": "rel-dep-1", "relation_type": "depends_on", "source": "task-frontend-ui", "target": "task-backend-api" }
-          ]
+            {
+              "relation_ref": "rel-dep-1",
+              "relation_type": "depends_on",
+              "source": "task-frontend-ui",
+              "target": "task-backend-api"
+            }
+          ],
+          "graph_snapshot_digest": {
+            "operand": "literal",
+            "value": "sha256:d7-exec"
+          }
+        },
+        "contracts": [
+          {
+            "contract_ref": "contract-backend-1",
+            "task_ref": "task-backend-api",
+            "requester_team_ref": "team-frontend",
+            "provider_team_ref": "team-backend",
+            "requested_capability": "backend-api",
+            "task_status": "in_progress",
+            "contract_version": 1,
+            "input_manifest": {
+              "resources": []
+            },
+            "output_contract": {
+              "artifact_types": [
+                "application/openapi+yaml"
+              ],
+              "required": true
+            }
+          },
+          {
+            "contract_ref": "contract-frontend-1",
+            "task_ref": "task-frontend-ui",
+            "requester_team_ref": "team-backend",
+            "provider_team_ref": "team-frontend",
+            "requested_capability": "frontend-ui",
+            "task_status": "accepted",
+            "contract_version": 1,
+            "input_manifest": {
+              "work_nodes": [
+                "task-backend-api"
+              ]
+            },
+            "output_contract": {
+              "artifact_types": [
+                "application/zip"
+              ],
+              "required": true
+            }
+          }
+        ],
+        "artifacts": [],
+        "verifications": [],
+        "integration": null,
+        "delivery": null,
+        "completion_contract": {
+          "contract_ref": "completion-contract-1",
+          "required_delivery_accepted": true
         },
         "execution_policy": {
           "policy_ref": "policy-tight",
-          "policy_version": 1,
           "max_agent_runs": 10,
           "max_total_tokens": 100000,
           "max_model_cost_microusd": 500000,
           "max_replans": 3,
+          "max_generated_tasks": 20,
           "max_active_agent_runs": 2,
-          "max_active_runs_per_team": 1
+          "max_active_runs_per_team": 1,
+          "max_specialist_depth": 2,
+          "max_specialist_runs_per_task": 2,
+          "deadline_at": null,
+          "version": 1
         },
-        "execution_usage": {
+        "usage": {
+          "usage_ref": "usage-demo-1",
           "agent_runs_started": 1,
           "agent_runs_completed": 0,
           "total_tokens": 60000,
           "model_cost_microusd": 300000,
-          "replan_count": 0
+          "replan_count": 0,
+          "generated_task_count": 2,
+          "active_agent_runs": 1
         },
-        "active_runs": [
+        "runs": [
           {
             "run_ref": "run-backend-1",
             "run_kind": "task_execution",
-            "team_ref": "team-backend",
             "task_ref": "task-backend-api",
+            "team_ref": "team-backend",
             "initiated_by": "service:project-orchestrator",
-            "executed_as": "team-agent:team-backend"
+            "executed_as": "team-agent:team-backend",
+            "execution_state": "running"
           }
         ],
-        "open_gates": [],
-        "open_input_requests": []
-      },
-      "input_events": [
-        {
-          "event_ref": "e01",
-          "event_type": "team_task.verified",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "payload": {
+        "tool_jobs": [],
+        "reservations": [
+          {
+            "reservation_ref": "reservation-backend-1",
+            "capability_ref": "backend-api",
+            "team_ref": "team-backend",
             "task_ref": "task-backend-api",
-            "passed": true,
-            "run_terminal_usage": { "run_ref": "run-backend-1", "tokens": 38000, "model_cost_microusd": 190000 }
+            "state": "reserved"
           },
-          "note": "backend run terminal，usage 入账一次：total_tokens=98000 / max 100000；wakeup 触发 orchestration 尝试 dispatch frontend"
-        },
+          {
+            "reservation_ref": "reservation-frontend-1",
+            "capability_ref": "frontend-ui",
+            "team_ref": "team-frontend",
+            "task_ref": "task-frontend-ui",
+            "state": "reserved"
+          }
+        ],
+        "capabilities": [
+          {
+            "capability_ref": "backend-api",
+            "team_ref": "team-backend",
+            "capacity": 2
+          },
+          {
+            "capability_ref": "frontend-ui",
+            "team_ref": "team-frontend",
+            "capacity": 2
+          }
+        ],
+        "gates": [],
+        "input_requests": [],
+        "pending_events": [],
+        "outbox": []
+      },
+      "stimuli": [
         {
-          "event_ref": "e02",
-          "event_type": "harness.fault_injection",
-          "fault": { "kind": "control_plane_restart" },
-          "note": "在 WAITING/HUMAN_APPROVAL 状态下注入进程重启，验证 Gate 与 WAITING 均为持久状态"
-        },
-        {
-          "event_ref": "e03",
-          "event_type": "approval.decided",
-          "actor": { "initiated_by": "human:user-project-owner" },
+          "source_event_id": "s01",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-backend-1",
+          "idempotency_key": "idem:run-backend-1:terminal",
           "payload": {
-            "gate_ref": "gate-budget-1",
-            "decision": "increase_budget",
-            "new_execution_policy": { "policy_ref": "policy-tight", "policy_version": 2, "max_total_tokens": 200000, "max_model_cost_microusd": 1000000 }
-          },
-          "note": "人类选择“提高预算”；其余选项（缩小范围 / 终止项目）作为 Gate 可选决定（OPEN-Q8）"
+            "outcome": "PASS",
+            "usage": {
+              "tokens": 38000,
+              "model_cost_microusd": 190000
+            }
+          }
         },
         {
-          "event_ref": "e04",
-          "event_type": "work.dispatched",
-          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-frontend" },
-          "payload": { "task_ref": "task-frontend-ui", "run_ref": "run-frontend-1" },
-          "note": "policy v2 生效后预算检查通过，恢复 dispatch"
+          "source_event_id": "s02",
+          "event_type": "fixture.fault_injection",
+          "origin": "FIXTURE_FAULT",
+          "subject_ref": "process-demo-1",
+          "idempotency_key": "fault:s02:restart",
+          "payload": {
+            "fault": {
+              "kind": "control_plane_restart",
+              "timing": "while WAITING/HUMAN_APPROVAL with gate-budget-1 open"
+            }
+          }
         },
         {
-          "event_ref": "e05",
+          "source_event_id": "s03",
+          "event_type": "approval.decided",
+          "origin": "HUMAN",
+          "subject_ref": "gate-budget-1",
+          "idempotency_key": "idem:gate-budget-1:decide",
+          "payload": {
+            "decision": "INCREASE_BUDGET",
+            "decided_by": "human:user-project-owner",
+            "role": "budget_approver",
+            "expected_gate_version": 1,
+            "expected_process_version": 9,
+            "new_execution_policy": {
+              "policy_ref": "policy-tight",
+              "max_total_tokens": 200000,
+              "max_model_cost_microusd": 1000000,
+              "version": 2
+            }
+          }
+        },
+        {
+          "source_event_id": "s04",
           "event_type": "team_task.started",
-          "actor": { "initiated_by": "team-agent:team-frontend" },
-          "payload": { "task_ref": "task-frontend-ui", "task_status": "in_progress" }
+          "origin": "AGENT_WORKER",
+          "subject_ref": "task-frontend-ui",
+          "idempotency_key": "idem:task-frontend-ui:start",
+          "payload": {
+            "run_ref": "run-frontend-1"
+          }
         },
         {
-          "event_ref": "e06",
+          "source_event_id": "s05",
           "event_type": "team_task.submitted",
-          "actor": { "initiated_by": "team-agent:team-frontend" },
-          "payload": { "task_ref": "task-frontend-ui", "artifact_refs": ["resource-ui-build"] }
+          "origin": "AGENT_WORKER",
+          "subject_ref": "task-frontend-ui",
+          "idempotency_key": "idem:task-frontend-ui:submit:v1",
+          "payload": {
+            "artifact_refs": [
+              "resource-ui-build"
+            ],
+            "artifact_version": 1
+          }
         },
         {
-          "event_ref": "e07",
-          "event_type": "team_task.verified",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "payload": { "task_ref": "task-frontend-ui", "passed": true }
+          "source_event_id": "s06",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-frontend-1",
+          "idempotency_key": "idem:run-frontend-1:terminal",
+          "payload": {
+            "outcome": "PASS",
+            "usage": {
+              "tokens": 35000,
+              "model_cost_microusd": 17000
+            }
+          }
         },
         {
-          "event_ref": "e08",
-          "event_type": "all_required_work_submitted",
-          "actor": { "initiated_by": "service:project-orchestrator" }
+          "source_event_id": "s07",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-verification-1",
+          "idempotency_key": "idem:run-verification-1:terminal",
+          "payload": {
+            "outcome": "PASS"
+          }
         },
         {
-          "event_ref": "e09",
-          "event_type": "verification.passed",
-          "actor": { "initiated_by": "service:project-orchestrator" }
+          "source_event_id": "s08",
+          "event_type": "project.integration.completed",
+          "origin": "TOOL_WORKER",
+          "subject_ref": "integration-1",
+          "idempotency_key": "idem:integration-1:complete",
+          "payload": {
+            "outcome": "PASS"
+          }
         },
         {
-          "event_ref": "e10",
-          "event_type": "integration.passed",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "payload": { "integration_ref": "integration-1" }
-        },
-        {
-          "event_ref": "e11",
-          "event_type": "delivery.accepted",
-          "actor": { "initiated_by": "human:user-project-owner" },
-          "payload": { "delivery_ref": "delivery-1" }
+          "source_event_id": "s09",
+          "event_type": "approval.decided",
+          "origin": "HUMAN",
+          "subject_ref": "delivery-1",
+          "idempotency_key": "idem:delivery-1:accept",
+          "payload": {
+            "decision": "ACCEPT",
+            "decided_by": "human:user-project-owner",
+            "role": "delivery_acceptor"
+          }
         }
       ],
-      "expected_transitions": [
+      "expected_steps": [
         {
-          "step_ref": "t01",
-          "trigger_event_ref": "e01",
-          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "to": { "phase": "EXECUTION", "status": "WAITING", "wait_reason": "HUMAN_APPROVAL" },
-          "process_version_change": "+1",
-          "transition_event_type": "budget_exhausted",
-          "note": "dispatch 前项目预算检查失败 → 打开预算 Gate；不自动重试（迁移事件名为语义占位）"
+          "step_id": "t01",
+          "stimulus_ref": "s01",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "WAITING",
+            "wait_reason": "HUMAN_APPROVAL"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 4,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-backend-1"
+            },
+            {
+              "event_type": "team_task.verified",
+              "subject_ref": "task-backend-api"
+            },
+            {
+              "event_type": "project.budget.exhausted",
+              "subject_ref": "policy-tight",
+              "note": "usage total 98000/100000 tokens; pre-dispatch project budget check would exceed the limit"
+            },
+            {
+              "event_type": "project.gate.opened",
+              "subject_ref": "gate-budget-1",
+              "transition": {
+                "from": {
+                  "phase": "EXECUTION",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "EXECUTION",
+                  "status": "WAITING",
+                  "wait_reason": "HUMAN_APPROVAL"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "gate",
+              "object_ref": "gate-budget-1",
+              "note": "gate_type=budget; status=OPEN; allowed decisions INCREASE_BUDGET/REDUCE_SCOPE/TERMINATE; atomic with the transition (ADR-0009 decision 5)"
+            },
+            {
+              "object_type": "usage_counter",
+              "object_ref": "usage-demo-1",
+              "note": "run-backend-1 usage settled exactly once via idem:run-backend-1:terminal; total tokens 60000+38000=98000"
+            }
+          ],
+          "commands": [],
+          "observations": [
+            "No automatic retry loop: the orchestrator opens the gate and sleeps instead of re-trying dispatch (G-INV-09)."
+          ]
         },
         {
-          "step_ref": "t02",
-          "trigger_event_ref": "e02",
-          "from": { "phase": "EXECUTION", "status": "WAITING", "wait_reason": "HUMAN_APPROVAL" },
-          "to": { "phase": "EXECUTION", "status": "WAITING", "wait_reason": "HUMAN_APPROVAL" },
-          "process_version_change": "0",
-          "transition_event_type": null,
-          "note": "重启后 Gate 仍 OPEN、状态不变：预算 Gate 必须持久（ADR-0006）"
+          "step_id": "t02",
+          "stimulus_ref": "s02",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "WAITING",
+            "wait_reason": "HUMAN_APPROVAL"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 0,
+          "emitted_domain_facts": [],
+          "active_operations": [],
+          "created_or_updated": [],
+          "commands": [],
+          "observations": [
+            "Restart assertion: gate-budget-1 remains OPEN, usage and policy come from durable state, no dispatch occurs, no automatic recovery."
+          ]
         },
         {
-          "step_ref": "t03",
-          "trigger_event_ref": "e03",
-          "from": { "phase": "EXECUTION", "status": "WAITING", "wait_reason": "HUMAN_APPROVAL" },
-          "to": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "approval.decided",
-          "note": "Gate 关闭；policy v2（guarded、audited）对后续预留生效"
+          "step_id": "t03",
+          "stimulus_ref": "s03",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 3,
+          "emitted_domain_facts": [
+            {
+              "event_type": "approval.decided",
+              "subject_ref": "gate-budget-1"
+            },
+            {
+              "event_type": "project.gate.decided",
+              "subject_ref": "gate-budget-1"
+            },
+            {
+              "event_type": "project.work.dispatched",
+              "subject_ref": "run-frontend-1",
+              "transition_key": "work.dispatched",
+              "transition": {
+                "from": {
+                  "phase": "EXECUTION",
+                  "status": "WAITING",
+                  "wait_reason": "HUMAN_APPROVAL"
+                },
+                "to": {
+                  "phase": "EXECUTION",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [
+            "run-frontend-1"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "gate",
+              "object_ref": "gate-budget-1",
+              "note": "status=DECIDED; decision=INCREASE_BUDGET"
+            },
+            {
+              "object_type": "execution_policy",
+              "object_ref": "policy-tight",
+              "note": "version 1->2, guarded and audited; existing reservations keep their admission revision (ADR-0006 decision 7)"
+            },
+            {
+              "object_type": "agent_run",
+              "object_ref": "run-frontend-1",
+              "note": "executed_as=team-agent:team-frontend; command id cmd-dispatch-frontend-1"
+            }
+          ],
+          "commands": [
+            {
+              "command_id": "cmd-dispatch-frontend-1",
+              "command_type": "propose_task",
+              "note": "dispatch after the gate decision; budget check now passes under policy v2"
+            }
+          ],
+          "observations": [
+            "Policy upgrade driven solely by the human gate decision; planner commands cannot raise budget."
+          ]
         },
         {
-          "step_ref": "t04",
-          "trigger_event_ref": "e04",
-          "from": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "work.dispatched"
+          "step_id": "t04",
+          "stimulus_ref": "s04",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.started",
+              "subject_ref": "task-frontend-ui"
+            }
+          ],
+          "active_operations": [
+            "run-frontend-1"
+          ],
+          "created_or_updated": [],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t05",
-          "trigger_event_ref": "e08",
-          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "to": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "all_required_work_submitted"
+          "step_id": "t05",
+          "stimulus_ref": "s05",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.submitted",
+              "subject_ref": "task-frontend-ui"
+            }
+          ],
+          "active_operations": [
+            "run-frontend-1"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "artifact",
+              "object_ref": "resource-ui-build",
+              "note": "version=1"
+            }
+          ],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t06",
-          "trigger_event_ref": "e09",
-          "from": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "verification.passed"
+          "step_id": "t06",
+          "stimulus_ref": "s06",
+          "expected_process": {
+            "phase": "VERIFICATION",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 3,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-frontend-1"
+            },
+            {
+              "event_type": "team_task.verified",
+              "subject_ref": "task-frontend-ui"
+            },
+            {
+              "event_type": "project.work.required_submitted",
+              "subject_ref": "process-demo-1",
+              "transition_key": "all_required_work_submitted",
+              "transition": {
+                "from": {
+                  "phase": "EXECUTION",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "VERIFICATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "verification",
+              "object_ref": "verif-task-frontend-ui-1",
+              "note": "outcome=PASS"
+            },
+            {
+              "object_type": "agent_run",
+              "object_ref": "run-verification-1",
+              "note": "queued; executed_as=service:project-orchestrator"
+            }
+          ],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t07",
-          "trigger_event_ref": "e10",
-          "from": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "integration.passed"
+          "step_id": "t07",
+          "stimulus_ref": "s07",
+          "expected_process": {
+            "phase": "INTEGRATION",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 2,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-verification-1"
+            },
+            {
+              "event_type": "project.verification.completed",
+              "subject_ref": "process-demo-1",
+              "outcome": "PASS",
+              "transition_key": "verification.passed",
+              "transition": {
+                "from": {
+                  "phase": "VERIFICATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "INTEGRATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "integration_run",
+              "object_ref": "integration-1",
+              "note": "created"
+            }
+          ],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t08",
-          "trigger_event_ref": "e11",
-          "from": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "TERMINAL", "status": "COMPLETED", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "delivery.accepted"
+          "step_id": "t08",
+          "stimulus_ref": "s08",
+          "expected_process": {
+            "phase": "DELIVERY",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "project.integration.completed",
+              "subject_ref": "integration-1",
+              "outcome": "PASS",
+              "transition_key": "integration.passed",
+              "transition": {
+                "from": {
+                  "phase": "INTEGRATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "DELIVERY",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "delivery_manifest",
+              "object_ref": "delivery-1",
+              "note": "ASSEMBLING->READY"
+            }
+          ],
+          "commands": [],
+          "observations": []
+        },
+        {
+          "step_id": "t09",
+          "stimulus_ref": "s09",
+          "expected_process": {
+            "phase": "TERMINAL",
+            "status": "COMPLETED",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 3,
+          "emitted_domain_facts": [
+            {
+              "event_type": "approval.decided",
+              "subject_ref": "delivery-1"
+            },
+            {
+              "event_type": "project.delivery.accepted",
+              "subject_ref": "delivery-1",
+              "transition_key": "delivery.accepted",
+              "transition": {
+                "from": {
+                  "phase": "DELIVERY",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "TERMINAL",
+                  "status": "COMPLETED",
+                  "wait_reason": "NONE"
+                }
+              }
+            },
+            {
+              "event_type": "project.completion.evaluated",
+              "subject_ref": "completion-contract-1",
+              "outcome": "PASS"
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [],
+          "commands": [],
+          "observations": []
         }
       ],
       "required_outputs": [
-        { "output_id": "ro-01", "kind": "state", "statement": "预算触顶后创建持久 Gate（gate_type 为预算提升类，选项含 提高预算/缩小范围/终止项目），在重启后仍 OPEN 且可被决定", "subject_refs": ["gate-budget-1"] },
-        { "output_id": "ro-02", "kind": "usage", "statement": "run-backend-1 的 terminal usage（38000 tokens / 190000 microusd）恰好入账一次，累计 total_tokens=98000", "subject_refs": ["process-demo-1"] },
-        { "output_id": "ro-03", "kind": "audit", "statement": "policy v1→v2 的预算提升由人类决定驱动并写入 audit；policy 版本递增，既有已预留额度保留其被接纳时的 policy 版本（ADR-0006）", "subject_refs": ["gate-budget-1", "policy-tight"] },
-        { "output_id": "ro-04", "kind": "state", "statement": "Gate 决定后 frontend dispatch 恰好一次；全程每个 dispatch 前均执行 项目预算 → 团队并发 → run 预算 的固定顺序检查", "subject_refs": ["task-frontend-ui"] }
+        {
+          "output_id": "ro-01",
+          "statement": "gate-budget-1 is durable: OPEN across the t02 restart, decided at most once per version (idem:gate-budget-1:decide), with allowed decisions INCREASE_BUDGET/REDUCE_SCOPE/TERMINATE."
+        },
+        {
+          "output_id": "ro-02",
+          "statement": "run-backend-1 terminal usage (38000 tokens) settled exactly once; usage-demo-1.total_tokens = 98000 after t01."
+        },
+        {
+          "output_id": "ro-03",
+          "statement": "policy-tight version 1->2 recorded with the audit trail of the human decision; existing reservation-backend-1 keeps its admission revision."
+        },
+        {
+          "output_id": "ro-04",
+          "statement": "Dispatch ordering held at every step: project budget -> team concurrency -> run budget derivation -> dispatch."
+        }
       ],
       "forbidden_outcomes": [
-        { "forbidden_id": "fo-01", "kind": "dispatch", "statement": "e01–e03 之间发生任何新 run dispatch（超预算放行）" },
-        { "forbidden_id": "fo-02", "kind": "state", "statement": "Planner command 修改 max_total_tokens / max_model_cost_microusd（预算只能由人类经 Gate 提高）" },
-        { "forbidden_id": "fo-03", "kind": "dispatch", "statement": "预算触顶后进入自动重试/继续 dispatch 的循环" },
-        { "forbidden_id": "fo-04", "kind": "state", "statement": "预算触顶导致 frontend task 被置为 rejected/失败，或项目被自动 CANCELLED" },
-        { "forbidden_id": "fo-05", "kind": "state", "statement": "重启后 Gate 丢失、WAITING 状态回退，或无需人类决定即自动恢复 dispatch" },
-        { "forbidden_id": "fo-06", "kind": "usage", "statement": "以内存信号代替持久 usage 判定预算（重启后预算判断漂移）" }
+        {
+          "forbidden_id": "fo-01",
+          "statement": "Any new run dispatch between t01 and t03 (over-budget admission)."
+        },
+        {
+          "forbidden_id": "fo-02",
+          "statement": "A planner command modifies max_total_tokens or max_model_cost_microusd."
+        },
+        {
+          "forbidden_id": "fo-03",
+          "statement": "An automatic retry/dispatch loop after budget exhaustion."
+        },
+        {
+          "forbidden_id": "fo-04",
+          "statement": "The frontend task marked rejected, or the project auto-cancelled, due to budget."
+        },
+        {
+          "forbidden_id": "fo-05",
+          "statement": "The gate disappears after restart, or dispatch resumes without a human decision."
+        },
+        {
+          "forbidden_id": "fo-06",
+          "statement": "Budget judgement based on in-memory signals instead of durable usage."
+        }
       ],
       "safety_invariants": [
-        { "invariant_id": "si-01", "statement": "项目级预算与单 run RunBudget 是两层独立检查：任一拒绝即不得 dispatch（ADR-0006）" },
-        { "invariant_id": "si-02", "statement": "WAITING/HUMAN_APPROVAL 期间无任何新 run、新 reservation 产生（G-INV-09）" }
+        {
+          "invariant_id": "si-01",
+          "statement": "Project-level budget and per-run RunBudget are independent checks; either rejection blocks dispatch (ADR-0006 decision 3)."
+        },
+        {
+          "invariant_id": "si-02",
+          "statement": "WAITING/HUMAN_APPROVAL window creates no run and no reservation (G-INV-09)."
+        }
       ],
       "crash_and_recovery": [
         {
           "recovery_id": "cr-01",
-          "injected_fault": "control_plane_restart(at WAITING/HUMAN_APPROVAL)",
-          "expected_behavior": "重启后 process 仍为 WAITING/HUMAN_APPROVAL，gate-budget-1 仍 OPEN，usage/policy 均来自持久状态",
-          "recovery_signal": "approval.decided（人类决定）驱动恢复推进",
-          "idempotency_requirement": "Gate 决定重复投递按 gate_id + decision 幂等收敛，policy 只升级一次"
+          "fault_kind": "control_plane_restart",
+          "expected_behavior": "Restart preserves WAITING/HUMAN_APPROVAL, the open gate, durable usage and policy; only approval.decided resumes progress.",
+          "recovery_signal": "Human gate decision (idem:gate-budget-1:decide).",
+          "idempotency_requirement": "Duplicate gate decisions converge by gate_id + decision + expected versions; policy upgraded exactly once."
         }
-      ],
-      "contract_assumptions": ["OPEN-Q1", "OPEN-Q3", "OPEN-Q8", "OPEN-Q13"]
+      ]
     },
     {
       "scenario_id": "eval-11-capability-capacity-exhaustion",
       "eval_ref": "Eval 11",
-      "summary": "frontend-ui 能力存在但 capacity=0（预留被外部项目占满）：orchestrator match 成功、reserve 失败 → 不 dispatch，创建容量协商请求并进入等待；容量获批后恰好 dispatch 一次。",
+      "summary": "frontend-ui capability exists but capacity=0. Match succeeds, reservation fails, nothing dispatches; the process waits in WAITING/SCHEDULE with exactly one negotiation; after the negotiation resolves, dispatch happens exactly once.",
       "initial_state": {
         "process": {
           "process_ref": "process-demo-1",
+          "project_ref": "project-harness-demo",
           "phase": "EXECUTION",
           "status": "RUNNING",
-          "wait_reason": "NONE"
+          "wait_reason": "NONE",
+          "process_version": 8,
+          "last_event_sequence": 13
         },
-        "process_version": "plan 批准后（相对值）",
-        "work_graph": {
+        "graph": {
           "nodes": [
-            { "node_ref": "task-backend-api", "node_type": "task", "team_ref": "team-backend", "task_status": "in_progress" },
-            { "node_ref": "task-frontend-ui", "node_type": "task", "team_ref": "team-frontend", "task_status": "accepted" }
+            {
+              "node_ref": "node-goal-1",
+              "node_type": "goal",
+              "subject_ref": "goal-1"
+            },
+            {
+              "node_ref": "node-task-backend-api",
+              "node_type": "task",
+              "subject_ref": "task-backend-api",
+              "team_ref": "team-backend",
+              "task_status": "in_progress"
+            },
+            {
+              "node_ref": "node-task-frontend-ui",
+              "node_type": "task",
+              "subject_ref": "task-frontend-ui",
+              "team_ref": "team-frontend",
+              "task_status": "accepted"
+            }
           ],
           "relations": [
-            { "relation_ref": "rel-dep-1", "relation_type": "depends_on", "source": "task-frontend-ui", "target": "task-backend-api" }
-          ]
+            {
+              "relation_ref": "rel-dep-1",
+              "relation_type": "depends_on",
+              "source": "task-frontend-ui",
+              "target": "task-backend-api"
+            }
+          ],
+          "graph_snapshot_digest": {
+            "operand": "literal",
+            "value": "sha256:d11-exec"
+          }
         },
-        "capabilities": [
-          { "capability_ref": "backend-api", "team_ref": "team-backend", "capacity": 1 },
-          { "capability_ref": "frontend-ui", "team_ref": "team-frontend", "capacity": 0, "note": "唯一容量被外部项目 reservation 长期占用" }
+        "contracts": [
+          {
+            "contract_ref": "contract-backend-1",
+            "task_ref": "task-backend-api",
+            "requester_team_ref": "team-frontend",
+            "provider_team_ref": "team-backend",
+            "requested_capability": "backend-api",
+            "task_status": "in_progress",
+            "contract_version": 1,
+            "input_manifest": {
+              "resources": []
+            },
+            "output_contract": {
+              "artifact_types": [
+                "application/openapi+yaml"
+              ],
+              "required": true
+            }
+          },
+          {
+            "contract_ref": "contract-frontend-1",
+            "task_ref": "task-frontend-ui",
+            "requester_team_ref": "team-backend",
+            "provider_team_ref": "team-frontend",
+            "requested_capability": "frontend-ui",
+            "task_status": "accepted",
+            "contract_version": 1,
+            "input_manifest": {
+              "work_nodes": [
+                "task-backend-api"
+              ]
+            },
+            "output_contract": {
+              "artifact_types": [
+                "application/zip"
+              ],
+              "required": true
+            }
+          }
         ],
-        "execution_usage": { "agent_runs_started": 1, "replan_count": 0 },
-        "active_runs": [
+        "artifacts": [],
+        "verifications": [],
+        "integration": null,
+        "delivery": null,
+        "completion_contract": {
+          "contract_ref": "completion-contract-1",
+          "required_delivery_accepted": true
+        },
+        "execution_policy": {
+          "policy_ref": "policy-default",
+          "max_agent_runs": 50,
+          "max_total_tokens": 2000000,
+          "max_model_cost_microusd": 5000000,
+          "max_replans": 5,
+          "max_generated_tasks": 20,
+          "max_active_agent_runs": 4,
+          "max_active_runs_per_team": 2,
+          "max_specialist_depth": 2,
+          "max_specialist_runs_per_task": 2,
+          "deadline_at": null,
+          "version": 1
+        },
+        "usage": {
+          "usage_ref": "usage-demo-1",
+          "agent_runs_started": 1,
+          "agent_runs_completed": 0,
+          "total_tokens": 30000,
+          "model_cost_microusd": 15000,
+          "replan_count": 0,
+          "generated_task_count": 2,
+          "active_agent_runs": 1
+        },
+        "runs": [
           {
             "run_ref": "run-backend-1",
             "run_kind": "task_execution",
-            "team_ref": "team-backend",
             "task_ref": "task-backend-api",
+            "team_ref": "team-backend",
             "initiated_by": "service:project-orchestrator",
-            "executed_as": "team-agent:team-backend"
+            "executed_as": "team-agent:team-backend",
+            "execution_state": "running"
           }
         ],
-        "open_gates": [],
-        "open_input_requests": []
-      },
-      "input_events": [
-        {
-          "event_ref": "e01",
-          "event_type": "team_task.verified",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "payload": { "task_ref": "task-backend-api", "passed": true },
-          "note": "backend 完成 → 依赖满足 → orchestration 尝试为 frontend 做 match + reserve"
-        },
-        {
-          "event_ref": "e02",
-          "event_type": "capacity.negotiation.resolved",
-          "actor": { "initiated_by": "human:user-project-owner" },
-          "payload": {
-            "negotiation_ref": "negotiation-cap-1",
-            "capability_ref": "frontend-ui",
-            "outcome": "capacity_granted",
-            "granted_capacity": 1
+        "tool_jobs": [],
+        "reservations": [
+          {
+            "reservation_ref": "reservation-backend-1",
+            "capability_ref": "backend-api",
+            "team_ref": "team-backend",
+            "task_ref": "task-backend-api",
+            "state": "reserved"
+          }
+        ],
+        "capabilities": [
+          {
+            "capability_ref": "backend-api",
+            "team_ref": "team-backend",
+            "capacity": 1
           },
-          "note": "容量协商/管理批准释放 1 个容量槽（事件名为语义占位，OPEN-Q14）"
+          {
+            "capability_ref": "frontend-ui",
+            "team_ref": "team-frontend",
+            "capacity": 0,
+            "note": "sole slot held long-term by an external project reservation"
+          }
+        ],
+        "gates": [],
+        "input_requests": [],
+        "pending_events": [],
+        "outbox": []
+      },
+      "stimuli": [
+        {
+          "source_event_id": "s01",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-backend-1",
+          "idempotency_key": "idem:run-backend-1:terminal",
+          "payload": {
+            "outcome": "PASS",
+            "usage": {
+              "tokens": 40000,
+              "model_cost_microusd": 20000
+            }
+          }
         },
         {
-          "event_ref": "e03",
-          "event_type": "work.dispatched",
-          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-frontend" },
-          "payload": { "task_ref": "task-frontend-ui", "run_ref": "run-frontend-1" },
-          "note": "reserve 成功后 dispatch 恰好一次"
+          "source_event_id": "s02",
+          "event_type": "project.capacity.negotiation_resolved",
+          "origin": "HUMAN",
+          "subject_ref": "negotiation-cap-1",
+          "idempotency_key": "idem:negotiation-cap-1:resolve",
+          "payload": {
+            "resolved_by": "human:user-project-owner",
+            "capability_ref": "frontend-ui",
+            "granted_capacity": 1
+          }
         },
         {
-          "event_ref": "e04",
+          "source_event_id": "s03",
           "event_type": "team_task.started",
-          "actor": { "initiated_by": "team-agent:team-frontend" },
-          "payload": { "task_ref": "task-frontend-ui", "task_status": "in_progress" }
+          "origin": "AGENT_WORKER",
+          "subject_ref": "task-frontend-ui",
+          "idempotency_key": "idem:task-frontend-ui:start",
+          "payload": {
+            "run_ref": "run-frontend-1"
+          }
         },
         {
-          "event_ref": "e05",
+          "source_event_id": "s04",
           "event_type": "team_task.submitted",
-          "actor": { "initiated_by": "team-agent:team-frontend" },
-          "payload": { "task_ref": "task-frontend-ui", "artifact_refs": ["resource-ui-build"] }
+          "origin": "AGENT_WORKER",
+          "subject_ref": "task-frontend-ui",
+          "idempotency_key": "idem:task-frontend-ui:submit:v1",
+          "payload": {
+            "artifact_refs": [
+              "resource-ui-build"
+            ],
+            "artifact_version": 1
+          }
         },
         {
-          "event_ref": "e06",
-          "event_type": "team_task.verified",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "payload": { "task_ref": "task-frontend-ui", "passed": true }
+          "source_event_id": "s05",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-frontend-1",
+          "idempotency_key": "idem:run-frontend-1:terminal",
+          "payload": {
+            "outcome": "PASS",
+            "usage": {
+              "tokens": 35000,
+              "model_cost_microusd": 17000
+            }
+          }
         },
         {
-          "event_ref": "e07",
-          "event_type": "all_required_work_submitted",
-          "actor": { "initiated_by": "service:project-orchestrator" }
+          "source_event_id": "s06",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-verification-1",
+          "idempotency_key": "idem:run-verification-1:terminal",
+          "payload": {
+            "outcome": "PASS"
+          }
         },
         {
-          "event_ref": "e08",
-          "event_type": "verification.passed",
-          "actor": { "initiated_by": "service:project-orchestrator" }
+          "source_event_id": "s07",
+          "event_type": "project.integration.completed",
+          "origin": "TOOL_WORKER",
+          "subject_ref": "integration-1",
+          "idempotency_key": "idem:integration-1:complete",
+          "payload": {
+            "outcome": "PASS"
+          }
         },
         {
-          "event_ref": "e09",
-          "event_type": "integration.passed",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "payload": { "integration_ref": "integration-1" }
-        },
-        {
-          "event_ref": "e10",
-          "event_type": "delivery.accepted",
-          "actor": { "initiated_by": "human:user-project-owner" },
-          "payload": { "delivery_ref": "delivery-1" }
+          "source_event_id": "s08",
+          "event_type": "approval.decided",
+          "origin": "HUMAN",
+          "subject_ref": "delivery-1",
+          "idempotency_key": "idem:delivery-1:accept",
+          "payload": {
+            "decision": "ACCEPT",
+            "decided_by": "human:user-project-owner",
+            "role": "delivery_acceptor"
+          }
         }
       ],
-      "expected_transitions": [
+      "expected_steps": [
         {
-          "step_ref": "t01",
-          "trigger_event_ref": "e01",
-          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "to": { "phase": "EXECUTION", "status": "WAITING", "wait_reason": "SCHEDULE" },
-          "process_version_change": "+1",
-          "transition_event_type": "capacity_reservation_failed",
-          "note": "match 命中 frontend-ui 但 reserve 失败（capacity=0）→ 不 dispatch，创建协商请求并等待（wait_reason 选择为 OPEN-Q4；Eval 11 允许 negotiation / replan / gate 三种响应，本主线取 negotiation，断言核心是“不 dispatch”）"
+          "step_id": "t01",
+          "stimulus_ref": "s01",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "WAITING",
+            "wait_reason": "SCHEDULE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 4,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-backend-1"
+            },
+            {
+              "event_type": "team_task.verified",
+              "subject_ref": "task-backend-api"
+            },
+            {
+              "event_type": "project.capability.matched",
+              "subject_ref": "task-frontend-ui",
+              "note": "CapabilityDirectoryService.match frontend-ui -> team-frontend succeeds"
+            },
+            {
+              "event_type": "project.capacity.reservation_failed",
+              "subject_ref": "reservation-frontend-1",
+              "note": "reserve fails: capacity=0; fail-closed, no AgentRun created (ADR-0010 decision 6)",
+              "transition": {
+                "from": {
+                  "phase": "EXECUTION",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "EXECUTION",
+                  "status": "WAITING",
+                  "wait_reason": "SCHEDULE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "capacity_negotiation",
+              "object_ref": "negotiation-cap-1",
+              "note": "created exactly once for (process, task-frontend-ui, frontend-ui)",
+              "idempotency_key": "idem:negotiation-cap-1:create"
+            }
+          ],
+          "commands": [],
+          "observations": [
+            "ADR-0010 decision 6: capacity exhaustion never dispatches; deterministic branch taken here is CapacityNegotiation, process state WAITING/SCHEDULE while unresolved."
+          ]
         },
         {
-          "step_ref": "t02",
-          "trigger_event_ref": "e02",
-          "from": { "phase": "EXECUTION", "status": "WAITING", "wait_reason": "SCHEDULE" },
-          "to": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "capacity.negotiation.resolved",
-          "note": "容量获批，readiness 其余条件均满足 → 可调度"
+          "step_id": "t02",
+          "stimulus_ref": "s02",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 3,
+          "emitted_domain_facts": [
+            {
+              "event_type": "project.capacity.negotiation_resolved",
+              "subject_ref": "negotiation-cap-1"
+            },
+            {
+              "event_type": "project.capacity.reserved",
+              "subject_ref": "reservation-frontend-1"
+            },
+            {
+              "event_type": "project.work.dispatched",
+              "subject_ref": "run-frontend-1",
+              "transition_key": "work.dispatched",
+              "transition": {
+                "from": {
+                  "phase": "EXECUTION",
+                  "status": "WAITING",
+                  "wait_reason": "SCHEDULE"
+                },
+                "to": {
+                  "phase": "EXECUTION",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [
+            "run-frontend-1"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "capacity_reservation",
+              "object_ref": "reservation-frontend-1",
+              "note": "state=reserved after grant",
+              "idempotency_key": "idem:reserve:task-frontend-ui:v1"
+            },
+            {
+              "object_type": "agent_run",
+              "object_ref": "run-frontend-1",
+              "note": "executed_as=team-agent:team-frontend; command id cmd-dispatch-frontend-1"
+            }
+          ],
+          "commands": [
+            {
+              "command_id": "cmd-dispatch-frontend-1",
+              "command_type": "propose_task"
+            }
+          ],
+          "observations": []
         },
         {
-          "step_ref": "t03",
-          "trigger_event_ref": "e03",
-          "from": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "work.dispatched"
+          "step_id": "t03",
+          "stimulus_ref": "s03",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.started",
+              "subject_ref": "task-frontend-ui"
+            }
+          ],
+          "active_operations": [
+            "run-frontend-1"
+          ],
+          "created_or_updated": [],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t04",
-          "trigger_event_ref": "e07",
-          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "to": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "all_required_work_submitted"
+          "step_id": "t04",
+          "stimulus_ref": "s04",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.submitted",
+              "subject_ref": "task-frontend-ui"
+            }
+          ],
+          "active_operations": [
+            "run-frontend-1"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "artifact",
+              "object_ref": "resource-ui-build",
+              "note": "version=1"
+            }
+          ],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t05",
-          "trigger_event_ref": "e08",
-          "from": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "verification.passed"
+          "step_id": "t05",
+          "stimulus_ref": "s05",
+          "expected_process": {
+            "phase": "VERIFICATION",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 3,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-frontend-1"
+            },
+            {
+              "event_type": "team_task.verified",
+              "subject_ref": "task-frontend-ui"
+            },
+            {
+              "event_type": "project.work.required_submitted",
+              "subject_ref": "process-demo-1",
+              "transition_key": "all_required_work_submitted",
+              "transition": {
+                "from": {
+                  "phase": "EXECUTION",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "VERIFICATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "verification",
+              "object_ref": "verif-task-frontend-ui-1",
+              "note": "outcome=PASS"
+            },
+            {
+              "object_type": "agent_run",
+              "object_ref": "run-verification-1",
+              "note": "queued; executed_as=service:project-orchestrator"
+            }
+          ],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t06",
-          "trigger_event_ref": "e09",
-          "from": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "integration.passed"
+          "step_id": "t06",
+          "stimulus_ref": "s06",
+          "expected_process": {
+            "phase": "INTEGRATION",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 2,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-verification-1"
+            },
+            {
+              "event_type": "project.verification.completed",
+              "subject_ref": "process-demo-1",
+              "outcome": "PASS",
+              "transition_key": "verification.passed",
+              "transition": {
+                "from": {
+                  "phase": "VERIFICATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "INTEGRATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "integration_run",
+              "object_ref": "integration-1",
+              "note": "created"
+            }
+          ],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t07",
-          "trigger_event_ref": "e10",
-          "from": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "TERMINAL", "status": "COMPLETED", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "delivery.accepted"
+          "step_id": "t07",
+          "stimulus_ref": "s07",
+          "expected_process": {
+            "phase": "DELIVERY",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "project.integration.completed",
+              "subject_ref": "integration-1",
+              "outcome": "PASS",
+              "transition_key": "integration.passed",
+              "transition": {
+                "from": {
+                  "phase": "INTEGRATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "DELIVERY",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "delivery_manifest",
+              "object_ref": "delivery-1",
+              "note": "ASSEMBLING->READY"
+            }
+          ],
+          "commands": [],
+          "observations": []
+        },
+        {
+          "step_id": "t08",
+          "stimulus_ref": "s08",
+          "expected_process": {
+            "phase": "TERMINAL",
+            "status": "COMPLETED",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 3,
+          "emitted_domain_facts": [
+            {
+              "event_type": "approval.decided",
+              "subject_ref": "delivery-1"
+            },
+            {
+              "event_type": "project.delivery.accepted",
+              "subject_ref": "delivery-1",
+              "transition_key": "delivery.accepted",
+              "transition": {
+                "from": {
+                  "phase": "DELIVERY",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "TERMINAL",
+                  "status": "COMPLETED",
+                  "wait_reason": "NONE"
+                }
+              }
+            },
+            {
+              "event_type": "project.completion.evaluated",
+              "subject_ref": "completion-contract-1",
+              "outcome": "PASS"
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [],
+          "commands": [],
+          "observations": []
         }
       ],
       "required_outputs": [
-        { "output_id": "ro-01", "kind": "dispatch", "statement": "capacity=0 期间 task-frontend-ui 未被 dispatch、未创建 run、未产生 reservation（G-INV-10）", "subject_refs": ["task-frontend-ui"] },
-        { "output_id": "ro-02", "kind": "state", "statement": "容量协商请求恰好创建一次（对同一 (process, task, capability) 不重复发起）；等待期无周期性自动重试 reserve", "subject_refs": ["negotiation-cap-1"] },
-        { "output_id": "ro-03", "kind": "state", "statement": "能力解析经由现有能力目录（match → filter → reserve），未创建平行能力注册表或绕过预留", "subject_refs": ["frontend-ui"] },
-        { "output_id": "ro-04", "kind": "dispatch", "statement": "容量获批后 dispatch 恰好一次，预留与 run 一一对应；释放/恢复语义不受本场景影响" }
+        {
+          "output_id": "ro-01",
+          "statement": "During t01, no run exists for task-frontend-ui and no reservation is created; the hard assertion of Eval 11 (never dispatch at capacity=0) holds."
+        },
+        {
+          "output_id": "ro-02",
+          "statement": "negotiation-cap-1 is created exactly once (idem:negotiation-cap-1:create) and no repeated reservation attempts occur while unresolved (no additional capacity.reservation_failed facts)."
+        },
+        {
+          "output_id": "ro-03",
+          "statement": "Capability resolution goes through the existing capability directory (match -> filter -> reserve); no parallel capability registry appears."
+        },
+        {
+          "output_id": "ro-04",
+          "statement": "After resolution, dispatch happens exactly once (cmd-dispatch-frontend-1; idem:task-frontend-ui:start) with reservation-frontend-1 matching the run."
+        }
       ],
       "forbidden_outcomes": [
-        { "forbidden_id": "fo-01", "kind": "dispatch", "statement": "capacity=0 时 dispatch frontend run（无论以何种理由降级）" },
-        { "forbidden_id": "fo-02", "kind": "state", "statement": "绕过能力目录：orchestrator 自行登记能力、伪造容量或直接创建 frontend run" },
-        { "forbidden_id": "fo-03", "kind": "dispatch", "statement": "协商未决期间反复自动重试 reserve（重试风暴）" },
-        { "forbidden_id": "fo-04", "kind": "state", "statement": "因容量不足把 task 置为 rejected/失败，或项目 FAILED" },
-        { "forbidden_id": "fo-05", "kind": "dispatch", "statement": "negotiation resolved 事件重复投递导致容量被授予两次 / dispatch 两次" }
+        {
+          "forbidden_id": "fo-01",
+          "statement": "A frontend run is dispatched while capacity=0, for any reason."
+        },
+        {
+          "forbidden_id": "fo-02",
+          "statement": "The orchestrator registers capabilities itself, fabricates capacity, or bypasses the directory."
+        },
+        {
+          "forbidden_id": "fo-03",
+          "statement": "Repeated automatic reserve retries while the negotiation is unresolved."
+        },
+        {
+          "forbidden_id": "fo-04",
+          "statement": "The task marked rejected or the project failed due to capacity."
+        },
+        {
+          "forbidden_id": "fo-05",
+          "statement": "A duplicated negotiation_resolved grants capacity twice or dispatches twice."
+        }
       ],
       "safety_invariants": [
-        { "invariant_id": "si-01", "statement": " Eval 11 的验收硬断言是“不得 dispatch”；negotiation / replan / gate 三种响应方式由主线程冻结后择一实现，fixture 主线取 negotiation" }
+        {
+          "invariant_id": "si-01",
+          "statement": "Eval 11's binding assertion is no-dispatch; negotiation/replan/gate are the ADR-0010 alternatives, and this main line exercises the negotiation branch while asserting WAITING/SCHEDULE."
+        }
       ],
-      "crash_and_recovery": [],
-      "contract_assumptions": ["OPEN-Q1", "OPEN-Q3", "OPEN-Q4", "OPEN-Q14"]
+      "crash_and_recovery": []
     }
   ]
 }

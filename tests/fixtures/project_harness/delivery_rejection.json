@@ -1,461 +1,1509 @@
 {
-  "fixture_schema": "project-harness-fixture.v1",
+  "fixture_schema": "project-harness-fixture.v2",
   "fixture_id": "delivery_rejection",
-  "title": "Delivery 被拒后的返工闭环与人工输入挂起恢复",
-  "description": "覆盖 Eval 14（全部 Task verified 但 DeliveryManifest 被拒，Process 不得 COMPLETE，应进入 rework/replan）与 Eval 12（Agent 产生 InputRequest 后进入稳定 WAITING，进程重启后仍可由回答事件恢复）。世界设定见 simple_project.json 的 world。",
+  "title": "Delivery rejection rework loop and durable human input suspension",
+  "description": "Eval 14 (all tasks verified but the DeliveryManifest is REJECTED; the process never completes until a new manifest is accepted) and Eval 12 (an agent input request parks the process in WAITING/HUMAN_INPUT across a restart; the answer event resumes it).",
+  "contract_refs": {
+    "machine_contract": "docs/adr/project-harness-contract-v1.json",
+    "event_catalog": "docs/adr/project-process-event-catalog-v1.md",
+    "fixture_contract": "docs/adr/project-harness-fixture-contract-v1.md"
+  },
   "eval_coverage": [
-    { "eval_id": "Eval 14", "scenario_id": "eval-14-delivery-rejection-rework" },
-    { "eval_id": "Eval 12", "scenario_id": "eval-12-human-input-suspension-restart" }
-  ],
-  "source_refs": {
-    "plan": "docs/plan/iteration/Team-Cooperation_Multi-Agent_Harness_Execution_Plan_v1.1_Audited.md#33-evaluation",
-    "spec": "docs/evaluation/project-harness-evaluation-spec.md"
-  },
-  "global_invariants": "docs/evaluation/project-harness-evaluation-spec.md 第 6 节 G-INV-01..G-INV-14 对所有场景生效",
-  "world": {
-    "project_ref": "project-harness-demo",
-    "goal": { "goal_ref": "goal-1", "title": "交付带后端 API 与前端界面的演示应用", "confirmed": true },
-    "teams": [
-      { "team_ref": "team-backend", "display_name": "后端团队" },
-      { "team_ref": "team-frontend", "display_name": "前端团队" }
-    ],
-    "capabilities": [
-      { "capability_ref": "backend-api", "team_ref": "team-backend", "capacity": 2 },
-      { "capability_ref": "frontend-ui", "team_ref": "team-frontend", "capacity": 2 }
-    ],
-    "principals": {
-      "human_owner": "human:user-project-owner",
-      "orchestrator": "service:project-orchestrator",
-      "team_agent_backend": "team-agent:team-backend",
-      "team_agent_frontend": "team-agent:team-frontend"
+    {
+      "eval_id": "Eval 14",
+      "scenario_id": "eval-14-delivery-rejection-rework"
     },
-    "default_execution_policy": {
-      "policy_ref": "policy-default",
-      "max_agent_runs": 50,
-      "max_total_tokens": 2000000,
-      "max_replans": 5,
-      "max_active_agent_runs": 4,
-      "max_active_runs_per_team": 2
-    },
-    "completion_contract": {
-      "contract_ref": "completion-contract-1",
-      "required_delivery_accepted": true,
-      "note": "完成条件引用 DeliveryManifest（计划 15.2 / 16.2）"
+    {
+      "eval_id": "Eval 12",
+      "scenario_id": "eval-12-human-input-suspension-restart"
     }
-  },
+  ],
   "scenarios": [
     {
       "scenario_id": "eval-14-delivery-rejection-rework",
       "eval_ref": "Eval 14",
-      "summary": "所有 Task 已 verified、Integration 通过，但 acceptor 以“release notes 缺少风险章节”拒绝 DeliveryManifest；DELIVERY 经 delivery.rejected 回到 EXECUTION，Planner 决定返工范围，修订后重新走 验证 → 集成 → 交付 v2 被接受，项目才完成。",
+      "summary": "The acceptor rejects delivery-1 (release notes missing the risk section). delivery.rejected returns the process to EXECUTION; a planner (reason=DELIVERY_REJECTED) proposes a rework task; delivery-2 is assembled, accepted, and only then does the process complete.",
       "initial_state": {
         "process": {
           "process_ref": "process-demo-1",
+          "project_ref": "project-harness-demo",
           "phase": "DELIVERY",
           "status": "READY",
-          "wait_reason": "NONE"
+          "wait_reason": "NONE",
+          "process_version": 13,
+          "last_event_sequence": 24
         },
-        "process_version": "integration.passed 迁移后（相对值）",
-        "work_graph": {
+        "graph": {
           "nodes": [
-            { "node_ref": "task-backend-api", "node_type": "task", "team_ref": "team-backend", "task_status": "verified" },
-            { "node_ref": "task-frontend-ui", "node_type": "task", "team_ref": "team-frontend", "task_status": "verified" }
+            {
+              "node_ref": "node-goal-1",
+              "node_type": "goal",
+              "subject_ref": "goal-1"
+            },
+            {
+              "node_ref": "node-task-backend-api",
+              "node_type": "task",
+              "subject_ref": "task-backend-api",
+              "team_ref": "team-backend",
+              "task_status": "verified"
+            },
+            {
+              "node_ref": "node-task-frontend-ui",
+              "node_type": "task",
+              "subject_ref": "task-frontend-ui",
+              "team_ref": "team-frontend",
+              "task_status": "verified"
+            }
           ],
           "relations": [
-            { "relation_ref": "rel-dep-1", "relation_type": "depends_on", "source": "task-frontend-ui", "target": "task-backend-api" }
-          ]
+            {
+              "relation_ref": "rel-dep-1",
+              "relation_type": "depends_on",
+              "source": "task-frontend-ui",
+              "target": "task-backend-api"
+            }
+          ],
+          "graph_snapshot_digest": {
+            "operand": "literal",
+            "value": "sha256:d14-delivery"
+          }
         },
+        "contracts": [
+          {
+            "contract_ref": "contract-backend-1",
+            "task_ref": "task-backend-api",
+            "requester_team_ref": "team-frontend",
+            "provider_team_ref": "team-backend",
+            "requested_capability": "backend-api",
+            "task_status": "verified",
+            "contract_version": 1,
+            "input_manifest": {
+              "resources": []
+            },
+            "output_contract": {
+              "artifact_types": [
+                "application/openapi+yaml"
+              ],
+              "required": true
+            }
+          },
+          {
+            "contract_ref": "contract-frontend-1",
+            "task_ref": "task-frontend-ui",
+            "requester_team_ref": "team-backend",
+            "provider_team_ref": "team-frontend",
+            "requested_capability": "frontend-ui",
+            "task_status": "verified",
+            "contract_version": 1,
+            "input_manifest": {
+              "work_nodes": [
+                "task-backend-api"
+              ]
+            },
+            "output_contract": {
+              "artifact_types": [
+                "application/zip"
+              ],
+              "required": true
+            }
+          }
+        ],
         "artifacts": [
-          { "resource_ref": "resource-api-spec", "version": 1, "visibility": "project_shared" },
-          { "resource_ref": "resource-ui-build", "version": 1, "visibility": "project_shared" },
-          { "resource_ref": "resource-release-notes", "version": 1, "visibility": "project_shared", "note": "缺少风险章节——被拒原因" }
+          {
+            "resource_ref": "resource-api-spec",
+            "version": 1,
+            "propagation": "portable"
+          },
+          {
+            "resource_ref": "resource-ui-build",
+            "version": 1,
+            "propagation": "portable"
+          },
+          {
+            "resource_ref": "resource-release-notes",
+            "version": 1,
+            "propagation": "portable",
+            "note": "missing the required risk section - rejection reason"
+          }
+        ],
+        "verifications": [
+          {
+            "verification_ref": "verif-task-backend-api-1",
+            "subject_ref": "task-backend-api",
+            "outcome": "PASS"
+          },
+          {
+            "verification_ref": "verif-task-frontend-ui-1",
+            "subject_ref": "task-frontend-ui",
+            "outcome": "PASS"
+          },
+          {
+            "verification_ref": "verif-project-1",
+            "subject_ref": "process-demo-1",
+            "outcome": "PASS"
+          }
         ],
         "integration": {
           "integration_ref": "integration-1",
           "status": "passed",
-          "input_artifact_refs": ["resource-api-spec", "resource-ui-build"]
+          "input_artifact_refs": [
+            "resource-api-spec",
+            "resource-ui-build"
+          ]
         },
         "delivery": {
           "delivery_ref": "delivery-1",
           "status": "READY",
-          "artifact_refs": ["resource-release-bundle"],
-          "release_notes_resource_ref": "resource-release-notes",
-          "verification_refs": ["task-backend-api", "task-frontend-ui"]
+          "artifact_refs": [
+            "resource-api-spec",
+            "resource-ui-build",
+            "resource-release-notes"
+          ],
+          "acceptance_role": "delivery_acceptor",
+          "manifest_version": 1
         },
-        "active_runs": [],
-        "execution_usage": { "agent_runs_started": 2, "replan_count": 0 },
-        "open_gates": [],
-        "open_input_requests": []
+        "completion_contract": {
+          "contract_ref": "completion-contract-1",
+          "required_delivery_accepted": true
+        },
+        "execution_policy": {
+          "policy_ref": "policy-default",
+          "max_agent_runs": 50,
+          "max_total_tokens": 2000000,
+          "max_model_cost_microusd": 5000000,
+          "max_replans": 5,
+          "max_generated_tasks": 20,
+          "max_active_agent_runs": 4,
+          "max_active_runs_per_team": 2,
+          "max_specialist_depth": 2,
+          "max_specialist_runs_per_task": 2,
+          "deadline_at": null,
+          "version": 1
+        },
+        "usage": {
+          "usage_ref": "usage-demo-1",
+          "agent_runs_started": 3,
+          "agent_runs_completed": 3,
+          "total_tokens": 104000,
+          "model_cost_microusd": 63000,
+          "replan_count": 0,
+          "generated_task_count": 2,
+          "active_agent_runs": 0
+        },
+        "runs": [],
+        "tool_jobs": [],
+        "reservations": [],
+        "capabilities": [
+          {
+            "capability_ref": "backend-api",
+            "team_ref": "team-backend",
+            "capacity": 2
+          },
+          {
+            "capability_ref": "frontend-ui",
+            "team_ref": "team-frontend",
+            "capacity": 2
+          }
+        ],
+        "gates": [],
+        "input_requests": [],
+        "pending_events": [],
+        "outbox": []
       },
-      "input_events": [
+      "stimuli": [
         {
-          "event_ref": "e01",
-          "event_type": "delivery.rejected",
-          "actor": { "initiated_by": "human:user-project-owner" },
+          "source_event_id": "s01",
+          "event_type": "approval.decided",
+          "origin": "HUMAN",
+          "subject_ref": "delivery-1",
+          "idempotency_key": "idem:delivery-1:reject",
           "payload": {
-            "delivery_ref": "delivery-1",
-            "rejected_reason": "release notes missing required risk section",
-            "delivery_status": "REJECTED"
-          },
-          "note": "acceptor 拒绝交付（ADR-0005：DELIVERY→EXECUTION 仅可经 delivery.rejected / scope.changed 等显式事件；事件载荷为语义占位，OPEN-Q7）"
+            "decision": "REJECT",
+            "decided_by": "human:user-project-owner",
+            "role": "delivery_acceptor",
+            "expected_manifest_version": 1,
+            "expected_process_version": 13,
+            "reason": "release notes missing required risk section"
+          }
         },
         {
-          "event_ref": "e02",
+          "source_event_id": "s02",
           "event_type": "agent_run.completed",
-          "actor": { "initiated_by": "service:project-orchestrator" },
+          "origin": "AGENT_WORKER",
+          "subject_ref": "planner-rework-run-1",
+          "idempotency_key": "idem:planner-rework-run-1:terminal",
           "payload": {
-            "run_ref": "planner-rework-run-1",
-            "run_kind": "replanning",
-            "decision_schema": "coifesp.orchestration-decision.v1",
-            "graph_snapshot_digest": "sha256:post-rejection",
-            "commands": [
-              { "type": "propose_task", "team_ref": "team-backend", "task_ref": "task-release-notes-revision", "title": "补充 release notes 风险章节", "revises_resource": "resource-release-notes" }
-            ]
-          },
-          "note": "返工范围需判断（哪个产物、什么改动）→ Planner replan；决策过 stale guard 后应用；replan_count 0→1"
+            "outcome": "PASS",
+            "usage": {
+              "tokens": 8000,
+              "model_cost_microusd": 4000
+            },
+            "decision": {
+              "schema": "coifesp.orchestration-decision.v1",
+              "based_on": {
+                "process_version": {
+                  "operand": "process_version_at_run_creation",
+                  "ref": "planner-rework-run-1"
+                },
+                "last_event_sequence": {
+                  "operand": "initial_state"
+                },
+                "graph_snapshot_digest": {
+                  "operand": "graph_digest_at_run_creation",
+                  "ref": "planner-rework-run-1"
+                }
+              },
+              "reason": "DELIVERY_REJECTED",
+              "commands": [
+                {
+                  "type": "propose_task",
+                  "task_ref": "task-release-notes-revision",
+                  "team_ref": "team-backend",
+                  "title": "add the risk section to the release notes",
+                  "revises_resource": "resource-release-notes"
+                }
+              ]
+            }
+          }
         },
         {
-          "event_ref": "e03",
+          "source_event_id": "s03",
           "event_type": "team_task.accepted",
-          "actor": { "initiated_by": "team-agent:team-backend" },
-          "payload": { "task_ref": "task-release-notes-revision", "task_status": "accepted" }
-        },
-        {
-          "event_ref": "e04",
-          "event_type": "work.dispatched",
-          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-backend" },
-          "payload": { "task_ref": "task-release-notes-revision", "run_ref": "run-rework-1" }
-        },
-        {
-          "event_ref": "e05",
-          "event_type": "team_task.started",
-          "actor": { "initiated_by": "team-agent:team-backend" },
-          "payload": { "task_ref": "task-release-notes-revision", "task_status": "in_progress" }
-        },
-        {
-          "event_ref": "e06",
-          "event_type": "team_task.submitted",
-          "actor": { "initiated_by": "team-agent:team-backend" },
-          "payload": { "task_ref": "task-release-notes-revision", "artifact_refs": ["resource-release-notes"], "artifact_version": 2 }
-        },
-        {
-          "event_ref": "e07",
-          "event_type": "team_task.verified",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "payload": { "task_ref": "task-release-notes-revision", "passed": true }
-        },
-        {
-          "event_ref": "e07b",
-          "event_type": "all_required_work_submitted",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "note": "Harness 聚合判定：含返工任务在内的全部必需工作已验证"
-        },
-        {
-          "event_ref": "e08",
-          "event_type": "verification.passed",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "note": "项目级验证（含已 verified 的原任务聚合）再次通过"
-        },
-        {
-          "event_ref": "e09",
-          "event_type": "integration.passed",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "payload": { "integration_ref": "integration-2", "input_artifact_refs": ["resource-api-spec", "resource-ui-build", "resource-release-notes#v2"] }
-        },
-        {
-          "event_ref": "e10",
-          "event_type": "delivery.accepted",
-          "actor": { "initiated_by": "human:user-project-owner" },
+          "origin": "TEAM",
+          "subject_ref": "task-release-notes-revision",
+          "idempotency_key": "idem:task-release-notes-revision:accept",
           "payload": {
-            "delivery_ref": "delivery-2",
-            "artifact_refs": ["resource-release-bundle"],
-            "release_notes_resource_ref": "resource-release-notes"
-          },
-          "note": "delivery-2 READY 后被 acceptor 接受；Completion Contract 的 required_delivery_accepted 至此满足"
+            "accepted_by": "team-agent:team-backend",
+            "contract_version": 1
+          }
+        },
+        {
+          "source_event_id": "s04",
+          "event_type": "team_task.started",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "task-release-notes-revision",
+          "idempotency_key": "idem:task-release-notes-revision:start",
+          "payload": {
+            "run_ref": "run-rework-1"
+          }
+        },
+        {
+          "source_event_id": "s05",
+          "event_type": "team_task.submitted",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "task-release-notes-revision",
+          "idempotency_key": "idem:task-release-notes-revision:submit:v1",
+          "payload": {
+            "artifact_refs": [
+              "resource-release-notes"
+            ],
+            "artifact_version": 2
+          }
+        },
+        {
+          "source_event_id": "s06",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-rework-1",
+          "idempotency_key": "idem:run-rework-1:terminal",
+          "payload": {
+            "outcome": "PASS",
+            "usage": {
+              "tokens": 7000,
+              "model_cost_microusd": 3500
+            }
+          }
+        },
+        {
+          "source_event_id": "s07",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-verification-1",
+          "idempotency_key": "idem:run-verification-1:terminal",
+          "payload": {
+            "outcome": "PASS"
+          }
+        },
+        {
+          "source_event_id": "s08",
+          "event_type": "project.integration.completed",
+          "origin": "TOOL_WORKER",
+          "subject_ref": "integration-2",
+          "idempotency_key": "idem:integration-2:complete",
+          "payload": {
+            "outcome": "PASS",
+            "input_artifact_refs": [
+              "resource-api-spec",
+              "resource-ui-build",
+              "resource-release-notes#2"
+            ]
+          }
+        },
+        {
+          "source_event_id": "s09",
+          "event_type": "approval.decided",
+          "origin": "HUMAN",
+          "subject_ref": "delivery-2",
+          "idempotency_key": "idem:delivery-2:accept",
+          "payload": {
+            "decision": "ACCEPT",
+            "decided_by": "human:user-project-owner",
+            "role": "delivery_acceptor",
+            "expected_manifest_version": 1
+          }
         }
       ],
-      "expected_transitions": [
+      "expected_steps": [
         {
-          "step_ref": "t01",
-          "trigger_event_ref": "e01",
-          "from": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "delivery.rejected",
-          "note": "交付被拒：合法回退路径（ADR-0005 主链外唯一 DELIVERY→EXECUTION 通道）；process 绝不进入 COMPLETED"
+          "step_id": "t01",
+          "stimulus_ref": "s01",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 2,
+          "emitted_domain_facts": [
+            {
+              "event_type": "approval.decided",
+              "subject_ref": "delivery-1"
+            },
+            {
+              "event_type": "project.delivery.rejected",
+              "subject_ref": "delivery-1",
+              "transition_key": "delivery.rejected",
+              "transition": {
+                "from": {
+                  "phase": "DELIVERY",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "EXECUTION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "delivery_manifest",
+              "object_ref": "delivery-1",
+              "note": "status READY->REJECTED, terminal for this manifest; reason recorded; never reset to READY",
+              "idempotency_key": "idem:delivery-1:reject"
+            },
+            {
+              "object_type": "agent_run",
+              "object_ref": "planner-rework-run-1",
+              "note": "queued; run_kind=replanning; initiated_by/executed_as=service:project-orchestrator; reason=DELIVERY_REJECTED; intent idem:intent:process-demo-1:DELIVERY_REJECTED"
+            }
+          ],
+          "commands": [],
+          "observations": [
+            "The only sanctioned DELIVERY->EXECUTION path is delivery.rejected / scope.changed (ADR-0005 decision 5); completion is impossible here."
+          ]
         },
         {
-          "step_ref": "t02",
-          "trigger_event_ref": "e02",
-          "from": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "0",
-          "transition_event_type": "plan.replanned",
-          "note": "rework 任务进入 proposed（待接受）；READY 保持到接受发生（本场景 planner run 快速完成，窗口内无活跃 run）"
+          "step_id": "t02",
+          "stimulus_ref": "s02",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "BLOCKED",
+            "wait_reason": "TEAM_RESPONSE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "planner-rework-run-1",
+              "transition": {
+                "from": {
+                  "phase": "EXECUTION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "EXECUTION",
+                  "status": "BLOCKED",
+                  "wait_reason": "TEAM_RESPONSE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "work_node",
+              "object_ref": "node-task-release-notes-revision",
+              "note": "task proposed for team-backend; revises resource-release-notes"
+            },
+            {
+              "object_type": "usage_counter",
+              "object_ref": "usage-demo-1",
+              "note": "replan_count 0->1 (graph mutation); command id cmd-propose-rework-notes"
+            }
+          ],
+          "commands": [
+            {
+              "command_id": "cmd-propose-rework-notes",
+              "command_type": "propose_task"
+            }
+          ],
+          "observations": [
+            "Stale guard passes with run-creation-time operands."
+          ]
         },
         {
-          "step_ref": "t03",
-          "trigger_event_refs": ["e03", "e04"],
-          "from": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "work.dispatched"
+          "step_id": "t03",
+          "stimulus_ref": "s03",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 4,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.accepted",
+              "subject_ref": "task-release-notes-revision"
+            },
+            {
+              "event_type": "project.capability.matched",
+              "subject_ref": "task-release-notes-revision"
+            },
+            {
+              "event_type": "project.capacity.reserved",
+              "subject_ref": "reservation-rework-1"
+            },
+            {
+              "event_type": "project.work.dispatched",
+              "subject_ref": "run-rework-1",
+              "transition_key": "work.dispatched",
+              "transition": {
+                "from": {
+                  "phase": "EXECUTION",
+                  "status": "BLOCKED",
+                  "wait_reason": "TEAM_RESPONSE"
+                },
+                "to": {
+                  "phase": "EXECUTION",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [
+            "run-rework-1"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "capacity_reservation",
+              "object_ref": "reservation-rework-1",
+              "note": "state=reserved",
+              "idempotency_key": "idem:reserve:task-release-notes-revision:v1"
+            },
+            {
+              "object_type": "agent_run",
+              "object_ref": "run-rework-1",
+              "note": "executed_as=team-agent:team-backend; command id cmd-dispatch-rework-1"
+            }
+          ],
+          "commands": [
+            {
+              "command_id": "cmd-dispatch-rework-1",
+              "command_type": "propose_task"
+            }
+          ],
+          "observations": []
         },
         {
-          "step_ref": "t04",
-          "trigger_event_ref": "e07b",
-          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "to": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "all_required_work_submitted"
+          "step_id": "t04",
+          "stimulus_ref": "s04",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.started",
+              "subject_ref": "task-release-notes-revision"
+            }
+          ],
+          "active_operations": [
+            "run-rework-1"
+          ],
+          "created_or_updated": [],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t05",
-          "trigger_event_ref": "e08",
-          "from": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "verification.passed"
+          "step_id": "t05",
+          "stimulus_ref": "s05",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.submitted",
+              "subject_ref": "task-release-notes-revision"
+            }
+          ],
+          "active_operations": [
+            "run-rework-1"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "artifact",
+              "object_ref": "resource-release-notes",
+              "note": "version=2 appended; v1 preserved"
+            }
+          ],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t06",
-          "trigger_event_ref": "e09",
-          "from": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "integration.passed",
-          "note": "integration-2 通过，delivery-2 就绪"
+          "step_id": "t06",
+          "stimulus_ref": "s06",
+          "expected_process": {
+            "phase": "VERIFICATION",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 3,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-rework-1"
+            },
+            {
+              "event_type": "team_task.verified",
+              "subject_ref": "task-release-notes-revision"
+            },
+            {
+              "event_type": "project.work.required_submitted",
+              "subject_ref": "process-demo-1",
+              "transition_key": "all_required_work_submitted",
+              "transition": {
+                "from": {
+                  "phase": "EXECUTION",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "VERIFICATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "verification",
+              "object_ref": "verif-task-release-notes-revision-1",
+              "note": "outcome=PASS"
+            },
+            {
+              "object_type": "agent_run",
+              "object_ref": "run-verification-1",
+              "note": "queued; executed_as=service:project-orchestrator"
+            }
+          ],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t07",
-          "trigger_event_ref": "e10",
-          "from": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "TERMINAL", "status": "COMPLETED", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "delivery.accepted"
+          "step_id": "t07",
+          "stimulus_ref": "s07",
+          "expected_process": {
+            "phase": "INTEGRATION",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 2,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-verification-1"
+            },
+            {
+              "event_type": "project.verification.completed",
+              "subject_ref": "process-demo-1",
+              "outcome": "PASS",
+              "transition_key": "verification.passed",
+              "transition": {
+                "from": {
+                  "phase": "VERIFICATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "INTEGRATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "integration_run",
+              "object_ref": "integration-2",
+              "note": "created; input includes resource-release-notes#2"
+            }
+          ],
+          "commands": [],
+          "observations": []
+        },
+        {
+          "step_id": "t08",
+          "stimulus_ref": "s08",
+          "expected_process": {
+            "phase": "DELIVERY",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "project.integration.completed",
+              "subject_ref": "integration-2",
+              "outcome": "PASS",
+              "transition_key": "integration.passed",
+              "transition": {
+                "from": {
+                  "phase": "INTEGRATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "DELIVERY",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "delivery_manifest",
+              "object_ref": "delivery-2",
+              "note": "new manifest; ASSEMBLING->READY; digest manifest differs from delivery-1 (resource-release-notes#2)"
+            }
+          ],
+          "commands": [],
+          "observations": []
+        },
+        {
+          "step_id": "t09",
+          "stimulus_ref": "s09",
+          "expected_process": {
+            "phase": "TERMINAL",
+            "status": "COMPLETED",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 3,
+          "emitted_domain_facts": [
+            {
+              "event_type": "approval.decided",
+              "subject_ref": "delivery-2"
+            },
+            {
+              "event_type": "project.delivery.accepted",
+              "subject_ref": "delivery-2",
+              "transition_key": "delivery.accepted",
+              "transition": {
+                "from": {
+                  "phase": "DELIVERY",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "TERMINAL",
+                  "status": "COMPLETED",
+                  "wait_reason": "NONE"
+                }
+              }
+            },
+            {
+              "event_type": "project.completion.evaluated",
+              "subject_ref": "completion-contract-1",
+              "outcome": "PASS"
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [],
+          "commands": [],
+          "observations": [
+            "required_delivery_accepted=true is satisfied only by delivery-2 at this step."
+          ]
         }
       ],
       "required_outputs": [
-        { "output_id": "ro-01", "kind": "state", "statement": "delivery-1 状态定格 REJECTED（终态、可追溯），不被复用或回改为 READY", "subject_refs": ["delivery-1"] },
-        { "output_id": "ro-02", "kind": "state", "statement": "从 e01 到 e10 之前，Completion Contract 始终不满足（required_delivery_accepted=false），process 未到达 TERMINAL/COMPLETED（G-INV-12）", "subject_refs": ["completion-contract-1"] },
-        { "output_id": "ro-03", "kind": "state", "statement": "delivery-2 引用 resource-release-notes v2 与新的集成结果；其版本/digest manifest 与 v1 不同", "subject_refs": ["delivery-2", "resource-release-notes"] },
-        { "output_id": "ro-04", "kind": "usage", "statement": "replan_count 从 0 到 1（delivery 拒绝驱动的重规划计入），且低于 max_replans", "subject_refs": ["process-demo-1"] },
-        { "output_id": "ro-05", "kind": "state", "statement": "rework 任务走完整生命周期并重新通过 task 级验证与项目级验证/集成，未绕过任何质量门" }
+        {
+          "output_id": "ro-01",
+          "statement": "delivery-1 is terminal in state REJECTED with the reason recorded; it is never reused, re-accepted, or reset to READY (idem:delivery-1:reject)."
+        },
+        {
+          "output_id": "ro-02",
+          "statement": "Between t01 and t08 the completion contract remains unsatisfied and no step shows TERMINAL/COMPLETED; every intermediate expected_process differs from TERMINAL."
+        },
+        {
+          "output_id": "ro-03",
+          "statement": "delivery-2 references resource-release-notes#2 and integration-2; its digest manifest differs from delivery-1."
+        },
+        {
+          "output_id": "ro-04",
+          "statement": "usage-demo-1.replan_count goes 0->1 exactly once at t02 (cmd-propose-rework-notes), below max_replans=5."
+        },
+        {
+          "output_id": "ro-05",
+          "statement": "The rework task passes full verification and integration-2 before delivery-2 becomes READY."
+        }
       ],
       "forbidden_outcomes": [
-        { "forbidden_id": "fo-01", "kind": "state", "statement": "delivery-1 处于 REJECTED 时（或其后任何未重新接受交付的时刻）process 到达 TERMINAL/COMPLETED（Eval 14 核心断言）" },
-        { "forbidden_id": "fo-02", "kind": "state", "statement": "不经 rework 直接对 delivery-1 二次 accept，或把 REJECTED 改回 READY" },
-        { "forbidden_id": "fo-03", "kind": "state", "statement": "delivery.rejected 之外的任何事件（如 admin 补丁、planner command）把 DELIVERY 拉回 EXECUTION 或推进 COMPLETED" },
-        { "forbidden_id": "fo-04", "kind": "state", "statement": "rework 产物（resource-release-notes v2）绕过 verification/integration 直接进入 delivery-2" },
-        { "forbidden_id": "fo-05", "kind": "state", "statement": "拒绝导致项目 FAILED/CANCELLED（拒绝是返工信号）" }
+        {
+          "forbidden_id": "fo-01",
+          "statement": "TERMINAL/COMPLETED while delivery-1 is REJECTED, or at any step before t09 (Eval 14 binding assertion)."
+        },
+        {
+          "forbidden_id": "fo-02",
+          "statement": "delivery-1 is accepted a second time or reset from REJECTED to READY."
+        },
+        {
+          "forbidden_id": "fo-03",
+          "statement": "Any event other than delivery.rejected / scope.changed moves DELIVERY back to EXECUTION, or a planner/admin patch advances the process directly."
+        },
+        {
+          "forbidden_id": "fo-04",
+          "statement": "resource-release-notes#2 bypasses verification or integration-2 on its way into delivery-2."
+        },
+        {
+          "forbidden_id": "fo-05",
+          "statement": "The rejection fails or cancels the project."
+        }
       ],
       "safety_invariants": [
-        { "invariant_id": "si-01", "statement": "DELIVERY→EXECUTION 回退只发生在 delivery.rejected / scope.changed 显式事件上，且每次回退 +1 version +1 权威事件（ADR-0005）" },
-        { "invariant_id": "si-02", "statement": "完成判定由确定性 CompletionEvaluator 做出：LLM/Agent 输出不能设置 COMPLETED（G-INV-12）" }
+        {
+          "invariant_id": "si-01",
+          "statement": "Each DELIVERY->EXECUTION rework round is a guarded transition with exactly one version increment and one durable event (ADR-0005 decision 6)."
+        },
+        {
+          "invariant_id": "si-02",
+          "statement": "Completion is decided only by the deterministic evaluator; model output cannot set TERMINAL/COMPLETED (G-INV-12)."
+        }
       ],
-      "crash_and_recovery": [],
-      "contract_assumptions": ["OPEN-Q1", "OPEN-Q3", "OPEN-Q7", "OPEN-Q12"]
+      "crash_and_recovery": []
     },
     {
       "scenario_id": "eval-12-human-input-suspension-restart",
       "eval_ref": "Eval 12",
-      "summary": "Delivery 拒绝后的 rework 执行中，agent 发现缺少必要业务信息（合规阈值数值），以 input request 正常结束；process 进入稳定 WAITING/HUMAN_INPUT；注入进程重启后 request 与状态均持久；人类回答后项目恢复并完成。",
+      "summary": "The rework agent lacks a compliance threshold value. Its run ends normally with a request_human_input command; the process parks in WAITING/HUMAN_INPUT with a durable ProjectInputRequest, survives a control-plane restart, and resumes only via human.input.provided.",
       "initial_state": {
         "process": {
           "process_ref": "process-demo-1",
+          "project_ref": "project-harness-demo",
           "phase": "EXECUTION",
           "status": "RUNNING",
-          "wait_reason": "NONE"
+          "wait_reason": "NONE",
+          "process_version": 12,
+          "last_event_sequence": 20
         },
-        "work_graph": {
+        "graph": {
           "nodes": [
-            { "node_ref": "task-release-notes-revision", "node_type": "task", "team_ref": "team-backend", "task_status": "in_progress" }
+            {
+              "node_ref": "node-goal-1",
+              "node_type": "goal",
+              "subject_ref": "goal-1"
+            },
+            {
+              "node_ref": "node-task-release-notes-revision",
+              "node_type": "task",
+              "subject_ref": "task-release-notes-revision",
+              "team_ref": "team-backend",
+              "task_status": "in_progress"
+            }
           ],
-          "relations": []
+          "relations": [],
+          "graph_snapshot_digest": {
+            "operand": "literal",
+            "value": "sha256:d12-rework"
+          }
         },
-        "active_runs": [
+        "contracts": [
+          {
+            "contract_ref": "contract-rework-1",
+            "task_ref": "task-release-notes-revision",
+            "requester_team_ref": "team-frontend",
+            "provider_team_ref": "team-backend",
+            "requested_capability": "backend-api",
+            "task_status": "in_progress",
+            "contract_version": 1,
+            "input_manifest": {
+              "resources": [
+                {
+                  "resource_ref": "resource-release-notes",
+                  "propagation": "portable"
+                }
+              ]
+            },
+            "output_contract": {
+              "artifact_types": [
+                "text/markdown"
+              ],
+              "required": true
+            }
+          }
+        ],
+        "artifacts": [
+          {
+            "resource_ref": "resource-release-notes",
+            "version": 1,
+            "propagation": "portable"
+          }
+        ],
+        "verifications": [
+          {
+            "verification_ref": "verif-task-backend-api-1",
+            "subject_ref": "task-backend-api",
+            "outcome": "PASS"
+          },
+          {
+            "verification_ref": "verif-task-frontend-ui-1",
+            "subject_ref": "task-frontend-ui",
+            "outcome": "PASS"
+          }
+        ],
+        "integration": null,
+        "delivery": null,
+        "completion_contract": {
+          "contract_ref": "completion-contract-1",
+          "required_delivery_accepted": true
+        },
+        "execution_policy": {
+          "policy_ref": "policy-default",
+          "max_agent_runs": 50,
+          "max_total_tokens": 2000000,
+          "max_model_cost_microusd": 5000000,
+          "max_replans": 5,
+          "max_generated_tasks": 20,
+          "max_active_agent_runs": 4,
+          "max_active_runs_per_team": 2,
+          "max_specialist_depth": 2,
+          "max_specialist_runs_per_task": 2,
+          "deadline_at": null,
+          "version": 1
+        },
+        "usage": {
+          "usage_ref": "usage-demo-1",
+          "agent_runs_started": 4,
+          "agent_runs_completed": 3,
+          "total_tokens": 111000,
+          "model_cost_microusd": 66500,
+          "replan_count": 1,
+          "generated_task_count": 3,
+          "active_agent_runs": 1
+        },
+        "runs": [
           {
             "run_ref": "run-rework-1",
             "run_kind": "task_execution",
-            "team_ref": "team-backend",
             "task_ref": "task-release-notes-revision",
+            "team_ref": "team-backend",
             "initiated_by": "service:project-orchestrator",
-            "executed_as": "team-agent:team-backend"
+            "executed_as": "team-agent:team-backend",
+            "execution_state": "running"
           }
         ],
-        "execution_usage": { "agent_runs_started": 3, "replan_count": 1 },
-        "open_gates": [],
-        "open_input_requests": []
+        "tool_jobs": [],
+        "reservations": [
+          {
+            "reservation_ref": "reservation-rework-1",
+            "capability_ref": "backend-api",
+            "team_ref": "team-backend",
+            "task_ref": "task-release-notes-revision",
+            "state": "reserved"
+          }
+        ],
+        "capabilities": [
+          {
+            "capability_ref": "backend-api",
+            "team_ref": "team-backend",
+            "capacity": 2
+          }
+        ],
+        "gates": [],
+        "input_requests": [],
+        "pending_events": [],
+        "outbox": []
       },
-      "input_events": [
+      "stimuli": [
         {
-          "event_ref": "e01",
-          "event_type": "input_request.created",
-          "actor": { "initiated_by": "team-agent:team-backend" },
+          "source_event_id": "s01",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-rework-1",
+          "idempotency_key": "idem:run-rework-1:terminal",
           "payload": {
-            "input_request_ref": "input-request-1",
-            "requested_by_run_ref": "run-rework-1",
-            "work_node_ref": "task-release-notes-revision",
-            "question": "风险章节所需的合规阈值数值是多少？",
-            "input_schema": { "compliance_threshold": "number" },
-            "status": "OPEN"
-          },
-          "note": "agent run 以 input request command 正常结束（计划 4.6 推荐行为）；事件名为语义占位（OPEN-Q9）"
+            "outcome": "PASS",
+            "usage": {
+              "tokens": 6000,
+              "model_cost_microusd": 3000
+            },
+            "run_command": {
+              "type": "request_human_input",
+              "question": "what is the compliance threshold value for the risk section?",
+              "input_schema": {
+                "compliance_threshold": "number"
+              },
+              "work_node_ref": "task-release-notes-revision"
+            }
+          }
         },
         {
-          "event_ref": "e02",
-          "event_type": "harness.fault_injection",
-          "fault": { "kind": "control_plane_restart" },
-          "note": "在 WAITING/HUMAN_INPUT 状态下重启：验证 input request 与 WAITING 均为持久状态"
+          "source_event_id": "s02",
+          "event_type": "fixture.fault_injection",
+          "origin": "FIXTURE_FAULT",
+          "subject_ref": "process-demo-1",
+          "idempotency_key": "fault:s02:restart",
+          "payload": {
+            "fault": {
+              "kind": "control_plane_restart",
+              "timing": "while WAITING/HUMAN_INPUT with input-request-1 OPEN"
+            }
+          }
         },
         {
-          "event_ref": "e03",
+          "source_event_id": "s03",
           "event_type": "human.input.provided",
-          "actor": { "initiated_by": "human:user-project-owner" },
+          "origin": "HUMAN",
+          "subject_ref": "input-request-1",
+          "idempotency_key": "idem:input-request-1:answer",
           "payload": {
-            "input_request_ref": "input-request-1",
-            "response": { "compliance_threshold": 0.02 }
-          },
-          "note": "人类回答（wakeup 源事件，计划 8.2）"
+            "answered_by": "human:user-project-owner",
+            "expected_request_version": 1,
+            "expected_process_version": 13,
+            "response": {
+              "compliance_threshold": 0.02
+            }
+          }
         },
         {
-          "event_ref": "e04",
-          "event_type": "work.dispatched",
-          "actor": { "initiated_by": "service:project-orchestrator", "executed_as": "team-agent:team-backend" },
-          "payload": { "task_ref": "task-release-notes-revision", "run_ref": "run-rework-2", "note": "新 run 携带回答上下文继续返工" }
+          "source_event_id": "s04",
+          "event_type": "team_task.started",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "task-release-notes-revision",
+          "idempotency_key": "idem:task-release-notes-revision:start:resume",
+          "payload": {
+            "run_ref": "run-rework-2"
+          }
         },
         {
-          "event_ref": "e05",
+          "source_event_id": "s05",
           "event_type": "team_task.submitted",
-          "actor": { "initiated_by": "team-agent:team-backend" },
-          "payload": { "task_ref": "task-release-notes-revision", "artifact_refs": ["resource-release-notes"], "artifact_version": 2 }
+          "origin": "AGENT_WORKER",
+          "subject_ref": "task-release-notes-revision",
+          "idempotency_key": "idem:task-release-notes-revision:submit:v2",
+          "payload": {
+            "artifact_refs": [
+              "resource-release-notes"
+            ],
+            "artifact_version": 2
+          }
         },
         {
-          "event_ref": "e06",
-          "event_type": "team_task.verified",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "payload": { "task_ref": "task-release-notes-revision", "passed": true }
+          "source_event_id": "s06",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-rework-2",
+          "idempotency_key": "idem:run-rework-2:terminal",
+          "payload": {
+            "outcome": "PASS",
+            "usage": {
+              "tokens": 7000,
+              "model_cost_microusd": 3500
+            }
+          }
         },
         {
-          "event_ref": "e06b",
-          "event_type": "all_required_work_submitted",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "note": "Harness 聚合判定：全部必需工作已验证"
+          "source_event_id": "s07",
+          "event_type": "agent_run.completed",
+          "origin": "AGENT_WORKER",
+          "subject_ref": "run-verification-1",
+          "idempotency_key": "idem:run-verification-1:terminal",
+          "payload": {
+            "outcome": "PASS"
+          }
         },
         {
-          "event_ref": "e07",
-          "event_type": "verification.passed",
-          "actor": { "initiated_by": "service:project-orchestrator" }
+          "source_event_id": "s08",
+          "event_type": "project.integration.completed",
+          "origin": "TOOL_WORKER",
+          "subject_ref": "integration-2",
+          "idempotency_key": "idem:integration-2:complete",
+          "payload": {
+            "outcome": "PASS"
+          }
         },
         {
-          "event_ref": "e08",
-          "event_type": "integration.passed",
-          "actor": { "initiated_by": "service:project-orchestrator" },
-          "payload": { "integration_ref": "integration-2" }
-        },
-        {
-          "event_ref": "e09",
-          "event_type": "delivery.accepted",
-          "actor": { "initiated_by": "human:user-project-owner" },
-          "payload": { "delivery_ref": "delivery-2" }
+          "source_event_id": "s09",
+          "event_type": "approval.decided",
+          "origin": "HUMAN",
+          "subject_ref": "delivery-2",
+          "idempotency_key": "idem:delivery-2:accept",
+          "payload": {
+            "decision": "ACCEPT",
+            "decided_by": "human:user-project-owner",
+            "role": "delivery_acceptor"
+          }
         }
       ],
-      "expected_transitions": [
+      "expected_steps": [
         {
-          "step_ref": "t01",
-          "trigger_event_ref": "e01",
-          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "to": { "phase": "EXECUTION", "status": "WAITING", "wait_reason": "HUMAN_INPUT" },
-          "process_version_change": "+1",
-          "transition_event_type": "input_request.created",
-          "note": "run 正常 terminal（非挂起），request 持久 OPEN，orchestrator 睡眠（计划 4.6 第一版行为，OPEN-Q9）"
+          "step_id": "t01",
+          "stimulus_ref": "s01",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "WAITING",
+            "wait_reason": "HUMAN_INPUT"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 2,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-rework-1"
+            },
+            {
+              "event_type": "project.input.requested",
+              "subject_ref": "input-request-1",
+              "transition": {
+                "from": {
+                  "phase": "EXECUTION",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "EXECUTION",
+                  "status": "WAITING",
+                  "wait_reason": "HUMAN_INPUT"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "input_request",
+              "object_ref": "input-request-1",
+              "note": "status=OPEN; requested_by_run=run-rework-1; question/schema recorded; atomic with the transition (ADR-0009 decision 5)",
+              "idempotency_key": "idem:input-request-1:create"
+            },
+            {
+              "object_type": "agent_run",
+              "object_ref": "run-rework-1",
+              "note": "terminal (normal end with a typed command); the run is NOT held open pending the answer (ADR-0009 decision 8)"
+            }
+          ],
+          "commands": [
+            {
+              "command_id": "cmd-request-human-input-1",
+              "command_type": "request_human_input"
+            }
+          ],
+          "observations": []
         },
         {
-          "step_ref": "t02",
-          "trigger_event_ref": "e02",
-          "from": { "phase": "EXECUTION", "status": "WAITING", "wait_reason": "HUMAN_INPUT" },
-          "to": { "phase": "EXECUTION", "status": "WAITING", "wait_reason": "HUMAN_INPUT" },
-          "process_version_change": "0",
-          "transition_event_type": null,
-          "note": "重启后：process 仍 WAITING/HUMAN_INPUT，input-request-1 仍 OPEN，无重复创建、无自动恢复执行"
+          "step_id": "t02",
+          "stimulus_ref": "s02",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "WAITING",
+            "wait_reason": "HUMAN_INPUT"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 0,
+          "emitted_domain_facts": [],
+          "active_operations": [],
+          "created_or_updated": [],
+          "commands": [],
+          "observations": [
+            "Restart assertion: input-request-1 remains OPEN with identical content; no duplicate request is created; the process stays WAITING/HUMAN_INPUT; no automatic resume."
+          ]
         },
         {
-          "step_ref": "t03",
-          "trigger_event_ref": "e03",
-          "from": { "phase": "EXECUTION", "status": "WAITING", "wait_reason": "HUMAN_INPUT" },
-          "to": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "human.input.provided",
-          "note": "request 置为 ANSWERED（记录 answered_by/answered_at），orchestrator 被唤醒"
+          "step_id": "t03",
+          "stimulus_ref": "s03",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 2,
+          "emitted_domain_facts": [
+            {
+              "event_type": "human.input.provided",
+              "subject_ref": "input-request-1"
+            },
+            {
+              "event_type": "project.work.dispatched",
+              "subject_ref": "run-rework-2",
+              "transition_key": "work.dispatched",
+              "transition": {
+                "from": {
+                  "phase": "EXECUTION",
+                  "status": "WAITING",
+                  "wait_reason": "HUMAN_INPUT"
+                },
+                "to": {
+                  "phase": "EXECUTION",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [
+            "run-rework-2"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "input_request",
+              "object_ref": "input-request-1",
+              "note": "status OPEN->ANSWERED; answered_by and answered_at recorded"
+            },
+            {
+              "object_type": "agent_run",
+              "object_ref": "run-rework-2",
+              "note": "new run with the answer in its context projection (compliance_threshold=0.02); executed_as=team-agent:team-backend; command id cmd-dispatch-rework-2"
+            }
+          ],
+          "commands": [
+            {
+              "command_id": "cmd-dispatch-rework-2",
+              "command_type": "propose_task",
+              "note": "the orchestrator creates a new run after the answer; the original run is not resumed in place (ADR-0009 decision 8)"
+            }
+          ],
+          "observations": [
+            "Answer requires authorization, idempotency key, and expected object/process versions (ADR-0009 decision 6)."
+          ]
         },
         {
-          "step_ref": "t04",
-          "trigger_event_ref": "e04",
-          "from": { "phase": "EXECUTION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "work.dispatched"
+          "step_id": "t04",
+          "stimulus_ref": "s04",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.started",
+              "subject_ref": "task-release-notes-revision"
+            }
+          ],
+          "active_operations": [
+            "run-rework-2"
+          ],
+          "created_or_updated": [],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t05",
-          "trigger_event_ref": "e06b",
-          "from": { "phase": "EXECUTION", "status": "RUNNING", "wait_reason": "NONE" },
-          "to": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "all_required_work_submitted"
+          "step_id": "t05",
+          "stimulus_ref": "s05",
+          "expected_process": {
+            "phase": "EXECUTION",
+            "status": "RUNNING",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 0,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "team_task.submitted",
+              "subject_ref": "task-release-notes-revision"
+            }
+          ],
+          "active_operations": [
+            "run-rework-2"
+          ],
+          "created_or_updated": [
+            {
+              "object_type": "artifact",
+              "object_ref": "resource-release-notes",
+              "note": "version=2 appended"
+            }
+          ],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t06",
-          "trigger_event_ref": "e07",
-          "from": { "phase": "VERIFICATION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "verification.passed"
+          "step_id": "t06",
+          "stimulus_ref": "s06",
+          "expected_process": {
+            "phase": "VERIFICATION",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 3,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-rework-2"
+            },
+            {
+              "event_type": "team_task.verified",
+              "subject_ref": "task-release-notes-revision"
+            },
+            {
+              "event_type": "project.work.required_submitted",
+              "subject_ref": "process-demo-1",
+              "transition_key": "all_required_work_submitted",
+              "transition": {
+                "from": {
+                  "phase": "EXECUTION",
+                  "status": "RUNNING",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "VERIFICATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "verification",
+              "object_ref": "verif-task-release-notes-revision-1",
+              "note": "outcome=PASS"
+            },
+            {
+              "object_type": "agent_run",
+              "object_ref": "run-verification-1",
+              "note": "queued; executed_as=service:project-orchestrator"
+            }
+          ],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t07",
-          "trigger_event_ref": "e08",
-          "from": { "phase": "INTEGRATION", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "integration.passed"
+          "step_id": "t07",
+          "stimulus_ref": "s07",
+          "expected_process": {
+            "phase": "INTEGRATION",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 2,
+          "emitted_domain_facts": [
+            {
+              "event_type": "agent_run.completed",
+              "subject_ref": "run-verification-1"
+            },
+            {
+              "event_type": "project.verification.completed",
+              "subject_ref": "process-demo-1",
+              "outcome": "PASS",
+              "transition_key": "verification.passed",
+              "transition": {
+                "from": {
+                  "phase": "VERIFICATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "INTEGRATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "integration_run",
+              "object_ref": "integration-2",
+              "note": "created"
+            }
+          ],
+          "commands": [],
+          "observations": []
         },
         {
-          "step_ref": "t08",
-          "trigger_event_ref": "e09",
-          "from": { "phase": "DELIVERY", "status": "READY", "wait_reason": "NONE" },
-          "to": { "phase": "TERMINAL", "status": "COMPLETED", "wait_reason": "NONE" },
-          "process_version_change": "+1",
-          "transition_event_type": "delivery.accepted"
+          "step_id": "t08",
+          "stimulus_ref": "s08",
+          "expected_process": {
+            "phase": "DELIVERY",
+            "status": "READY",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 1,
+          "emitted_domain_facts": [
+            {
+              "event_type": "project.integration.completed",
+              "subject_ref": "integration-2",
+              "outcome": "PASS",
+              "transition_key": "integration.passed",
+              "transition": {
+                "from": {
+                  "phase": "INTEGRATION",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "DELIVERY",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                }
+              }
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [
+            {
+              "object_type": "delivery_manifest",
+              "object_ref": "delivery-2",
+              "note": "ASSEMBLING->READY"
+            }
+          ],
+          "commands": [],
+          "observations": []
+        },
+        {
+          "step_id": "t09",
+          "stimulus_ref": "s09",
+          "expected_process": {
+            "phase": "TERMINAL",
+            "status": "COMPLETED",
+            "wait_reason": "NONE"
+          },
+          "process_version_change": 1,
+          "event_sequence_change": 3,
+          "emitted_domain_facts": [
+            {
+              "event_type": "approval.decided",
+              "subject_ref": "delivery-2"
+            },
+            {
+              "event_type": "project.delivery.accepted",
+              "subject_ref": "delivery-2",
+              "transition_key": "delivery.accepted",
+              "transition": {
+                "from": {
+                  "phase": "DELIVERY",
+                  "status": "READY",
+                  "wait_reason": "NONE"
+                },
+                "to": {
+                  "phase": "TERMINAL",
+                  "status": "COMPLETED",
+                  "wait_reason": "NONE"
+                }
+              }
+            },
+            {
+              "event_type": "project.completion.evaluated",
+              "subject_ref": "completion-contract-1",
+              "outcome": "PASS"
+            }
+          ],
+          "active_operations": [],
+          "created_or_updated": [],
+          "commands": [],
+          "observations": []
         }
       ],
       "required_outputs": [
-        { "output_id": "ro-01", "kind": "state", "statement": "input-request-1 为持久对象：跨 control_plane_restart 存活，保持 OPEN 且内容（question/schema/请求 run）不变、不重复创建", "subject_refs": ["input-request-1"] },
-        { "output_id": "ro-02", "kind": "state", "statement": "run-rework-1 在发出 input request 时正常 terminal（记录于 run 历史），不以挂起/僵尸状态驻留", "subject_refs": ["run-rework-1"] },
-        { "output_id": "ro-03", "kind": "state", "statement": "回答后 run-rework-2 的 context 包含回答内容（compliance_threshold=0.02）；request 状态 ANSWERED 且记录回答者", "subject_refs": ["run-rework-2", "input-request-1"] },
-        { "output_id": "ro-04", "kind": "audit", "statement": "audit 完整记录 提问（由哪个 run 发起）→ 重启 → 回答（由谁）→ 恢复 dispatch 链路；身份全程符合 G-INV-06" }
+        {
+          "output_id": "ro-01",
+          "statement": "input-request-1 is durable: it crosses the t02 restart with status OPEN and identical question/schema/requester, created exactly once (idem:input-request-1:create)."
+        },
+        {
+          "output_id": "ro-02",
+          "statement": "run-rework-1 ends terminally at t01 (normal end with a typed command); no run sits in a suspended/awaiting state across the wait."
+        },
+        {
+          "output_id": "ro-03",
+          "statement": "run-rework-2's context projection contains the answer (compliance_threshold=0.02); input-request-1 is ANSWERED with answered_by recorded."
+        },
+        {
+          "output_id": "ro-04",
+          "statement": "Audit records the chain: request by run-rework-1 -> restart -> answer by human:user-project-owner -> dispatch run-rework-2, with identities preserved per G-INV-06."
+        }
       ],
       "forbidden_outcomes": [
-        { "forbidden_id": "fo-01", "kind": "state", "statement": "重启后 input request 丢失、被重复创建，或 WAITING 状态回退/漂移" },
-        { "forbidden_id": "fo-02", "kind": "dispatch", "statement": "WAITING/HUMAN_INPUT 期间 dispatch 新 run 或推进其他工作" },
-        { "forbidden_id": "fo-03", "kind": "state", "statement": "回答事件以 best-effort 方式丢失导致项目永久 WAITING（必须持久可恢复）" },
-        { "forbidden_id": "fo-04", "kind": "state", "statement": "run-rework-1 以 AWAITING 之类的挂起状态驻留（第一版不扩展 DurableRunStatus，见计划 4.6）" },
-        { "forbidden_id": "fo-05", "kind": "state", "statement": "未回答期间 task/process 被任何超时机制自动置为 FAILED（等待是稳定状态，不是失败）" }
+        {
+          "forbidden_id": "fo-01",
+          "statement": "The input request disappears, is duplicated, or drifts after the restart."
+        },
+        {
+          "forbidden_id": "fo-02",
+          "statement": "Any run is dispatched or other work advances during WAITING/HUMAN_INPUT (t01-t03 window)."
+        },
+        {
+          "forbidden_id": "fo-03",
+          "statement": "The answer event is lost best-effort leaving the project permanently WAITING."
+        },
+        {
+          "forbidden_id": "fo-04",
+          "statement": "run-rework-1 is held open in an awaiting/suspended run state across the wait (ADR-0009 decision 8)."
+        },
+        {
+          "forbidden_id": "fo-05",
+          "statement": "A timeout marks the task or process FAILED while the human wait is pending."
+        }
       ],
       "safety_invariants": [
-        { "invariant_id": "si-01", "statement": "HUMAN_INPUT 等待是稳定可持久状态：进程重启、worker 更替均不改变其语义（Eval 12 核心）" },
-        { "invariant_id": "si-02", "statement": "input request 的 context projection 只包含回答所需的最小项目上下文，不泄露其他团队私有内容（G-INV-07）" }
+        {
+          "invariant_id": "si-01",
+          "statement": "HUMAN_INPUT is a stable, durable wait: restarts and worker turnover do not change its semantics (Eval 12 binding assertion)."
+        },
+        {
+          "invariant_id": "si-02",
+          "statement": "The input request context projection carries the minimum project context needed to answer and no other team's private content (G-INV-07)."
+        }
       ],
       "crash_and_recovery": [
         {
           "recovery_id": "cr-01",
-          "injected_fault": "control_plane_restart(at WAITING/HUMAN_INPUT)",
-          "expected_behavior": "重启后状态与 request 均来自持久层；唯一推进路径是 human.input.provided",
-          "recovery_signal": "human.input.provided 事件唤醒 orchestrator",
-          "idempotency_requirement": "回答事件重复投递按 request_id 幂等：request 只置 ANSWERED 一次，恢复 dispatch 只发生一次"
+          "fault_kind": "control_plane_restart",
+          "expected_behavior": "Restart preserves the WAITING/HUMAN_INPUT triple and the OPEN request from durable state; the only progress path is human.input.provided.",
+          "recovery_signal": "human.input.provided wakes the orchestrator.",
+          "idempotency_requirement": "Duplicate answers converge by request_id + expected versions; the request flips to ANSWERED once and dispatch happens once."
         }
-      ],
-      "contract_assumptions": ["OPEN-Q1", "OPEN-Q3", "OPEN-Q9", "OPEN-Q13"]
+      ]
     }
   ]
 }
