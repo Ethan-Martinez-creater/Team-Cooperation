@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     CheckConstraint,
     Column,
@@ -9,7 +10,6 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
-    JSON,
     MetaData,
     String,
     Table,
@@ -710,6 +710,33 @@ Index(
     DOCUMENT_CHANGE_DRAFTS.c.status,
 )
 
+TEAM_AGENT_PROFILES = Table(
+    "product_team_agent_profiles",
+    PRODUCT_METADATA,
+    Column("profile_id", String(128), primary_key=True),
+    Column("version", Integer, primary_key=True),
+    Column("team_id", String(128), ForeignKey("product_teams.team_id"), nullable=False),
+    Column("display_name", String(128), nullable=False),
+    Column("tool_policy_id", String(128), nullable=False),
+    Column("skill_policy_id", String(128), nullable=False),
+    Column("model_policy_id", String(128), nullable=False),
+    Column("memory_policy_id", String(128), nullable=False),
+    Column("autonomy_level", String(32), nullable=False),
+    Column("max_run_budget_profile", JSON, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint("version >= 1", name="positive_version"),
+    CheckConstraint(
+        "autonomy_level IN ('supervised','bounded','autonomous')",
+        name="autonomy_level",
+    ),
+    UniqueConstraint("team_id", "version", name="uq_team_agent_profile_version"),
+)
+Index(
+    "ix_product_team_agent_profiles_team",
+    TEAM_AGENT_PROFILES.c.team_id,
+    TEAM_AGENT_PROFILES.c.version,
+)
+
 TEAM_PROJECT_AGENTS = Table(
     "product_team_project_agents",
     PRODUCT_METADATA,
@@ -718,10 +745,20 @@ TEAM_PROJECT_AGENTS = Table(
     Column("team_id", String(128), ForeignKey("product_teams.team_id"), nullable=False),
     Column("status", String(32), nullable=False, server_default="active"),
     Column("memory_version", Integer, nullable=False, server_default="1"),
+    Column("profile_id", String(128), nullable=False),
+    Column("profile_version", Integer, nullable=False, server_default="1"),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     CheckConstraint("status IN ('active','archived')", name="status"),
     CheckConstraint("memory_version >= 1", name="positive_memory_version"),
+    CheckConstraint("profile_version >= 1", name="positive_profile_version"),
+    ForeignKeyConstraint(
+        ["profile_id", "profile_version"],
+        [
+            "product_team_agent_profiles.profile_id",
+            "product_team_agent_profiles.version",
+        ],
+    ),
     UniqueConstraint("project_id", "team_id", name="uq_team_project_agent"),
 )
 Index(
@@ -1045,6 +1082,7 @@ ALL_PRODUCT_TABLES = (
     RESOURCE_VERSIONS,
     RESOURCE_DERIVATIVES,
     DOCUMENT_CHANGE_DRAFTS,
+    TEAM_AGENT_PROFILES,
     TEAM_PROJECT_AGENTS,
     PROJECT_CONVERSATIONS,
     PROJECT_CONVERSATION_MESSAGES,

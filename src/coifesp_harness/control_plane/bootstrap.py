@@ -75,7 +75,7 @@ from ..work_graph import ProjectWorkGraphService, SQLAlchemyWorkGraphRepository
 from .app import create_app
 from .session_lifecycle import SessionLifecycleService
 
-SCHEMA_REVISION = "20260830_50"
+SCHEMA_REVISION = "20260830_51"
 REQUIRED_RLS_TABLES = (
     "audit_events",
     "audit_heads",

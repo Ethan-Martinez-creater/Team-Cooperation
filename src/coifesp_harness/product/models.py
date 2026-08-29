@@ -692,6 +692,21 @@ class TeamProjectAgentStatus(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class TeamAgentProfile:
+    profile_id: str
+    team_id: str
+    version: int
+    display_name: str
+    tool_policy_id: str
+    skill_policy_id: str
+    model_policy_id: str
+    memory_policy_id: str
+    autonomy_level: str
+    max_run_budget_profile: dict
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class TeamProjectAgent:
     agent_id: str
     project_id: str
@@ -700,6 +715,8 @@ class TeamProjectAgent:
     memory_version: int
     created_at: datetime
     updated_at: datetime
+    profile_id: str | None = None
+    profile_version: int = 1
 
 
 @dataclass(frozen=True, slots=True)

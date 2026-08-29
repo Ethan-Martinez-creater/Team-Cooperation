@@ -43,15 +43,16 @@ from .models import (
 from .repository import (
     ACCOUNTS,
     COLLABORATION_ACTION_DRAFTS,
-    PROJECTS,
     PROJECT_ACTIVITIES,
     PROJECT_ACTIVITY_CURSORS,
     PROJECT_AGENT_RUNS,
     PROJECT_AGENT_TURNS,
-    PROJECT_CONVERSATIONS,
     PROJECT_CONVERSATION_MESSAGES,
+    PROJECT_CONVERSATIONS,
     PROJECT_RESOURCES,
     PROJECT_TEAMS,
+    PROJECTS,
+    TEAM_AGENT_PROFILES,
     TEAM_PROJECT_AGENTS,
     TEAM_TASKS,
 )
@@ -73,6 +74,7 @@ class ProjectWorkspaceService:
         self, *, project_id: str, team_id: str
     ) -> TeamProjectAgent:
         now = datetime.now(UTC)
+        profile = self.ensure_team_agent_profile(team_id=team_id)
         try:
             with self.engine.begin() as connection:
                 agent_id = f"agent-{secrets.token_hex(12)}"
@@ -83,6 +85,8 @@ class ProjectWorkspaceService:
                         team_id=team_id,
                         status=TeamProjectAgentStatus.ACTIVE.value,
                         memory_version=1,
+                        profile_id=profile.profile_id,
+                        profile_version=profile.version,
                         created_at=now,
                         updated_at=now,
                     )
@@ -92,6 +96,56 @@ class ProjectWorkspaceService:
                 )
         except IntegrityError:
             return self.get_team_project_agent(project_id=project_id, team_id=team_id)
+
+    def ensure_team_agent_profile(self, *, team_id: str):
+        from .models import TeamAgentProfile
+
+        now = datetime.now(UTC)
+        values = {
+            "profile_id": team_id,
+            "version": 1,
+            "team_id": team_id,
+            "display_name": f"{team_id} Agent",
+            "tool_policy_id": "default",
+            "skill_policy_id": "default",
+            "model_policy_id": "default",
+            "memory_policy_id": "default",
+            "autonomy_level": "bounded",
+            "max_run_budget_profile": {
+                "max_turns": 20,
+                "max_tool_calls": 50,
+                "max_total_tokens": 100000,
+                "max_model_cost_microusd": 10000000,
+            },
+            "created_at": now,
+        }
+        try:
+            with self.engine.begin() as connection:
+                connection.execute(TEAM_AGENT_PROFILES.insert().values(**values))
+        except IntegrityError:
+            pass
+        with self.engine.connect() as connection:
+            row = connection.execute(
+                select(TEAM_AGENT_PROFILES).where(
+                    and_(
+                        TEAM_AGENT_PROFILES.c.profile_id == team_id,
+                        TEAM_AGENT_PROFILES.c.version == 1,
+                    )
+                )
+            ).mappings().one()
+        return TeamAgentProfile(
+            row["profile_id"],
+            row["team_id"],
+            row["version"],
+            row["display_name"],
+            row["tool_policy_id"],
+            row["skill_policy_id"],
+            row["model_policy_id"],
+            row["memory_policy_id"],
+            row["autonomy_level"],
+            dict(row["max_run_budget_profile"]),
+            ProductAccountService._aware(row["created_at"]),
+        )
 
     def get_team_project_agent(
         self, *, project_id: str, team_id: str
@@ -950,6 +1004,8 @@ class ProjectWorkspaceService:
             int(row["memory_version"]),
             ProductAccountService._aware(row["created_at"]),
             ProductAccountService._aware(row["updated_at"]),
+            row["profile_id"],
+            int(row["profile_version"]),
         )
 
     @staticmethod
