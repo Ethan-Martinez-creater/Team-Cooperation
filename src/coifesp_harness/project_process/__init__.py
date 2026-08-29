@@ -35,6 +35,7 @@ from .commands import (
     ProjectProcessOutboxEntry,
     ProjectProcessOutboxStatus,
 )
+from .context import ProjectAgentContextBuilder, TeamTaskExecutionContract
 from .gates import (
     DeliveryGateDecision,
     ProjectGate,
@@ -150,6 +151,7 @@ __all__ = [
     "DependencySnapshot",
     "HumanGateService",
     "ProcessReadinessSnapshot",
+    "ProjectAgentContextBuilder",
     "ProjectBudgetEvaluator",
     "ProjectBudgetExhausted",
     "ProjectCapabilityAdapter",
@@ -221,6 +223,7 @@ __all__ = [
     "TaskReadinessFacts",
     "TaskReadinessSnapshot",
     "TeamReadinessSnapshot",
+    "TeamTaskExecutionContract",
     "ValidatedPlannerCommand",
     "WorkGraphReadinessSnapshot",
     "WorkItemSnapshot",
