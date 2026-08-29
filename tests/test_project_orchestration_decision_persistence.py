@@ -233,6 +233,24 @@ def test_decision_finish_is_idempotent_and_terminal_conflict_is_rejected():
         )
 
 
+def test_decision_finish_fence_failure_keeps_decision_pending():
+    _, repository, _ = _stack()
+    service = ProjectProcessCommandService(repository, clock=lambda: NOW)
+    _record(service)
+
+    def fence(_connection):
+        raise GovernanceConflictError("stale wakeup lease")
+
+    with pytest.raises(GovernanceConflictError, match="stale wakeup lease"):
+        service.finish_decision(
+            decision_id="decision-a",
+            status=ProjectOrchestrationDecisionStatus.APPLIED,
+            mutation_fence=fence,
+        )
+    with repository.transaction() as connection:
+        assert repository.decision(connection, "decision-a").status is ProjectOrchestrationDecisionStatus.PENDING
+
+
 def test_mutation_fence_failure_rolls_back_decision_and_cursor():
     _, repository, _ = _stack()
     service = ProjectProcessCommandService(repository, clock=lambda: NOW)

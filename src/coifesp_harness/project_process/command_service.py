@@ -238,6 +238,7 @@ class ProjectProcessCommandService:
         *,
         decision_id: str,
         status: ProjectOrchestrationDecisionStatus,
+        mutation_fence=None,
     ) -> ProjectOrchestrationDecision:
         """Idempotently close a pending decision batch."""
 
@@ -253,6 +254,8 @@ class ProjectProcessCommandService:
         decision_id = self._identifier(decision_id, "decision_id", 128)
         now = self.clock()
         with self.repository.transaction() as connection:
+            if mutation_fence is not None:
+                mutation_fence(connection)
             decision = self.repository.decision(connection, decision_id)
             if decision is None:
                 raise GovernanceConflictError("project orchestration decision is unavailable")
