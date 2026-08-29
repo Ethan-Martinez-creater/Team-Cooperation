@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    JSON,
     MetaData,
     String,
     Table,
@@ -266,9 +267,7 @@ TEAM_TASKS = Table(
     Column("due_at", DateTime(timezone=True), nullable=True),
     Column("schedule_version", Integer, nullable=False, server_default="1"),
     Column("due_changed_at", DateTime(timezone=True), nullable=True),
-    Column(
-        "due_changed_by", String(128), ForeignKey("product_accounts.account_id"), nullable=True
-    ),
+    Column("due_changed_by", String(128), ForeignKey("product_accounts.account_id"), nullable=True),
     Column("completed_at", DateTime(timezone=True), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
@@ -281,10 +280,18 @@ TEAM_TASKS = Table(
     CheckConstraint("schedule_version >= 1", name="positive_schedule_version"),
 )
 Index("ix_product_tasks_project_status", TEAM_TASKS.c.project_id, TEAM_TASKS.c.status)
-Index("ix_product_tasks_team_status_due", TEAM_TASKS.c.target_team_id, TEAM_TASKS.c.status,
-      TEAM_TASKS.c.due_at)
-Index("ix_product_tasks_project_priority_due", TEAM_TASKS.c.project_id, TEAM_TASKS.c.priority,
-      TEAM_TASKS.c.due_at)
+Index(
+    "ix_product_tasks_team_status_due",
+    TEAM_TASKS.c.target_team_id,
+    TEAM_TASKS.c.status,
+    TEAM_TASKS.c.due_at,
+)
+Index(
+    "ix_product_tasks_project_priority_due",
+    TEAM_TASKS.c.project_id,
+    TEAM_TASKS.c.priority,
+    TEAM_TASKS.c.due_at,
+)
 
 TASK_SCHEDULE_PROPOSALS = Table(
     "product_task_schedule_proposals",
@@ -294,9 +301,7 @@ TASK_SCHEDULE_PROPOSALS = Table(
     Column("task_id", String(128), ForeignKey("product_team_tasks.task_id"), nullable=False),
     Column("proposed_by", String(128), ForeignKey("product_accounts.account_id"), nullable=False),
     Column("proposed_by_team_id", String(128), ForeignKey("product_teams.team_id"), nullable=False),
-    Column(
-        "decided_by_team_id", String(128), ForeignKey("product_teams.team_id"), nullable=True
-    ),
+    Column("decided_by_team_id", String(128), ForeignKey("product_teams.team_id"), nullable=True),
     Column("old_priority", String(16), nullable=False),
     Column("new_priority", String(16), nullable=False),
     Column("old_due_at", DateTime(timezone=True), nullable=True),
@@ -330,9 +335,7 @@ Index(
 NOTIFICATION_PREFERENCES = Table(
     "product_notification_preferences",
     PRODUCT_METADATA,
-    Column(
-        "account_id", String(128), ForeignKey("product_accounts.account_id"), primary_key=True
-    ),
+    Column("account_id", String(128), ForeignKey("product_accounts.account_id"), primary_key=True),
     Column("notify_tasks", Boolean, nullable=False, server_default="1"),
     Column("notify_messages", Boolean, nullable=False, server_default="1"),
     Column("notify_resources", Boolean, nullable=False, server_default="1"),
@@ -592,9 +595,7 @@ CODE_CHANGE_DRAFTS = Table(
     Column("decided_at", DateTime(timezone=True), nullable=True),
     Column("patch_artifact_id", String(128), nullable=True),
     Column("patch_artifact_sha256", String(64), nullable=True),
-    CheckConstraint(
-        "status IN ('pending','rejected','approved','applied')", name="status"
-    ),
+    CheckConstraint("status IN ('pending','rejected','approved','applied')", name="status"),
     CheckConstraint("version >= 1", name="positive_version"),
     CheckConstraint("length(base_commit) IN (40,64)", name="base_commit"),
     CheckConstraint(
@@ -627,9 +628,7 @@ RESOURCE_VERSIONS = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     CheckConstraint("version_number >= 1", name="positive_version_number"),
     CheckConstraint("length(artifact_sha256)=64", name="artifact_sha256"),
-    UniqueConstraint(
-        "resource_id", "version_number", name="uq_product_resource_version_number"
-    ),
+    UniqueConstraint("resource_id", "version_number", name="uq_product_resource_version_number"),
 )
 Index(
     "ix_product_resource_versions_resource",
@@ -805,10 +804,9 @@ PROJECT_AGENT_TURNS = Table(
     Column("completed_at", DateTime(timezone=True), nullable=True),
     CheckConstraint(
         "trigger_kind IN ('user_message','exchange','planning','exchange_draft')",
-        name="trigger_kind"),
-    CheckConstraint(
-        "status IN ('active','completed','failed','cancelled')", name="turn_status"
+        name="trigger_kind",
     ),
+    CheckConstraint("status IN ('active','completed','failed','cancelled')", name="turn_status"),
     UniqueConstraint("conversation_id", "idempotency_key", name="uq_turn_idempotency"),
 )
 Index(
@@ -900,9 +898,7 @@ AGENT_EXCHANGE_RECIPIENTS = Table(
     Column("draft_turn_id", String(128), nullable=True),
     Column("responded_at", DateTime(timezone=True), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
-    CheckConstraint(
-        "status IN ('pending','drafting','responded','declined')", name="status"
-    ),
+    CheckConstraint("status IN ('pending','drafting','responded','declined')", name="status"),
 )
 Index(
     "ix_product_exchange_recipients_team_status",
@@ -948,6 +944,13 @@ PROJECT_PLAN_DRAFTS = Table(
     Column("source_conversation_id", String(128), nullable=True),
     Column("source_turn_id", String(128), nullable=True),
     Column("source_run_id", String(128), nullable=True),
+    Column(
+        "schema_version",
+        String(64),
+        nullable=False,
+        server_default="coifesp.project-plan.v1",
+    ),
+    Column("plan_payload", JSON, nullable=False, server_default="{}"),
     Column("goals", Text, nullable=False),
     Column("scope", Text, nullable=False),
     Column("phases", Text, nullable=False, server_default="[]"),
@@ -965,6 +968,10 @@ PROJECT_PLAN_DRAFTS = Table(
     Column("rejection_reason", Text, nullable=False, server_default=""),
     CheckConstraint("length(content_sha256)=64", name="content_sha256"),
     CheckConstraint("version >= 1", name="positive_version"),
+    CheckConstraint(
+        "schema_version IN ('coifesp.project-plan.v1','coifesp.project-plan.v2')",
+        name="schema_version",
+    ),
     CheckConstraint("status IN ('drafting','approved','rejected')", name="status"),
     # One draft per source run so projection retries can never duplicate
     # plans even when callbacks race; multiple NULLs stay allowed.
@@ -981,8 +988,12 @@ PROJECT_TEAM_REQUIREMENT_DRAFTS = Table(
     PRODUCT_METADATA,
     Column("requirement_id", String(128), primary_key=True),
     Column("project_id", String(128), ForeignKey("product_projects.project_id"), nullable=False),
-    Column("plan_draft_id", String(128),
-        ForeignKey("product_project_plan_drafts.draft_id"), nullable=True),
+    Column(
+        "plan_draft_id",
+        String(128),
+        ForeignKey("product_project_plan_drafts.draft_id"),
+        nullable=True,
+    ),
     Column("team_category", String(32), nullable=False),
     Column("team_count", Integer, nullable=False),
     Column("rationale", Text, nullable=False, server_default=""),
@@ -993,7 +1004,8 @@ PROJECT_TEAM_REQUIREMENT_DRAFTS = Table(
     CheckConstraint("team_count >= 1", name="positive_team_count"),
     CheckConstraint(
         "team_category IN ('product','engineering','quality','design','operations','custom')",
-        name="team_category"),
+        name="team_category",
+    ),
     CheckConstraint("status IN ('drafting','approved','rejected')", name="status"),
 )
 Index(

@@ -15,6 +15,8 @@ class ProjectPlanDraftView(BaseModel):
     source_conversation_id: str | None
     source_turn_id: str | None
     source_run_id: str | None
+    schema_version: str
+    plan_payload: dict
     goals: str
     scope: str
     phases: list[dict]
@@ -173,6 +175,8 @@ def _plan_view(value) -> ProjectPlanDraftView:
         source_conversation_id=value.source_conversation_id,
         source_turn_id=value.source_turn_id,
         source_run_id=value.source_run_id,
+        schema_version=value.schema_version,
+        plan_payload=dict(value.plan_payload),
         goals=value.goals,
         scope=value.scope,
         phases=list(value.phases),

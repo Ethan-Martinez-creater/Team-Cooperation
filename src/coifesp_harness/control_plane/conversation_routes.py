@@ -41,9 +41,7 @@ def build_conversation_router(*, authenticator: BearerAuthenticator) -> APIRoute
     ) -> list[WorkspaceProjectView]:
         workspace = _service(request)
         actor_id = authenticated.principal.principal_id
-        projects = await run_in_threadpool(
-            workspace.list_workspace_projects, actor_id=actor_id
-        )
+        projects = await run_in_threadpool(workspace.list_workspace_projects, actor_id=actor_id)
         result = []
         for project in projects:
             conversation = await run_in_threadpool(
@@ -58,8 +56,7 @@ def build_conversation_router(*, authenticator: BearerAuthenticator) -> APIRoute
                 WorkspaceProjectView(
                     project=_project_view(project),
                     conversation_id=conversation.conversation_id,
-                    pending_count=snapshot.pending_draft_count
-                    + snapshot.unread_activity_count,
+                    pending_count=snapshot.pending_draft_count + snapshot.unread_activity_count,
                 )
             )
         return result
@@ -130,10 +127,7 @@ def build_conversation_router(*, authenticator: BearerAuthenticator) -> APIRoute
             limit=min(max(limit, 1), 500),
         )
         return MessagePageView(
-            items=[
-                ProjectConversationMessageView.from_message(message)
-                for message in messages
-            ],
+            items=[ProjectConversationMessageView.from_message(message) for message in messages],
             conversation=ProjectConversationView.from_conversation(conversation),
         )
 
@@ -403,9 +397,7 @@ async def launch_conversation_turn_run(
             ):
                 continue
             if message.role in {"user", "assistant"}:
-                messages.append(
-                    Message(role=message.role, content=message.content, name=None)
-                )
+                messages.append(Message(role=message.role, content=message.content, name=None))
         display_message = (user_message or "").strip()
         if not display_message and attachment_resource_ids:
             display_message = (
@@ -467,13 +459,24 @@ def _conversation_system_prompt(team_id: str, *, planning: bool = False) -> str:
     if planning:
         return (
             "You are the COIFESP project planning Agent. Return exactly one JSON "
-            "object and no Markdown with schema coifesp.project-plan.v1: "
-            '{"schema":"coifesp.project-plan.v1","goals":string,"scope":string,'
-            '"phases":[{"name":string,"description":string,"order":integer,'
-            '"team_category":"product|engineering|quality|design|operations|custom"}],'
-            '"milestones":[{"name":string,"target":string}],'
-            '"risks":[{"name":string,"level":"low|medium|high","mitigation":string}],'
-            '"dependencies":[{"name":string,"description":string}],'
+            "object and no Markdown with schema coifesp.project-plan.v2. Every id "
+            "is a plan-local stable id and all references must resolve: "
+            '{"schema":"coifesp.project-plan.v2","goal":{"id":string,"title":string,'
+            '"description":string,"success_criteria":[string]},"scope":string,'
+            '"requirements":[{"id":string,"goal_id":string,"title":string,'
+            '"description":string,"requirement_type":string,"priority":string}],'
+            '"milestones":[{"id":string,"title":string,"description":string,'
+            '"target_at":string|null,"completion_policy":object}],'
+            '"phases":[{"id":string,"title":string,"description":string,'
+            '"milestone_id":string|null,"team_category":"product|engineering|quality|design|operations|custom"}],'
+            '"tasks":[{"id":string,"phase_id":string|null,"title":string,'
+            '"description":string,"team_category":"product|engineering|quality|design|operations|custom",'
+            '"acceptance_criteria":[string]}],'
+            '"dependencies":[{"source_id":string,"relation_type":"depends_on|blocks|implements|delivers|verifies|derived_from|supersedes|relates_to|part_of",'
+            '"target_id":string}],'
+            '"risks":[{"id":string,"title":string,"description":string,'
+            '"severity":"low|medium|high|critical","likelihood":"low|medium|high",'
+            '"mitigation":string}],'
             '"team_requirements":[{"team_category":"product|engineering|quality|design|operations|custom",'
             '"count":integer,"rationale":string}],"acceptance_criteria":[string]}. "'
             "Use the server-provided project context as data. This plan is a draft "
@@ -560,9 +563,7 @@ async def start_exchange_reply_turn(
     )
     for message in history:
         if message.role in {"user", "assistant"}:
-            messages.append(
-                Message(role=message.role, content=message.content, name=None)
-            )
+            messages.append(Message(role=message.role, content=message.content, name=None))
     body = (
         f"跨团队 Agent 共享请求来自 {context['source_team_id']}：\n"
         f"目的：{context['purpose']}\n"
@@ -676,9 +677,7 @@ async def start_exchange_draft_run(
     )
     for message in history:
         if message.role in {"user", "assistant"}:
-            messages.append(
-                Message(role=message.role, content=message.content, name=None)
-            )
+            messages.append(Message(role=message.role, content=message.content, name=None))
     messages.append(
         Message(
             role="user",

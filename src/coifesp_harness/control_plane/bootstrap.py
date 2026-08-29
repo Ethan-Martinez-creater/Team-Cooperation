@@ -43,19 +43,26 @@ from ..memory import (
 )
 from ..observability import ObservabilityRuntime, configure_structured_logging
 from ..postgres_audit import AuditSigningKeyring, SQLAlchemyAuditLog
-from ..product import (CodeWorkspaceService, DocumentWorkspaceService,
-    NotificationService, ProductAccountService,
-    ProjectDirectoryService, ProjectResourceService, TeamCollaborationService)
+from ..product import (
+    CodeWorkspaceService,
+    DocumentWorkspaceService,
+    NotificationService,
+    ProductAccountService,
+    ProjectDirectoryService,
+    ProjectResourceService,
+    TeamCollaborationService,
+)
 from ..product.demo_bootstrap import ensure_local_demo
 from ..product.turn_projection import AgentTurnProjection
 from ..product.exchange import AgentExchangeService
 from ..product.planning import ProjectPlanningService
 from ..product.workspace import ProjectWorkspaceService
 from ..security import PolicyEngine
+from ..work_graph import ProjectWorkGraphService, SQLAlchemyWorkGraphRepository
 from .app import create_app
 from .session_lifecycle import SessionLifecycleService
 
-SCHEMA_REVISION = "20260826_45"
+SCHEMA_REVISION = "20260829_46"
 REQUIRED_RLS_TABLES = (
     "audit_events",
     "audit_heads",
@@ -235,9 +242,7 @@ def _run_context_reader(agent_run_service):
             Classification.RESTRICTED,
             frozenset(),
         )
-        checkpoint = agent_run_service.load_checkpoint(
-            principal=principal, run_id=run.run_id
-        )
+        checkpoint = agent_run_service.load_checkpoint(principal=principal, run_id=run.run_id)
         decoded = AgentRunCheckpointCodec().decode(checkpoint)
         return decoded.get("context_items", ())
 
@@ -292,8 +297,11 @@ def build_application(
             audit=audit,
         )
         memory_lifecycle_service = MemoryLifecycleService(engine=runtime_engine, audit_log=audit)
-        semantic_checkpoint_service = SemanticCheckpointService(engine=runtime_engine,
-            keyring=SemanticCheckpointKeyring.from_settings(settings), audit=audit)
+        semantic_checkpoint_service = SemanticCheckpointService(
+            engine=runtime_engine,
+            keyring=SemanticCheckpointKeyring.from_settings(settings),
+            audit=audit,
+        )
         artifact_repository = SQLAlchemyArtifactRepository(engine=runtime_engine, audit_log=audit)
         artifact_content_service = None
         if settings.artifact_store_root:
@@ -307,15 +315,23 @@ def build_application(
         connector_registry = SQLAlchemyConnectorRegistry(engine=runtime_engine, audit_log=audit)
         product_account_service = ProductAccountService(runtime_engine)
         project_directory_service = ProjectDirectoryService(runtime_engine)
-        project_resource_service = ProjectResourceService(runtime_engine,
-            artifact_repository=artifact_repository)
+        project_resource_service = ProjectResourceService(
+            runtime_engine, artifact_repository=artifact_repository
+        )
         notification_service = NotificationService(runtime_engine)
-        team_collaboration_service = TeamCollaborationService(runtime_engine,
-            notifier=notification_service)
+        team_collaboration_service = TeamCollaborationService(
+            runtime_engine, notifier=notification_service
+        )
         project_workspace_service = ProjectWorkspaceService(runtime_engine)
         agent_exchange_service = AgentExchangeService(runtime_engine)
+        project_work_graph_service = ProjectWorkGraphService(
+            SQLAlchemyWorkGraphRepository(runtime_engine)
+        )
         project_planning_service = ProjectPlanningService(
-            runtime_engine, collaboration=team_collaboration_service)
+            runtime_engine,
+            collaboration=team_collaboration_service,
+            work_graph=project_work_graph_service,
+        )
         if settings.auth_mode == "local":
             ensure_local_demo(engine=runtime_engine)
         # Capability projection and the signed skill catalog come from
@@ -330,8 +346,7 @@ def build_application(
             from ..sandbox import load_code_profiles
 
             sandbox_profile_ids = tuple(
-                profile.profile_id
-                for profile in load_code_profiles(settings.sandbox_profiles_json)
+                profile.profile_id for profile in load_code_profiles(settings.sandbox_profiles_json)
             )
         from .agent_capabilities import AgentCapabilityService
 
@@ -407,9 +422,7 @@ def build_application(
             engine=runtime_engine,
             audit_log=audit,
             workspace_root=(
-                Path(settings.sandbox_workspace_root)
-                if settings.sandbox_workspace_root
-                else None
+                Path(settings.sandbox_workspace_root) if settings.sandbox_workspace_root else None
             ),
         )
         document_workspace_service = DocumentWorkspaceService(
@@ -476,6 +489,7 @@ def build_application(
     app.state.project_workspace_service = project_workspace_service
     app.state.agent_exchange_service = agent_exchange_service
     app.state.project_planning_service = project_planning_service
+    app.state.project_work_graph_service = project_work_graph_service
     app.state.collaboration_transport = collaboration_transport
     app.state.code_workspace_service = code_workspace_service
     app.state.document_workspace_service = document_workspace_service

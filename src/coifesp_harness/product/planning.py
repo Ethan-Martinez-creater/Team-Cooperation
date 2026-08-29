@@ -4,6 +4,7 @@ An Agent produces a structured plan (``coifesp.project-plan.v1``); the plan
 is stored as a reviewable draft with team requirement recommendations. Nothing
 is projected into business objects until the project owner confirms.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -16,6 +17,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 
 from ..errors import GovernanceConflictError, ResourceNotFound
+from ..work_graph import ProjectWorkGraphService, WorkNodeType
 from .models import (
     PlanDraftStatus,
     ProjectPlanDraft,
@@ -28,6 +30,7 @@ from .repository import (
     PROJECT_TEAMS,
 )
 from .service import ProductAccountService, TeamCollaborationService
+from .plan_schema import PLAN_V2, parse_project_plan
 
 _TEAM_CATEGORIES = frozenset(
     {"product", "engineering", "quality", "design", "operations", "custom"}
@@ -51,10 +54,15 @@ def _plan_sha256(payload: dict) -> str:
 
 class ProjectPlanningService:
     def __init__(
-        self, engine: Engine, *, collaboration: TeamCollaborationService | None = None
+        self,
+        engine: Engine,
+        *,
+        collaboration: TeamCollaborationService | None = None,
+        work_graph: ProjectWorkGraphService | None = None,
     ) -> None:
         self.engine = engine
         self.collaboration = collaboration
+        self.work_graph = work_graph
 
     def import_plan_draft(
         self,
@@ -82,54 +90,13 @@ class ProjectPlanningService:
                 ).scalar_one_or_none()
             if existing is not None:
                 return self._plan_row_with_engine(draft_id=existing)
-        try:
-            payload = json.loads(content)
-        except (ValueError, TypeError) as exc:
-            raise ValueError("plan output is not valid JSON") from exc
-        if payload.get("schema") != "coifesp.project-plan.v1":
-            raise ValueError("plan output schema is invalid")
-        goals = str(payload.get("goals", "")).strip()
-        scope = str(payload.get("scope", "")).strip()
-        if not goals or not scope:
-            raise ValueError("plan goals and scope are required")
-        phases = self._object_list(payload.get("phases", []), "phases")
-        milestones = self._object_list(payload.get("milestones", []), "milestones")
-        risks = self._object_list(payload.get("risks", []), "risks")
-        dependencies = self._object_list(payload.get("dependencies", []), "dependencies")
-        criteria = self._string_list(payload.get("acceptance_criteria", []), "acceptance_criteria")
-        team_requirements = payload.get("team_requirements", [])
-        if not isinstance(team_requirements, list) or len(team_requirements) > 20:
-            raise ValueError("team_requirements must be a list of at most 20 entries")
-        normalized_requirements = []
-        for index, entry in enumerate(team_requirements):
-            if not isinstance(entry, dict):
-                raise ValueError(f"team_requirements[{index}] is malformed")
-            category = str(entry.get("team_category", "")).strip()
-            if category not in _TEAM_CATEGORIES:
-                raise ValueError(f"team_requirements[{index}] has invalid team_category")
-            try:
-                count = int(entry.get("count", 0))
-            except (TypeError, ValueError):
-                raise ValueError(f"team_requirements[{index}] count is invalid")
-            if count < 1 or count > 500:
-                raise ValueError(f"team_requirements[{index}] count is out of range")
-            normalized_requirements.append(
-                {
-                    "team_category": category,
-                    "count": count,
-                    "rationale": str(entry.get("rationale", "")).strip(),
-                }
-            )
-        draft_payload = {
-            "goals": goals,
-            "scope": scope,
-            "phases": phases,
-            "milestones": milestones,
-            "risks": risks,
-            "dependencies": dependencies,
-            "acceptance_criteria": criteria,
-            "team_requirements": normalized_requirements,
-        }
+        parsed = parse_project_plan(content)
+        goals, scope = parsed.goals, parsed.scope
+        phases, milestones = parsed.phases, parsed.milestones
+        risks, dependencies = parsed.risks, parsed.dependencies
+        criteria = parsed.acceptance_criteria
+        normalized_requirements = parsed.team_requirements
+        draft_payload = parsed.payload
         now = datetime.now(UTC)
         try:
             with self.engine.begin() as connection:
@@ -141,6 +108,8 @@ class ProjectPlanningService:
                         source_conversation_id=source_conversation_id,
                         source_turn_id=source_turn_id,
                         source_run_id=source_run_id,
+                        schema_version=parsed.schema_version,
+                        plan_payload=draft_payload,
                         goals=goals,
                         scope=scope,
                         phases=json.dumps(phases, ensure_ascii=False),
@@ -244,6 +213,7 @@ class ProjectPlanningService:
         # Project business objects first; each create is idempotent.
         self._project_plan_topic(project_id=project_id, draft=draft, actor_id=actor_id)
         self._materialize_plan(project_id=project_id, draft=draft, actor_id=actor_id)
+        self._materialize_work_graph(project_id=project_id, draft=draft, actor_id=actor_id)
         now = datetime.now(UTC)
         with self.engine.begin() as connection:
             updated = connection.execute(
@@ -295,9 +265,10 @@ class ProjectPlanningService:
     def _project_plan_topic(self, *, project_id, draft, actor_id) -> None:
         if self.collaboration is None:
             return
-        summary = (
-            f"项目计划已确认：{draft.goals[:200]}"
-            + (f"（阶段 {len(draft.phases)} 个，风险 {len(draft.risks)} 项）" if draft.phases or draft.risks else "")
+        summary = f"项目计划已确认：{draft.goals[:200]}" + (
+            f"（阶段 {len(draft.phases)} 个，风险 {len(draft.risks)} 项）"
+            if draft.phases or draft.risks
+            else ""
         )
         try:
             self.collaboration.create_topic(
@@ -328,6 +299,9 @@ class ProjectPlanningService:
         """
         collaboration = self.collaboration
         if collaboration is None:
+            return
+        if draft.schema_version == PLAN_V2:
+            self._materialize_v2_tasks(project_id=project_id, draft=draft, actor_id=actor_id)
             return
         teams_by_kind = self._project_teams_by_kind(project_id)
         owner_team = self._project_owner_team(project_id)
@@ -375,7 +349,11 @@ class ProjectPlanningService:
                         raise
                     continue
                 continue
-            criteria = draft.acceptance_criteria[0] if draft.acceptance_criteria else "按项目计划验收标准执行"
+            criteria = (
+                draft.acceptance_criteria[0]
+                if draft.acceptance_criteria
+                else "按项目计划验收标准执行"
+            )
             try:
                 collaboration.create_task(
                     task_id=f"plan-ph-{draft.draft_id}-{index}",
@@ -390,6 +368,263 @@ class ProjectPlanningService:
                 if not _is_duplicate_key_error(exc):
                     raise
                 continue
+
+    def _materialize_v2_tasks(self, *, project_id, draft, actor_id) -> None:
+        collaboration = self.collaboration
+        if collaboration is None:
+            return
+        teams_by_kind = self._project_teams_by_kind(project_id)
+        owner_team = self._project_owner_team(project_id)
+        for task in draft.plan_payload.get("tasks", ()):
+            local_id = task["id"]
+            target_team = teams_by_kind.get(task["team_category"])
+            if target_team is None or target_team == owner_team:
+                raise GovernanceConflictError(
+                    f"plan task {local_id} has no assignable participating team"
+                )
+            criteria = task.get("acceptance_criteria") or draft.acceptance_criteria
+            criterion = criteria[0] if criteria else "按项目计划验收标准执行"
+            try:
+                collaboration.create_task(
+                    task_id=self._stable_id("plan-task", draft.draft_id, local_id),
+                    project_id=project_id,
+                    actor_id=actor_id,
+                    target_team_id=target_team,
+                    title=task["title"],
+                    description=task["description"],
+                    acceptance_criteria=criterion,
+                )
+            except IntegrityError as exc:
+                if not _is_duplicate_key_error(exc):
+                    raise
+
+    def _materialize_work_graph(self, *, project_id, draft, actor_id) -> None:
+        graph = self.work_graph
+        if graph is None:
+            return
+        if draft.schema_version == PLAN_V2:
+            self._materialize_v2_work_graph(project_id=project_id, draft=draft, actor_id=actor_id)
+            return
+        self._materialize_v1_work_graph(project_id=project_id, draft=draft, actor_id=actor_id)
+
+    def _materialize_v2_work_graph(self, *, project_id, draft, actor_id) -> None:
+        graph = self.work_graph
+        payload = draft.plan_payload
+        local_nodes: dict[str, str] = {}
+        goal = payload["goal"]
+        goal_id = self._stable_id("goal", draft.draft_id, goal["id"])
+        _, goal_node = graph.create_goal(
+            goal_id=goal_id,
+            project_id=project_id,
+            title=goal["title"],
+            description=goal["description"],
+            success_criteria=tuple(goal["success_criteria"]),
+            created_by=actor_id,
+        )
+        local_nodes[goal["id"]] = goal_node.node_id
+
+        for item in payload.get("requirements", ()):
+            requirement_id = self._stable_id("requirement", draft.draft_id, item["id"])
+            _, node = graph.create_requirement(
+                requirement_id=requirement_id,
+                project_id=project_id,
+                goal_id=self._stable_id("goal", draft.draft_id, item["goal_id"]),
+                title=item["title"],
+                description=item["description"],
+                requirement_type=item["requirement_type"],
+                priority=item["priority"],
+                source_type="plan",
+                source_id=draft.draft_id,
+            )
+            local_nodes[item["id"]] = node.node_id
+
+        for item in payload.get("milestones", ()):
+            milestone_id = self._stable_id("milestone", draft.draft_id, item["id"])
+            _, node = graph.create_milestone(
+                milestone_id=milestone_id,
+                project_id=project_id,
+                title=item["title"],
+                description=item["description"],
+                target_at=self._optional_datetime(item.get("target_at")),
+                completion_policy=item["completion_policy"],
+            )
+            local_nodes[item["id"]] = node.node_id
+
+        teams_by_kind = self._project_teams_by_kind(project_id)
+        for item in payload.get("phases", ()):
+            milestone_id = (
+                self._stable_id("milestone", draft.draft_id, item["milestone_id"])
+                if item.get("milestone_id")
+                else None
+            )
+            owner_team_id = (
+                teams_by_kind.get(item["team_category"]) if item.get("team_category") else None
+            )
+            _, node = graph.create_phase(
+                phase_id=self._stable_id("phase", draft.draft_id, item["id"]),
+                project_id=project_id,
+                title=item["title"],
+                description=item["description"],
+                milestone_id=milestone_id,
+                owner_team_id=owner_team_id,
+            )
+            local_nodes[item["id"]] = node.node_id
+
+        for item in payload.get("risks", ()):
+            _, node = graph.create_risk(
+                risk_id=self._stable_id("risk", draft.draft_id, item["id"]),
+                project_id=project_id,
+                title=item["title"],
+                description=item["description"],
+                severity=item["severity"],
+                likelihood=item["likelihood"],
+                mitigation=item["mitigation"],
+                source_run_id=draft.source_run_id,
+            )
+            local_nodes[item["id"]] = node.node_id
+
+        for item in payload.get("tasks", ()):
+            task_id = self._stable_id("plan-task", draft.draft_id, item["id"])
+            node = graph.register_existing_subject(
+                node_id=f"node:task:{task_id}",
+                project_id=project_id,
+                node_type=WorkNodeType.TASK,
+                subject_id=task_id,
+            )
+            local_nodes[item["id"]] = node.node_id
+
+        semantic_edges: list[tuple[str, str, str]] = []
+        for item in payload.get("requirements", ()):
+            semantic_edges.append((item["id"], "derived_from", item["goal_id"]))
+        for item in payload.get("phases", ()):
+            if item.get("milestone_id"):
+                semantic_edges.append((item["id"], "part_of", item["milestone_id"]))
+        for item in payload.get("tasks", ()):
+            if item.get("phase_id"):
+                semantic_edges.append((item["id"], "part_of", item["phase_id"]))
+        for item in payload.get("risks", ()):
+            semantic_edges.append((item["id"], "relates_to", goal["id"]))
+        for item in payload.get("dependencies", ()):
+            semantic_edges.append((item["source_id"], item["relation_type"], item["target_id"]))
+        for source, relation_type, target in semantic_edges:
+            graph.add_relation(
+                relation_id=self._stable_id(
+                    "relation", draft.draft_id, f"{source}|{relation_type}|{target}"
+                ),
+                project_id=project_id,
+                source_node_id=local_nodes[source],
+                relation_type=relation_type,
+                target_node_id=local_nodes[target],
+                created_by_type="plan",
+                created_by_id=actor_id,
+                source_run_id=draft.source_run_id,
+            )
+
+    def _materialize_v1_work_graph(self, *, project_id, draft, actor_id) -> None:
+        graph = self.work_graph
+        _, goal_node = graph.create_goal(
+            goal_id=self._stable_id("goal", draft.draft_id, "goal"),
+            project_id=project_id,
+            title=draft.goals[:256],
+            description=draft.scope,
+            success_criteria=draft.acceptance_criteria,
+            created_by=actor_id,
+        )
+        milestone_nodes = {}
+        for index, item in enumerate(draft.milestones):
+            local = f"milestone-{index}"
+            _, node = graph.create_milestone(
+                milestone_id=self._stable_id("milestone", draft.draft_id, local),
+                project_id=project_id,
+                title=str(item.get("name") or "未命名里程碑"),
+                description=str(item.get("description") or item.get("name") or ""),
+                target_at=self._optional_datetime(item.get("target")),
+                completion_policy={"source_schema": "v1"},
+            )
+            milestone_nodes[index] = node
+            graph.add_relation(
+                relation_id=self._stable_id("relation", draft.draft_id, f"{local}|part_of|goal"),
+                project_id=project_id,
+                source_node_id=node.node_id,
+                relation_type="part_of",
+                target_node_id=goal_node.node_id,
+                created_by_type="plan",
+                created_by_id=actor_id,
+                source_run_id=draft.source_run_id,
+            )
+        teams_by_kind = self._project_teams_by_kind(project_id)
+        owner_team = self._project_owner_team(project_id)
+        for index, item in enumerate(draft.phases):
+            local = f"phase-{index}"
+            owner = teams_by_kind.get(str(item.get("team_category") or ""))
+            _, phase_node = graph.create_phase(
+                phase_id=self._stable_id("phase", draft.draft_id, local),
+                project_id=project_id,
+                title=str(item.get("name") or f"Phase {index + 1}"),
+                description=str(item.get("description") or item.get("name") or ""),
+                milestone_id=None,
+                owner_team_id=owner,
+            )
+            if owner and owner != owner_team:
+                task_id = f"plan-ph-{draft.draft_id}-{index}"
+                task_node = graph.register_existing_subject(
+                    node_id=f"node:task:{task_id}",
+                    project_id=project_id,
+                    node_type="task",
+                    subject_id=task_id,
+                )
+                graph.add_relation(
+                    relation_id=self._stable_id(
+                        "relation", draft.draft_id, f"task-{index}|part_of|{local}"
+                    ),
+                    project_id=project_id,
+                    source_node_id=task_node.node_id,
+                    relation_type="part_of",
+                    target_node_id=phase_node.node_id,
+                    created_by_type="plan",
+                    created_by_id=actor_id,
+                    source_run_id=draft.source_run_id,
+                )
+        for index, item in enumerate(draft.risks):
+            _, node = graph.create_risk(
+                risk_id=self._stable_id("risk", draft.draft_id, f"risk-{index}"),
+                project_id=project_id,
+                title=str(item.get("name") or item.get("title") or f"Risk {index + 1}"),
+                description=str(item.get("description") or item.get("name") or "Risk"),
+                severity=str(item.get("level") or "medium"),
+                likelihood=str(item.get("likelihood") or "medium"),
+                mitigation=str(item.get("mitigation") or "unspecified"),
+                source_run_id=draft.source_run_id,
+            )
+            graph.add_relation(
+                relation_id=self._stable_id(
+                    "relation", draft.draft_id, f"risk-{index}|relates_to|goal"
+                ),
+                project_id=project_id,
+                source_node_id=node.node_id,
+                relation_type="relates_to",
+                target_node_id=goal_node.node_id,
+                created_by_type="plan",
+                created_by_id=actor_id,
+                source_run_id=draft.source_run_id,
+            )
+
+    @staticmethod
+    def _stable_id(prefix: str, draft_id: str, local_id: str) -> str:
+        digest = hashlib.sha256(f"{draft_id}\0{local_id}".encode("utf-8")).hexdigest()[:32]
+        return f"{prefix}-{digest}"
+
+    @staticmethod
+    def _optional_datetime(value):
+        if value in (None, ""):
+            return None
+        if isinstance(value, datetime):
+            return value if value.tzinfo else value.replace(tzinfo=UTC)
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
     def _project_teams_by_kind(self, project_id: str) -> dict:
         from .repository import PROJECT_TEAMS as TEAMS_TABLE
@@ -445,6 +680,8 @@ class ProjectPlanningService:
             row["source_conversation_id"],
             row["source_turn_id"],
             row["source_run_id"],
+            row["schema_version"],
+            dict(row["plan_payload"]),
             row["goals"],
             row["scope"],
             tuple(json.loads(row["phases"])),

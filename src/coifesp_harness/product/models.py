@@ -85,9 +85,7 @@ TASK_PRIORITY_RANK = {
     TaskPriority.LOW: 3,
 }
 
-TASK_TERMINAL_STATUSES = frozenset(
-    {TeamTaskStatus.VERIFIED, TeamTaskStatus.REJECTED}
-)
+TASK_TERMINAL_STATUSES = frozenset({TeamTaskStatus.VERIFIED, TeamTaskStatus.REJECTED})
 
 TASK_SCHEDULE_DUE_MAX_DAYS = 366
 
@@ -339,11 +337,7 @@ def compute_team_task_schedule(
 ) -> TeamTaskSchedule:
     is_overdue = task_is_overdue(status, due_at, now)
     due_in = task_due_in_seconds(due_at, now)
-    is_due_soon = (
-        not is_overdue
-        and due_in is not None
-        and 0 <= due_in <= due_soon_hours * 3600
-    )
+    is_due_soon = not is_overdue and due_in is not None and 0 <= due_in <= due_soon_hours * 3600
     return TeamTaskSchedule(
         is_overdue=is_overdue,
         due_in_seconds=due_in,
@@ -859,6 +853,8 @@ class ProjectPlanDraft:
     source_conversation_id: str | None
     source_turn_id: str | None
     source_run_id: str | None
+    schema_version: str
+    plan_payload: dict
     goals: str
     scope: str
     phases: tuple[dict, ...]
