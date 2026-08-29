@@ -32,6 +32,7 @@ def task(
     slots: int = 1,
     contract_id: str | None = None,
     contract_accepted: bool | None = True,
+    contract_required: bool = False,
     requester_team_id: str | None = None,
     team_available: bool = True,
     active_operation_ids: tuple[str, ...] = (),
@@ -45,6 +46,7 @@ def task(
         required_slots=slots,
         contract_id=contract_id,
         contract_accepted=contract_accepted,
+        contract_required=contract_required,
         requester_team_id=requester_team_id,
         team_available=team_available,
         active_operation_ids=active_operation_ids,
@@ -119,6 +121,75 @@ def test_contract_must_be_accepted_before_cross_team_work_is_ready():
         contracts=(ContractReadinessSnapshot("contract-1", "work-1", accepted=True),),
     )
     assert [item.work_id for item in evaluate_readiness(accepted).ready_work] == ["work-1"]
+
+
+def test_proposed_work_is_never_ready_even_when_contract_is_accepted():
+    snapshot = ProjectReadinessSnapshot(
+        tasks=(
+            task(
+                "work-1",
+                status=WorkItemStatus.PROPOSED,
+                team_id="team-provider",
+                requester_team_id="team-requester",
+                contract_id="contract-1",
+                contract_required=True,
+            ),
+        ),
+        contracts=(ContractReadinessSnapshot("contract-1", "work-1", accepted=True),),
+    )
+
+    result = evaluate_readiness(snapshot)
+
+    assert not result.ready_work
+    assert reasons(result, "work-1") == {ReadinessBlockReason.NOT_DISPATCHABLE}
+
+
+def test_internal_work_without_contract_requires_explicit_opt_out():
+    explicit = ProjectReadinessSnapshot(
+        tasks=(task("internal", contract_required=False, contract_accepted=None),),
+    )
+    assert [item.work_id for item in evaluate_readiness(explicit).ready_work] == ["internal"]
+
+    fail_closed = ProjectReadinessSnapshot(
+        tasks=(
+            WorkItemSnapshot(
+                work_id="internal-default",
+                status=WorkItemStatus.ACCEPTED,
+                team_id="team-a",
+            ),
+        ),
+    )
+    assert reasons(evaluate_readiness(fail_closed), "internal-default") == {
+        ReadinessBlockReason.CONTRACT_NOT_ACCEPTED
+    }
+
+
+def test_unknown_contract_reference_fails_closed_even_for_internal_work():
+    snapshot = ProjectReadinessSnapshot(
+        tasks=(task("work-1", contract_id="missing", contract_required=False),),
+    )
+
+    assert reasons(evaluate_readiness(snapshot), "work-1") == {
+        ReadinessBlockReason.CONTRACT_NOT_ACCEPTED
+    }
+
+
+def test_changes_requested_with_accepted_contract_is_dispatchable():
+    snapshot = ProjectReadinessSnapshot(
+        tasks=(
+            task(
+                "work-1",
+                status=WorkItemStatus.CHANGES_REQUESTED,
+                team_id="team-provider",
+                requester_team_id="team-requester",
+                contract_id="contract-1",
+                contract_required=True,
+            ),
+        ),
+        contracts=(ContractReadinessSnapshot("contract-1", "work-1", accepted=True),),
+    )
+
+    assert [item.work_id for item in evaluate_readiness(snapshot).ready_work] == ["work-1"]
 
 
 def test_missing_capability_and_zero_capacity_fail_closed():
@@ -253,6 +324,64 @@ def test_all_successful_work_is_terminal_and_verification_ready():
     assert [item.work_id for item in result.blocked_work] == ["work-a", "work-b"]
     assert result.all_work_terminal is True
     assert result.verification_ready is True
+
+
+def test_submitted_work_is_verification_ready_but_not_terminal():
+    snapshot = ProjectReadinessSnapshot(
+        tasks=(
+            task("work-b", status=WorkItemStatus.SUBMITTED),
+            task("work-a", status=WorkItemStatus.SUBMITTED),
+        ),
+        dependencies=(DependencySnapshot("work-b", "work-a"),),
+    )
+
+    result = evaluate_readiness(snapshot)
+
+    assert result.verification_ready is True
+    assert result.all_work_terminal is False
+
+
+def test_submitted_prerequisite_does_not_make_dependent_work_ready():
+    snapshot = ProjectReadinessSnapshot(
+        tasks=(
+            task("dependent"),
+            task("prerequisite", status=WorkItemStatus.SUBMITTED),
+        ),
+        dependencies=(DependencySnapshot("dependent", "prerequisite"),),
+    )
+
+    submitted_result = evaluate_readiness(snapshot)
+    assert reasons(submitted_result, "dependent") == {
+        ReadinessBlockReason.DEPENDENCY_UNSATISFIED
+    }
+
+    verified_result = evaluate_readiness(
+        replace(
+            snapshot,
+            tasks=(
+                task("dependent"),
+                task("prerequisite", status=WorkItemStatus.VERIFIED),
+            ),
+        )
+    )
+    assert [item.work_id for item in verified_result.ready_work] == ["dependent"]
+
+
+def test_verification_ready_accepts_submitted_and_verified_work_but_not_in_progress():
+    submitted_and_verified = ProjectReadinessSnapshot(
+        tasks=(
+            task("submitted", status=WorkItemStatus.SUBMITTED),
+            task("verified", status=WorkItemStatus.VERIFIED),
+        ),
+    )
+    result = evaluate_readiness(submitted_and_verified)
+    assert result.verification_ready is True
+    assert result.all_work_terminal is False
+
+    in_progress = ProjectReadinessSnapshot(
+        tasks=(task("work-1", status=WorkItemStatus.IN_PROGRESS),),
+    )
+    assert evaluate_readiness(in_progress).verification_ready is False
 
 
 def test_evaluation_is_stable_across_snapshot_order_and_rejects_duplicate_work_ids():

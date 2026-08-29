@@ -75,8 +75,10 @@ class WorkItemSnapshot:
     ``work_id`` is the stable business/work identity.  ``node_id`` is the
     optional Work Graph identity; relations may address either identity.  A
     missing ``contract_accepted`` value means that the evaluator resolves the
-    value from ``ProjectReadinessSnapshot.contracts``.  The default is useful
-    for local/same-team work that has no cross-team Contract.
+    value from ``ProjectReadinessSnapshot.contracts``.  ``contract_required``
+    is deliberately fail-closed by default: an internal work item with no
+    Contract must explicitly set it to ``False``.  Cross-team work still
+    requires a matching accepted Contract even when that opt-out is supplied.
     """
 
     work_id: str
@@ -86,7 +88,8 @@ class WorkItemSnapshot:
     required_capabilities: tuple[str, ...] = ()
     required_slots: int = 1
     contract_id: str | None = None
-    contract_accepted: bool | None = True
+    contract_accepted: bool | None = None
+    contract_required: bool = True
     requester_team_id: str | None = None
     team_available: bool = True
     active_operation_ids: tuple[str, ...] = ()
@@ -100,6 +103,8 @@ class WorkItemSnapshot:
             raise ValueError("node_id cannot be empty")
         if self.required_slots < 1:
             raise ValueError("required_slots must be positive")
+        if not isinstance(self.contract_required, bool):
+            raise TypeError("contract_required must be boolean")
         if any(not str(item).strip() for item in self.required_capabilities):
             raise ValueError("required capability identifiers cannot be empty")
         if any(not str(item).strip() for item in self.active_operation_ids):
@@ -431,15 +436,21 @@ class ReadinessEvaluation:
 ReadinessResult = ReadinessEvaluation
 
 
+_DEPENDENCY_SUCCESS_STATUSES = frozenset(
+    {WorkItemStatus.VERIFIED.value, "completed", "succeeded", "done"}
+)
+_VERIFICATION_ELIGIBLE_STATUSES = _DEPENDENCY_SUCCESS_STATUSES | {
+    WorkItemStatus.SUBMITTED.value
+}
 _DISPATCHABLE_STATUSES = frozenset(
     {
-        WorkItemStatus.PROPOSED.value,
         WorkItemStatus.ACCEPTED.value,
         WorkItemStatus.CHANGES_REQUESTED.value,
     }
 )
-_SUCCESS_STATUSES = frozenset({WorkItemStatus.VERIFIED.value, "completed", "succeeded", "done"})
-_TERMINAL_STATUSES = _SUCCESS_STATUSES | {WorkItemStatus.REJECTED.value}
+_TERMINAL_STATUSES = frozenset(
+    {WorkItemStatus.VERIFIED.value, "completed", "succeeded", "done", WorkItemStatus.REJECTED.value}
+)
 _PROCESS_TERMINAL_STATUSES = frozenset({"COMPLETED", "FAILED", "CANCELLED"})
 _REASON_ORDER = {
     ReadinessBlockReason.PROCESS_TERMINAL: 0,
@@ -630,21 +641,31 @@ class ProjectReadinessEvaluator:
                     # the same cyclic edge.
                     continue
                 prerequisite_task = next(item for item in tasks if item.work_id == prerequisite)
-                if _normalized_status(prerequisite_task.status) not in _SUCCESS_STATUSES:
+                if _normalized_status(prerequisite_task.status) not in _DEPENDENCY_SUCCESS_STATUSES:
                     reasons.append(ReadinessBlockReason.DEPENDENCY_UNSATISFIED)
                     blocked_by.add(prerequisite)
 
-            contract = contracts_by_id.get(task.contract_id) if task.contract_id else None
-            if contract is None:
-                contract = contracts_by_work.get(task.work_id)
-            contract_accepted = task.contract_accepted
-            if contract is not None:
+            # An explicitly named Contract must be resolved by that exact ID;
+            # silently falling back to a different Contract for the same work
+            # would turn an unknown/stale reference into acceptance evidence.
+            contract = (
+                contracts_by_id.get(task.contract_id)
+                if task.contract_id
+                else contracts_by_work.get(task.work_id)
+            )
+            cross_team = (
+                task.requester_team_id is not None
+                and task.requester_team_id != task.team_id
+            )
+            if contract is not None and contract.work_id == task.work_id:
                 contract_accepted = contract.accepted
-            elif contract_accepted is None:
-                contract_accepted = not (
-                    task.requester_team_id is not None
-                    and task.requester_team_id != task.team_id
-                )
+            else:
+                requires_contract = task.contract_required or cross_team or task.contract_id is not None
+                # A boolean supplied without a corresponding Contract is not
+                # acceptance evidence.  Internal work can opt out explicitly
+                # with contract_required=False; unknown cross-team work fails
+                # closed.
+                contract_accepted = not requires_contract and task.contract_accepted is not False
             if not contract_accepted:
                 reasons.append(ReadinessBlockReason.CONTRACT_NOT_ACCEPTED)
 
@@ -704,8 +725,7 @@ class ProjectReadinessEvaluator:
         all_terminal = bool(tasks) and statuses.issubset(_TERMINAL_STATUSES)
         verification_ready = (
             bool(tasks)
-            and statuses.issubset(_SUCCESS_STATUSES)
-            and all_terminal
+            and statuses.issubset(_VERIFICATION_ELIGIBLE_STATUSES)
             and not cycles
             and not any(missing_dependencies.values())
             and not any(active_by_work.values())
