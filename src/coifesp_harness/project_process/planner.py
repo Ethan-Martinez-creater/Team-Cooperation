@@ -128,6 +128,32 @@ class ProjectPlannerIntentService:
             return existing
         return self.get(intent_id)
 
+    def request(
+        self,
+        *,
+        process_id: str,
+        owner_team_id: str,
+        reason: str,
+        work_graph,
+        run_service,
+    ):
+        """Create-or-resume the one Planner Run for the current process snapshot."""
+
+        with self.repository.transaction() as connection:
+            process = self.repository.process(connection, process_id)
+        graph = work_graph.snapshot(project_id=process.project_id)
+        intent = self.create(
+            process_id=process.process_id,
+            project_id=process.project_id,
+            owner_team_id=owner_team_id,
+            reason=reason,
+            based_on_process_version=process.version,
+            based_on_event_sequence=process.last_event_sequence,
+            graph=graph,
+        )
+        run = self.launch(intent=intent, graph=graph, run_service=run_service)
+        return self.get(intent.planner_intent_id), run
+
     def launch(self, *, intent: ProjectPlannerIntent, graph: ProjectGraphSnapshot, run_service):
         if intent.status not in {
             ProjectPlannerIntentStatus.PENDING,

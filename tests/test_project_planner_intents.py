@@ -149,6 +149,37 @@ def test_launch_uses_an_ordinary_toolless_durable_agent_run():
     assert context_payload["graph"]["project_id"] == "project-a"
 
 
+def test_request_loads_current_snapshot_and_reuses_deterministic_run():
+    repository, process, graph = _stack()
+    service = ProjectPlannerIntentService(repository, clock=lambda: NOW)
+    created = {}
+
+    class FakeRunService:
+        def create(self, **values):
+            created.setdefault(values["idempotency_key"], values["run_id"])
+            return SimpleNamespace(run_id=created[values["idempotency_key"]])
+
+    work_graph = SimpleNamespace(snapshot=lambda **_: graph)
+    first_intent, first_run = service.request(
+        process_id=process.process_id,
+        owner_team_id="team-a",
+        reason="ANALYSIS",
+        work_graph=work_graph,
+        run_service=FakeRunService(),
+    )
+    second_intent, second_run = service.request(
+        process_id=process.process_id,
+        owner_team_id="team-a",
+        reason="ANALYSIS",
+        work_graph=work_graph,
+        run_service=FakeRunService(),
+    )
+
+    assert first_intent == second_intent
+    assert first_run.run_id == second_run.run_id
+    assert len(created) == 1
+
+
 def test_terminal_intent_update_is_idempotent_but_conflicts_on_different_outcome():
     repository, process, graph = _stack()
     service = ProjectPlannerIntentService(repository, clock=lambda: NOW)
