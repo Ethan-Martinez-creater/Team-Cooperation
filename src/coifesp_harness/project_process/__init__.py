@@ -9,6 +9,14 @@ from .budget import (
     ProjectExecutionUsage,
 )
 from .budget_service import ProjectExecutionBudgetService
+from .capability_adapter import (
+    CapabilityMatch,
+    CapabilityRequirement,
+    ProjectCapabilityAdapter,
+    ProjectCapabilityMatch,
+    ProjectCapabilityRequirement,
+    ProjectOrchestratorCapabilityAdapter,
+)
 from .command_service import ProjectProcessCommandService, ProjectProcessOutboxService
 from .commands import (
     ProjectProcessCommand,
@@ -88,7 +96,9 @@ __all__ = [
     "ActiveOperationSnapshot",
     "AdmissionRequest",
     "BudgetGateDecision",
+    "CapabilityMatch",
     "CapabilityReadinessSnapshot",
+    "CapabilityRequirement",
     "CapabilitySnapshot",
     "ContractReadinessSnapshot",
     "ContractSnapshot",
@@ -98,6 +108,9 @@ __all__ = [
     "ProcessReadinessSnapshot",
     "ProjectBudgetEvaluator",
     "ProjectBudgetExhausted",
+    "ProjectCapabilityAdapter",
+    "ProjectCapabilityMatch",
+    "ProjectCapabilityRequirement",
     "ProjectExecutionBudgetService",
     "ProjectExecutionPolicy",
     "ProjectExecutionReadinessSnapshot",
@@ -109,6 +122,7 @@ __all__ = [
     "ProjectGateType",
     "ProjectInputRequest",
     "ProjectInputRequestStatus",
+    "ProjectOrchestratorCapabilityAdapter",
     "ProjectOrchestratorScheduler",
     "ProjectOrchestratorWakeup",
     "ProjectOrchestratorWakeupRepository",
