@@ -63,12 +63,28 @@ from .readiness import (
     evaluate_readiness,
 )
 from .repository import SQLAlchemyProjectProcessRepository
+from .scheduler import (
+    PROJECT_PROCESS_WAKEUP_METADATA,
+    PROJECT_PROCESS_WAKEUPS,
+    ProjectOrchestratorScheduler,
+    ProjectOrchestratorWakeup,
+    ProjectOrchestratorWakeupRepository,
+    ProjectOrchestratorWakeupStatus,
+    ProjectProcessScheduler,
+    ProjectProcessWakeup,
+    ProjectProcessWakeupRepository,
+    ProjectProcessWakeupService,
+    ProjectProcessWakeupStatus,
+    SQLAlchemyProjectProcessWakeupRepository,
+)
 from .service import ProjectProcessService
 from .shadow import ProjectProcessShadowAdapter
 from .transitions import MAIN_TRANSITIONS, ProjectTransition, ProjectTransitionGuard
 
 __all__ = [
     "MAIN_TRANSITIONS",
+    "PROJECT_PROCESS_WAKEUPS",
+    "PROJECT_PROCESS_WAKEUP_METADATA",
     "ActiveOperationSnapshot",
     "AdmissionRequest",
     "BudgetGateDecision",
@@ -93,6 +109,10 @@ __all__ = [
     "ProjectGateType",
     "ProjectInputRequest",
     "ProjectInputRequestStatus",
+    "ProjectOrchestratorScheduler",
+    "ProjectOrchestratorWakeup",
+    "ProjectOrchestratorWakeupRepository",
+    "ProjectOrchestratorWakeupStatus",
     "ProjectProcess",
     "ProjectProcessCommand",
     "ProjectProcessCommandService",
@@ -103,10 +123,15 @@ __all__ = [
     "ProjectProcessOutboxService",
     "ProjectProcessOutboxStatus",
     "ProjectProcessPhase",
+    "ProjectProcessScheduler",
     "ProjectProcessService",
     "ProjectProcessShadowAdapter",
     "ProjectProcessStatus",
     "ProjectProcessWaitReason",
+    "ProjectProcessWakeup",
+    "ProjectProcessWakeupRepository",
+    "ProjectProcessWakeupService",
+    "ProjectProcessWakeupStatus",
     "ProjectReadinessEvaluator",
     "ProjectReadinessSnapshot",
     "ProjectTransition",
@@ -118,6 +143,7 @@ __all__ = [
     "ReadinessResult",
     "ReadinessSnapshot",
     "SQLAlchemyProjectProcessRepository",
+    "SQLAlchemyProjectProcessWakeupRepository",
     "TeamReadinessSnapshot",
     "WorkGraphReadinessSnapshot",
     "WorkItemSnapshot",
