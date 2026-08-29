@@ -19,9 +19,13 @@ from .capability_adapter import (
 )
 from .command_service import ProjectProcessCommandService, ProjectProcessOutboxService
 from .commands import (
+    ProjectOrchestrationDecision,
+    ProjectOrchestrationDecisionStatus,
     ProjectProcessCommand,
     ProjectProcessCommandStatus,
     ProjectProcessCommandType,
+    ProjectProcessDecision,
+    ProjectProcessDecisionStatus,
     ProjectProcessOutboxEntry,
     ProjectProcessOutboxStatus,
 )
@@ -79,7 +83,11 @@ from .readiness_adapter import (
     bind_project_readiness,
     build_project_readiness,
 )
-from .repository import SQLAlchemyProjectProcessRepository
+from .repository import (
+    PROJECT_ORCHESTRATION_DECISIONS,
+    PROJECT_PROCESS_COMMANDS,
+    SQLAlchemyProjectProcessRepository,
+)
 from .scheduler import (
     PROJECT_PROCESS_WAKEUP_METADATA,
     PROJECT_PROCESS_WAKEUPS,
@@ -100,6 +108,8 @@ from .transitions import MAIN_TRANSITIONS, ProjectTransition, ProjectTransitionG
 
 __all__ = [
     "MAIN_TRANSITIONS",
+    "PROJECT_ORCHESTRATION_DECISIONS",
+    "PROJECT_PROCESS_COMMANDS",
     "PROJECT_PROCESS_WAKEUPS",
     "PROJECT_PROCESS_WAKEUP_METADATA",
     "ActiveOperationSnapshot",
@@ -132,6 +142,8 @@ __all__ = [
     "ProjectGateType",
     "ProjectInputRequest",
     "ProjectInputRequestStatus",
+    "ProjectOrchestrationDecision",
+    "ProjectOrchestrationDecisionStatus",
     "ProjectOrchestratorCapabilityAdapter",
     "ProjectOrchestratorScheduler",
     "ProjectOrchestratorWakeup",
@@ -142,6 +154,8 @@ __all__ = [
     "ProjectProcessCommandService",
     "ProjectProcessCommandStatus",
     "ProjectProcessCommandType",
+    "ProjectProcessDecision",
+    "ProjectProcessDecisionStatus",
     "ProjectProcessEvent",
     "ProjectProcessOutboxEntry",
     "ProjectProcessOutboxService",

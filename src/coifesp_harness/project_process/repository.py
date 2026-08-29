@@ -33,6 +33,8 @@ from .budget import (
     ProjectExecutionUsage,
 )
 from .commands import (
+    ProjectOrchestrationDecision,
+    ProjectOrchestrationDecisionStatus,
     ProjectProcessCommand,
     ProjectProcessCommandStatus,
     ProjectProcessCommandType,
@@ -371,6 +373,58 @@ Index(
     PROJECT_PROCESS_EVENTS.c.sequence,
 )
 
+PROJECT_ORCHESTRATION_DECISIONS = Table(
+    "project_orchestration_decisions",
+    PROJECT_PROCESS_METADATA,
+    Column("decision_id", String(128), primary_key=True),
+    Column("process_id", String(128), nullable=False),
+    Column("project_id", String(128), nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("based_on_process_version", Integer, nullable=False),
+    Column("based_on_event_sequence", Integer, nullable=False),
+    Column("graph_snapshot_digest", String(71), nullable=False),
+    Column("command_batch_digest", String(64), nullable=False),
+    Column("decision_json", OBJECT, nullable=False),
+    Column("decision_digest", String(64), nullable=False),
+    Column("status", String(16), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("applied_at", DateTime(timezone=True), nullable=True),
+    ForeignKeyConstraint(
+        ["process_id", "project_id"],
+        ["project_processes.process_id", "project_processes.project_id"],
+    ),
+    CheckConstraint(
+        "based_on_process_version >= 1",
+        name="project_decision_process_version",
+    ),
+    CheckConstraint(
+        "based_on_event_sequence >= 0",
+        name="project_decision_event_sequence",
+    ),
+    CheckConstraint(
+        "length(command_batch_digest) = 64",
+        name="project_decision_batch_digest",
+    ),
+    CheckConstraint(
+        "length(decision_digest) = 64",
+        name="project_decision_digest",
+    ),
+    CheckConstraint(
+        "status IN ('PENDING','APPLIED','STALE','REJECTED')",
+        name="project_decision_status",
+    ),
+    CheckConstraint(
+        "(status = 'PENDING' AND applied_at IS NULL) OR "
+        "(status <> 'PENDING' AND applied_at IS NOT NULL)",
+        name="project_decision_terminal_time",
+    ),
+)
+Index(
+    "ix_project_decision_process_status",
+    PROJECT_ORCHESTRATION_DECISIONS.c.process_id,
+    PROJECT_ORCHESTRATION_DECISIONS.c.status,
+)
+
 PROJECT_PROCESS_COMMANDS = Table(
     "project_process_commands",
     PROJECT_PROCESS_METADATA,
@@ -380,6 +434,7 @@ PROJECT_PROCESS_COMMANDS = Table(
     Column("decision_id", String(128), nullable=False),
     Column("command_type", String(64), nullable=False),
     Column("request_digest", String(64), nullable=False),
+    Column("request_json", OBJECT, nullable=False),
     Column("based_on_process_version", Integer, nullable=False),
     Column("based_on_event_sequence", Integer, nullable=False),
     Column("graph_snapshot_digest", String(71), nullable=False),
@@ -653,6 +708,56 @@ class SQLAlchemyProjectProcessRepository:
         return SQLAlchemyProjectProcessRepository._command(row) if row else None
 
     @staticmethod
+    def decision(connection: Connection, decision_id: str) -> ProjectOrchestrationDecision | None:
+        row = (
+            connection.execute(
+                select(PROJECT_ORCHESTRATION_DECISIONS).where(
+                    PROJECT_ORCHESTRATION_DECISIONS.c.decision_id == decision_id
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return SQLAlchemyProjectProcessRepository._decision(row) if row else None
+
+    # The explicit name is useful at call sites where ``decision`` is also a
+    # local variable, and keeps the repository API self-documenting.
+    orchestration_decision = decision
+
+    @staticmethod
+    def decisions_for_process(
+        connection: Connection, process_id: str
+    ) -> tuple[ProjectOrchestrationDecision, ...]:
+        rows = (
+            connection.execute(
+                select(PROJECT_ORCHESTRATION_DECISIONS)
+                .where(PROJECT_ORCHESTRATION_DECISIONS.c.process_id == process_id)
+                .order_by(
+                    PROJECT_ORCHESTRATION_DECISIONS.c.created_at,
+                    PROJECT_ORCHESTRATION_DECISIONS.c.decision_id,
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return tuple(SQLAlchemyProjectProcessRepository._decision(row) for row in rows)
+
+    @staticmethod
+    def commands_for_decision(
+        connection: Connection, decision_id: str
+    ) -> tuple[ProjectProcessCommand, ...]:
+        rows = (
+            connection.execute(
+                select(PROJECT_PROCESS_COMMANDS)
+                .where(PROJECT_PROCESS_COMMANDS.c.decision_id == decision_id)
+                .order_by(PROJECT_PROCESS_COMMANDS.c.command_id)
+            )
+            .mappings()
+            .all()
+        )
+        return tuple(SQLAlchemyProjectProcessRepository._command(row) for row in rows)
+
+    @staticmethod
     def outbox_entry(connection: Connection, outbox_id: str) -> ProjectProcessOutboxEntry | None:
         row = (
             connection.execute(
@@ -818,6 +923,31 @@ class SQLAlchemyProjectProcessRepository:
             row["based_on_process_version"], row["based_on_event_sequence"],
             row["graph_snapshot_digest"], ProjectProcessCommandStatus(row["status"]),
             row["result_subject_id"], created, applied,
+            dict(row["request_json"] or {}),
+        )
+
+    @staticmethod
+    def _decision(row) -> ProjectOrchestrationDecision:
+        created = row["created_at"]
+        applied = row["applied_at"]
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        if applied is not None and applied.tzinfo is None:
+            applied = applied.replace(tzinfo=UTC)
+        return ProjectOrchestrationDecision(
+            row["decision_id"],
+            row["process_id"],
+            row["project_id"],
+            row["reason"],
+            row["based_on_process_version"],
+            row["based_on_event_sequence"],
+            row["graph_snapshot_digest"],
+            row["command_batch_digest"],
+            dict(row["decision_json"] or {}),
+            row["decision_digest"],
+            ProjectOrchestrationDecisionStatus(row["status"]),
+            created,
+            applied,
         )
 
     @staticmethod
