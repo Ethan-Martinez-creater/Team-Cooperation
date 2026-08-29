@@ -155,6 +155,50 @@ Index(
     postgresql_where=_ACTIVE_PROCESS,
 )
 
+PROJECT_PLANNER_INTENTS = Table(
+    "project_planner_intents",
+    PROJECT_PROCESS_METADATA,
+    Column("planner_intent_id", String(128), primary_key=True),
+    Column("process_id", String(128), nullable=False),
+    Column("project_id", String(128), nullable=False),
+    Column("owner_team_id", String(128), nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("based_on_process_version", Integer, nullable=False),
+    Column("based_on_event_sequence", Integer, nullable=False),
+    Column("graph_snapshot_digest", String(71), nullable=False),
+    Column("status", String(16), nullable=False),
+    Column("run_id", String(128), nullable=True, unique=True),
+    Column("decision_id", String(128), nullable=True, unique=True),
+    Column("error_code", String(64), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    Column("projected_at", DateTime(timezone=True), nullable=True),
+    ForeignKeyConstraint(
+        ["process_id", "project_id"],
+        ["project_processes.process_id", "project_processes.project_id"],
+    ),
+    CheckConstraint(
+        "based_on_process_version >= 1", name="planner_intent_process_version"
+    ),
+    CheckConstraint(
+        "based_on_event_sequence >= 0", name="planner_intent_event_sequence"
+    ),
+    CheckConstraint(
+        "status IN ('PENDING','RUNNING','PROJECTED','STALE','REJECTED','FAILED','CANCELLED')",
+        name="planner_intent_status",
+    ),
+    CheckConstraint(
+        "(status IN ('PENDING','RUNNING') AND projected_at IS NULL) OR "
+        "(status NOT IN ('PENDING','RUNNING') AND projected_at IS NOT NULL)",
+        name="planner_intent_terminal_time",
+    ),
+)
+Index(
+    "ix_project_planner_intent_status",
+    PROJECT_PLANNER_INTENTS.c.status,
+    PROJECT_PLANNER_INTENTS.c.created_at,
+)
+
 PROJECT_EXECUTION_USAGE = Table(
     "project_execution_usage",
     PROJECT_PROCESS_METADATA,

@@ -60,6 +60,8 @@ from ..product.workspace import ProjectWorkspaceService
 from ..project_process import (
     HumanGateService,
     ProjectExecutionBudgetService,
+    ProjectPlannerIntentService,
+    ProjectPlannerProjection,
     ProjectProcessCommandService,
     ProjectProcessOutboxService,
     ProjectProcessScheduler,
@@ -73,7 +75,7 @@ from ..work_graph import ProjectWorkGraphService, SQLAlchemyWorkGraphRepository
 from .app import create_app
 from .session_lifecycle import SessionLifecycleService
 
-SCHEMA_REVISION = "20260829_49"
+SCHEMA_REVISION = "20260830_50"
 REQUIRED_RLS_TABLES = (
     "audit_events",
     "audit_heads",
@@ -376,6 +378,9 @@ def build_application(
         project_process_command_service = ProjectProcessCommandService(
             project_process_repository
         )
+        project_planner_intent_service = ProjectPlannerIntentService(
+            project_process_repository
+        )
         project_process_outbox_service = ProjectProcessOutboxService(
             project_process_repository
         )
@@ -457,7 +462,25 @@ def build_application(
             run_reader=_run_conversation_reader(agent_run_service),
             context_reader=_run_context_reader(agent_run_service),
         )
-        agent_run_service.terminal_callback = _projection.on_run_terminal
+        _planner_projection = ProjectPlannerProjection(
+            intent_service=project_planner_intent_service,
+            command_service=project_process_command_service,
+            process_service=project_process_service,
+            work_graph=project_work_graph_service,
+            run_reader=_run_conversation_reader(agent_run_service),
+        )
+
+        def project_terminal_callback(run):
+            first_error = None
+            for projector in (_projection, _planner_projection):
+                try:
+                    projector.on_run_terminal(run)
+                except Exception as exc:  # noqa: BLE001
+                    first_error = first_error or exc
+            if first_error is not None:
+                raise first_error
+
+        agent_run_service.terminal_callback = project_terminal_callback
         capability_service = CapabilityDirectoryService(
             SQLAlchemyCapabilityRepository(engine=runtime_engine, audit_log=audit)
         )
@@ -527,6 +550,8 @@ def build_application(
     app.state.database_engine = runtime_engine
     app.state.audit_log = audit
     app.state.turn_projection = _projection
+    app.state.project_planner_projection = _planner_projection
+    app.state.project_planner_intent_service = project_planner_intent_service
     app.state.governance_service = governance_service
     app.state.task_repository = task_repository
     app.state.task_execution_service = task_execution_service

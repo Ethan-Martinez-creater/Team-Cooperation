@@ -35,7 +35,8 @@ def test_revision_47_upgrade_matches_runtime_tables_and_downgrades_cleanly():
 
     inspector = inspect(engine)
     expected_tables = set(PROJECT_PROCESS_METADATA.tables) - {
-        "project_orchestration_decisions"
+        "project_orchestration_decisions",
+        "project_planner_intents",
     }
     assert expected_tables.issubset(inspector.get_table_names())
     for name in sorted(expected_tables):
@@ -79,4 +80,36 @@ def test_bootstrap_revision_includes_project_orchestration_decision_head():
     migration = _module()
     assert migration.revision == "20260829_47"
     assert migration.down_revision == "20260829_46"
-    assert SCHEMA_REVISION == "20260829_49"
+    assert SCHEMA_REVISION == "20260830_50"
+
+
+def test_revision_50_creates_and_drops_project_planner_intents():
+    path = (
+        Path(__file__).parents[1]
+        / "alembic"
+        / "versions"
+        / "20260830_50_project_planner_intents.py"
+    )
+    spec = importlib.util.spec_from_file_location("project_process_revision_50", path)
+    migration = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(migration)
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    with engine.begin() as connection:
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.upgrade()
+
+    inspector = inspect(engine)
+    assert "project_planner_intents" in inspector.get_table_names()
+    assert {column["name"] for column in inspector.get_columns("project_planner_intents")} == {
+        column.name
+        for column in PROJECT_PROCESS_METADATA.tables["project_planner_intents"].columns
+    }
+    assert {item["name"] for item in inspector.get_indexes("project_planner_intents")} == {
+        "ix_project_planner_intent_status"
+    }
+
+    with engine.begin() as connection:
+        migration.op = Operations(MigrationContext.configure(connection))
+        migration.downgrade()
+    assert "project_planner_intents" not in inspect(engine).get_table_names()

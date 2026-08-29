@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import inspect
 import logging
+from collections.abc import Callable, Sequence
 from contextlib import asynccontextmanager
-from typing import Callable, Sequence
 
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.concurrency import run_in_threadpool
@@ -20,35 +20,40 @@ from ..errors import (
     ResourceNotFound,
 )
 from ..observability import ObservabilityMiddleware, ObservabilityRuntime
-from ..product import (NotificationService, ProductAccountService,
-    ProjectDirectoryService, ProjectResourceService, TeamCollaborationService)
+from ..product import (
+    NotificationService,
+    ProductAccountService,
+    ProjectDirectoryService,
+    ProjectResourceService,
+    TeamCollaborationService,
+)
 from ..product.auth import BuiltinAccountVerifier
 from ..product.exchange import AgentExchangeService
 from ..product.planning import ProjectPlanningService
 from ..product.workspace import ProjectWorkspaceService
-from .auth import Authenticated, BearerAuthenticator
-from .agent_capability_routes import build_agent_capability_router
 from .agent_capabilities import AgentCapabilityService
+from .agent_capability_routes import build_agent_capability_router
+from .agent_control_routes import build_agent_control_router
+from .agent_run_routes import build_agent_run_router
 from .approval_routes import build_approval_router
+from .artifact_routes import build_artifact_router
+from .auth import Authenticated, BearerAuthenticator
 from .capability_routes import build_capability_router
 from .checkpoint_routes import build_checkpoint_router
-from .artifact_routes import build_artifact_router
+from .code_workspace_routes import build_code_workspace_router
 from .connector_routes import build_connector_router
-from .agent_run_routes import build_agent_run_router
-from .agent_control_routes import build_agent_control_router
 from .conversation_routes import build_conversation_router
+from .document_workspace_routes import build_document_workspace_router
 from .exchange_routes import build_exchange_router
 from .execution_routes import build_execution_router
-from .planning_routes import build_planning_router
-from .middleware import BoundedBodyMiddleware, RequestContextMiddleware
-from .memory_routes import build_memory_router
 from .governance_routes import build_governance_router
-from .models import HealthResponse, IdentityResponse
-from .product_routes import build_product_router
-from .code_workspace_routes import build_code_workspace_router
-from .document_workspace_routes import build_document_workspace_router
-from .workspace_routes import build_workspace_router
 from .local_identity import LocalIdentityProvider
+from .memory_routes import build_memory_router
+from .middleware import BoundedBodyMiddleware, RequestContextMiddleware
+from .models import HealthResponse, IdentityResponse
+from .planning_routes import build_planning_router
+from .product_routes import build_product_router
+from .workspace_routes import build_workspace_router
 
 logger = logging.getLogger("coifesp.control_plane")
 
@@ -107,10 +112,14 @@ def create_app(
                     raise RuntimeError("control-plane startup readiness check failed")
             # Crash recovery: replay terminal runs whose conversation turn is
             # still active so an interrupted projection is not lost forever.
-            projection = getattr(app.state, "turn_projection", None)
             agent_run_service = getattr(app.state, "agent_run_service", None)
-            if projection is not None and agent_run_service is not None:
-                await run_in_threadpool(projection.replay_pending, agent_run_service)
+            if agent_run_service is not None:
+                for name in ("turn_projection", "project_planner_projection"):
+                    projection = getattr(app.state, name, None)
+                    if projection is not None:
+                        await run_in_threadpool(
+                            projection.replay_pending, agent_run_service
+                        )
             yield
         finally:
             for callback in reversed(tuple(shutdown_callbacks)):

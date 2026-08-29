@@ -25,6 +25,8 @@ from .command_validator import (
 from .commands import (
     ProjectOrchestrationDecision,
     ProjectOrchestrationDecisionStatus,
+    ProjectPlannerIntent,
+    ProjectPlannerIntentStatus,
     ProjectProcessCommand,
     ProjectProcessCommandStatus,
     ProjectProcessCommandType,
@@ -51,6 +53,12 @@ from .models import (
     select_blocked_wait_reason,
     validate_process_state,
 )
+from .planner import (
+    PLANNER_DECISION_SCHEMA,
+    PLANNER_INTENT_REASONS,
+    ProjectPlannerIntentService,
+)
+from .planner_projection import ProjectPlannerProjection
 from .readiness import (
     ActiveOperationSnapshot,
     CapabilityReadinessSnapshot,
@@ -122,6 +130,8 @@ from .transitions import MAIN_TRANSITIONS, ProjectTransition, ProjectTransitionG
 __all__ = [
     "MAIN_TRANSITIONS",
     "ORCHESTRATOR_PRINCIPAL_ID",
+    "PLANNER_DECISION_SCHEMA",
+    "PLANNER_INTENT_REASONS",
     "PROJECT_ORCHESTRATION_DECISIONS",
     "PROJECT_PROCESS_COMMANDS",
     "PROJECT_PROCESS_WAKEUPS",
@@ -170,6 +180,10 @@ __all__ = [
     "ProjectOrchestratorWakeupStatus",
     "ProjectOrchestratorWorkerOutcome",
     "ProjectOrchestratorWorkerStatus",
+    "ProjectPlannerIntent",
+    "ProjectPlannerIntentService",
+    "ProjectPlannerIntentStatus",
+    "ProjectPlannerProjection",
     "ProjectProcess",
     "ProjectProcessCommand",
     "ProjectProcessCommandService",

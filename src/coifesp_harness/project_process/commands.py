@@ -32,6 +32,35 @@ class ProjectProcessCommandType(StrEnum):
     REQUEST_HUMAN_GATE = "request_human_gate"
 
 
+class ProjectPlannerIntentStatus(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    PROJECTED = "PROJECTED"
+    STALE = "STALE"
+    REJECTED = "REJECTED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectPlannerIntent:
+    planner_intent_id: str
+    process_id: str
+    project_id: str
+    owner_team_id: str
+    reason: str
+    based_on_process_version: int
+    based_on_event_sequence: int
+    graph_snapshot_digest: str
+    status: ProjectPlannerIntentStatus
+    run_id: str | None
+    decision_id: str | None
+    error_code: str | None
+    created_at: datetime
+    updated_at: datetime
+    projected_at: datetime | None
+
+
 class ProjectProcessOutboxStatus(StrEnum):
     PENDING = "PENDING"
     PUBLISHING = "PUBLISHING"
