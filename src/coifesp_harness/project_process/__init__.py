@@ -70,6 +70,15 @@ from .readiness import (
     derive_readiness,
     evaluate_readiness,
 )
+from .readiness_adapter import (
+    BoundReadinessSnapshot,
+    ProjectReadinessAdapter,
+    TaskReadinessFacts,
+    TaskReadinessSnapshot,
+    adapt_project_readiness,
+    bind_project_readiness,
+    build_project_readiness,
+)
 from .repository import SQLAlchemyProjectProcessRepository
 from .scheduler import (
     PROJECT_PROCESS_WAKEUP_METADATA,
@@ -95,6 +104,7 @@ __all__ = [
     "PROJECT_PROCESS_WAKEUP_METADATA",
     "ActiveOperationSnapshot",
     "AdmissionRequest",
+    "BoundReadinessSnapshot",
     "BudgetGateDecision",
     "CapabilityMatch",
     "CapabilityReadinessSnapshot",
@@ -146,6 +156,7 @@ __all__ = [
     "ProjectProcessWakeupRepository",
     "ProjectProcessWakeupService",
     "ProjectProcessWakeupStatus",
+    "ProjectReadinessAdapter",
     "ProjectReadinessEvaluator",
     "ProjectReadinessSnapshot",
     "ProjectTransition",
@@ -158,6 +169,8 @@ __all__ = [
     "ReadinessSnapshot",
     "SQLAlchemyProjectProcessRepository",
     "SQLAlchemyProjectProcessWakeupRepository",
+    "TaskReadinessFacts",
+    "TaskReadinessSnapshot",
     "TeamReadinessSnapshot",
     "WorkGraphReadinessSnapshot",
     "WorkItemSnapshot",
@@ -165,6 +178,9 @@ __all__ = [
     "WorkNodeSnapshot",
     "WorkReadiness",
     "WorkRelationSnapshot",
+    "adapt_project_readiness",
+    "bind_project_readiness",
+    "build_project_readiness",
     "derive_readiness",
     "evaluate_readiness",
     "select_blocked_wait_reason",
