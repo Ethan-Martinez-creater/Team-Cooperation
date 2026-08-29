@@ -36,13 +36,14 @@ from .runtime import AgentLoop
 from .runtime.providers import build_model_gateway
 from .security import PolicyEngine
 from .skills import SkillCatalog, SkillTrustStore
-from .tools import ToolExecutor, ToolRegistry
+from .team_agents import TeamAgentPrincipalResolver
 from .tool_catalog import (
     build_agent_worker_registry,
     build_builtin_manifests,
     validate_registry_manifests,
 )
 from .tool_jobs import SQLAlchemyToolJobRepository, ToolBatchCoordinator, ToolJobKeyring
+from .tools import ToolExecutor
 
 logger = logging.getLogger("coifesp.worker")
 
@@ -230,7 +231,10 @@ async def build_worker_runtime(settings: Settings) -> WorkerRuntime:
         worker = DurableAgentWorker(
             service=service,
             loop=agent_loop,
-            principal_resolver=directory,
+            principal_resolver=TeamAgentPrincipalResolver(
+                engine=engine,
+                human_resolver=directory,
+            ),
             lease_seconds=settings.worker_lease_seconds,
             heartbeat_interval_seconds=settings.worker_heartbeat_seconds,
             observer=observability,
