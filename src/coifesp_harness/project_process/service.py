@@ -223,6 +223,7 @@ class ProjectProcessService:
         causation_id: str | None = None,
         schema_version: str = "v1",
         idempotency_key: str | None = None,
+        mutation_fence=None,
     ):
         idempotency_key = idempotency_key or event_id
         validate_event_contract(
@@ -232,6 +233,8 @@ class ProjectProcessService:
         )
         normalized, digest = self.repository.canonical_payload(payload)
         with self.repository.transaction() as connection:
+            if mutation_fence is not None:
+                mutation_fence(connection)
             process = self.repository.process(connection, process_id)
             duplicate = self._event_retry(connection, process_id, event_id, idempotency_key)
             if duplicate is not None:
@@ -321,6 +324,7 @@ class ProjectProcessService:
         causation_id: str | None = None,
         schema_version: str = "v1",
         idempotency_key: str | None = None,
+        mutation_fence=None,
     ):
         idempotency_key = idempotency_key or event_id
         validate_event_contract(
@@ -331,6 +335,8 @@ class ProjectProcessService:
         normalized, digest = self.repository.canonical_payload(payload)
         now = self.clock()
         with self.repository.transaction() as connection:
+            if mutation_fence is not None:
+                mutation_fence(connection)
             process = self.repository.process(connection, process_id)
             duplicate = self._event_retry(connection, process_id, event_id, idempotency_key)
             if duplicate is not None:

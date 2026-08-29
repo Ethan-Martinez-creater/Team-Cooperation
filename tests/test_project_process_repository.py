@@ -193,6 +193,40 @@ def test_transition_cas_rejects_a_concurrent_fact_cursor_change(monkeypatch):
     assert process.last_event_sequence == 1
 
 
+def test_transition_and_fact_require_the_current_worker_fence_before_mutation():
+    repository, service, _ = _stack()
+    calls = []
+
+    def lost_fence(connection):
+        calls.append(connection)
+        raise GovernanceConflictError("worker fencing token is stale")
+
+    with pytest.raises(GovernanceConflictError, match="fencing"):
+        service.apply_transition(**_event_args(), mutation_fence=lost_fence)
+    with pytest.raises(GovernanceConflictError, match="fencing"):
+        service.append_fact(
+            process_id="process-a",
+            event_id="event-risk-fenced",
+            event_type="risk.created",
+            expected_version=1,
+            expected_event_sequence=1,
+            subject_type="risk",
+            subject_id="risk-a",
+            initiated_by="lead-a",
+            executed_as="service:project-orchestrator",
+            correlation_id="corr-risk-fenced",
+            payload={"severity": "high"},
+            mutation_fence=lost_fence,
+        )
+    assert len(calls) == 2
+    with repository.transaction() as connection:
+        unchanged = repository.process(connection, "process-a")
+        events = repository.events(connection, "process-a")
+    assert unchanged.version == 1
+    assert unchanged.last_event_sequence == 1
+    assert [item.event_type for item in events] == ["project.input.requested"]
+
+
 def test_event_catalog_rejects_unknown_fact_selector_mismatch_and_wrong_v2_schema():
     _, service, _ = _stack()
     with pytest.raises(ValueError, match="event catalog"):
