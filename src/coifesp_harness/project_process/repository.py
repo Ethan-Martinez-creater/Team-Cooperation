@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC
 
@@ -452,8 +452,20 @@ Index("ix_project_outbox_pending", PROJECT_PROCESS_OUTBOX.c.status, PROJECT_PROC
 
 
 class SQLAlchemyProjectProcessRepository:
-    def __init__(self, engine: Engine) -> None:
+    def __init__(
+        self,
+        engine: Engine,
+        *,
+        event_listener: Callable[[Connection, ProjectProcessEvent], None] | None = None,
+    ) -> None:
         self.engine = engine
+        self.event_listener = event_listener
+
+    def set_event_listener(
+        self,
+        event_listener: Callable[[Connection, ProjectProcessEvent], None] | None,
+    ) -> None:
+        self.event_listener = event_listener
 
     def create_schema(self) -> None:
         PROJECT_PROCESS_METADATA.create_all(self.engine)
@@ -484,8 +496,7 @@ class SQLAlchemyProjectProcessRepository:
             raise ResourceNotFound("project process is unavailable")
         return SQLAlchemyProjectProcessRepository._process(row)
 
-    @staticmethod
-    def append_event(connection: Connection, values: dict) -> ProjectProcessEvent:
+    def append_event(self, connection: Connection, values: dict) -> ProjectProcessEvent:
         existing = (
             connection.execute(
                 select(PROJECT_PROCESS_EVENTS).where(
@@ -534,7 +545,10 @@ class SQLAlchemyProjectProcessRepository:
                 last_error=None,
             )
         )
-        return SQLAlchemyProjectProcessRepository._event(values)
+        event = SQLAlchemyProjectProcessRepository._event(values)
+        if self.event_listener is not None:
+            self.event_listener(connection, event)
+        return event
 
     @staticmethod
     def event(connection: Connection, event_id: str) -> ProjectProcessEvent | None:

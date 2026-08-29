@@ -22,8 +22,10 @@ from coifesp_harness.project_process import (
     ProjectProcessCommandType,
     ProjectProcessOutboxService,
     ProjectProcessOutboxStatus,
+    ProjectProcessScheduler,
     ProjectProcessService,
     SQLAlchemyProjectProcessRepository,
+    SQLAlchemyProjectProcessWakeupRepository,
 )
 from coifesp_harness.project_process import (
     ProjectProcessPhase as Phase,
@@ -156,6 +158,54 @@ def test_transition_and_event_commit_together_and_duplicate_converges():
     assert same.event_id == event.event_id
     with repository.transaction() as connection:
         assert len(repository.events(connection, "process-a")) == 2
+
+
+def test_new_process_event_enqueues_one_wakeup_in_the_same_transaction():
+    repository, service, _ = _stack()
+    wakeups = SQLAlchemyProjectProcessWakeupRepository(repository.engine)
+    wakeups.create_schema()
+    scheduler = ProjectProcessScheduler(wakeups, clock=lambda: NOW)
+    repository.set_event_listener(
+        lambda connection, event: scheduler.enqueue_in_transaction(
+            connection,
+            process_id=event.process_id,
+            project_id=event.project_id,
+            source_event_id=event.event_id,
+            source_event_type=event.event_type,
+            payload={"sequence": event.sequence},
+            available_at=event.occurred_at,
+        )
+    )
+
+    service.apply_transition(**_event_args())
+    service.apply_transition(**_event_args())
+
+    with wakeups.transaction() as connection:
+        queued = wakeups.list_for_process(connection, "process-a")
+    assert len(queued) == 1
+    assert queued[0].source_event_id == "event-goal"
+    assert queued[0].source_event_type == "project.goal.confirmed"
+
+
+def test_event_listener_failure_rolls_back_process_event_and_outbox():
+    repository, service, _ = _stack()
+
+    def fail_listener(connection, event):
+        del connection, event
+        raise RuntimeError("wakeup persistence failed")
+
+    repository.set_event_listener(fail_listener)
+    with pytest.raises(RuntimeError, match="wakeup persistence failed"):
+        service.apply_transition(**_event_args())
+
+    with repository.transaction() as connection:
+        process = repository.process(connection, "process-a")
+        events = repository.events(connection, "process-a")
+        rolled_back_outbox = repository.outbox_entry(connection, "outbox:event-goal")
+    assert process.version == 1
+    assert process.last_event_sequence == 1
+    assert [item.event_type for item in events] == ["project.input.requested"]
+    assert rolled_back_outbox is None
 
 
 def test_conflicting_event_retry_and_stale_transition_fail_closed():

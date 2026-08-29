@@ -62,16 +62,18 @@ from ..project_process import (
     ProjectExecutionBudgetService,
     ProjectProcessCommandService,
     ProjectProcessOutboxService,
+    ProjectProcessScheduler,
     ProjectProcessService,
     ProjectProcessShadowAdapter,
     SQLAlchemyProjectProcessRepository,
+    SQLAlchemyProjectProcessWakeupRepository,
 )
 from ..security import PolicyEngine
 from ..work_graph import ProjectWorkGraphService, SQLAlchemyWorkGraphRepository
 from .app import create_app
 from .session_lifecycle import SessionLifecycleService
 
-SCHEMA_REVISION = "20260829_47"
+SCHEMA_REVISION = "20260829_48"
 REQUIRED_RLS_TABLES = (
     "audit_events",
     "audit_heads",
@@ -324,6 +326,30 @@ def build_application(
         connector_registry = SQLAlchemyConnectorRegistry(engine=runtime_engine, audit_log=audit)
         product_account_service = ProductAccountService(runtime_engine)
         project_process_repository = SQLAlchemyProjectProcessRepository(runtime_engine)
+        project_process_wakeup_repository = SQLAlchemyProjectProcessWakeupRepository(
+            runtime_engine
+        )
+        project_process_scheduler = ProjectProcessScheduler(
+            project_process_wakeup_repository
+        )
+
+        def enqueue_project_process_event(connection, event) -> None:
+            project_process_scheduler.enqueue_in_transaction(
+                connection,
+                process_id=event.process_id,
+                project_id=event.project_id,
+                source_event_id=event.event_id,
+                source_event_type=event.event_type,
+                payload={
+                    "event_id": event.event_id,
+                    "event_type": event.event_type,
+                    "sequence": event.sequence,
+                    "process_version_after": event.process_version_after,
+                },
+                available_at=event.occurred_at,
+            )
+
+        project_process_repository.set_event_listener(enqueue_project_process_event)
         project_process_shadow = ProjectProcessShadowAdapter(project_process_repository)
         project_directory_service = ProjectDirectoryService(
             runtime_engine, process_shadow=project_process_shadow
@@ -521,6 +547,8 @@ def build_application(
     app.state.project_planning_service = project_planning_service
     app.state.project_work_graph_service = project_work_graph_service
     app.state.project_process_repository = project_process_repository
+    app.state.project_process_wakeup_repository = project_process_wakeup_repository
+    app.state.project_process_scheduler = project_process_scheduler
     app.state.project_process_service = project_process_service
     app.state.project_execution_budget_service = project_execution_budget_service
     app.state.human_gate_service = human_gate_service

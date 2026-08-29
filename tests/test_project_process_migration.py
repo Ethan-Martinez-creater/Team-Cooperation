@@ -69,8 +69,8 @@ def test_revision_47_upgrade_matches_runtime_tables_and_downgrades_cleanly():
     assert not expected_tables.intersection(inspect(engine).get_table_names())
 
 
-def test_bootstrap_revision_matches_project_process_head():
+def test_bootstrap_revision_includes_project_process_scheduler_head():
     migration = _module()
     assert migration.revision == "20260829_47"
     assert migration.down_revision == "20260829_46"
-    assert SCHEMA_REVISION == migration.revision
+    assert SCHEMA_REVISION == "20260829_48"
