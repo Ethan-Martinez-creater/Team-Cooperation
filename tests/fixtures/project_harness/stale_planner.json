@@ -571,7 +571,7 @@
             "status": "RUNNING",
             "wait_reason": "NONE"
           },
-          "process_version_change": 1,
+          "process_version_change": 0,
           "event_sequence_change": 4,
           "emitted_domain_facts": [
             {
@@ -589,20 +589,7 @@
             {
               "event_type": "project.work.dispatched",
               "subject_ref": "run-compat-1",
-              "transition_key": null,
-              "transition": {
-                "from": {
-                  "phase": "EXECUTION",
-                  "status": "RUNNING",
-                  "wait_reason": "NONE"
-                },
-                "to": {
-                  "phase": "EXECUTION",
-                  "status": "RUNNING",
-                  "wait_reason": "NONE"
-                }
-              },
-              "note": "Re-entrant transition: consumed while RUNNING (backend run still claimed); transient READY gap noted."
+              "note": "Continuous dispatch replaces the active operation within the same consumption transaction; the triple stays RUNNING and no state transition occurs (spec section 6)."
             }
           ],
           "active_operations": [
@@ -781,7 +768,7 @@
             "status": "RUNNING",
             "wait_reason": "NONE"
           },
-          "process_version_change": 1,
+          "process_version_change": 0,
           "event_sequence_change": 3,
           "emitted_domain_facts": [
             {
@@ -795,20 +782,7 @@
             {
               "event_type": "project.work.dispatched",
               "subject_ref": "run-frontend-1",
-              "transition_key": null,
-              "transition": {
-                "from": {
-                  "phase": "EXECUTION",
-                  "status": "RUNNING",
-                  "wait_reason": "NONE"
-                },
-                "to": {
-                  "phase": "EXECUTION",
-                  "status": "RUNNING",
-                  "wait_reason": "NONE"
-                }
-              },
-              "note": "Re-entrant transition: consumed while RUNNING; transient READY gap noted."
+              "note": "Continuous dispatch replaces the active operation within the same consumption transaction; the triple stays RUNNING and no state transition occurs (spec section 6)."
             }
           ],
           "active_operations": [

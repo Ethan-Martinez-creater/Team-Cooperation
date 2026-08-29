@@ -335,7 +335,7 @@
             "status": "RUNNING",
             "wait_reason": "NONE"
           },
-          "process_version_change": 1,
+          "process_version_change": 0,
           "event_sequence_change": 3,
           "emitted_domain_facts": [
             {
@@ -350,19 +350,7 @@
             {
               "event_type": "project.work.dispatched",
               "subject_ref": "run-backend-2",
-              "note": "dispatch fact for the deterministic rework run; no main-chain key | Re-entrant transition: dispatch consumed while RUNNING; transient READY gap noted.",
-              "transition": {
-                "from": {
-                  "phase": "EXECUTION",
-                  "status": "RUNNING",
-                  "wait_reason": "NONE"
-                },
-                "to": {
-                  "phase": "EXECUTION",
-                  "status": "RUNNING",
-                  "wait_reason": "NONE"
-                }
-              }
+              "note": "Continuous dispatch replaces the active operation within the same consumption transaction; the triple stays RUNNING and no state transition occurs (spec section 6)."
             }
           ],
           "active_operations": [
@@ -456,7 +444,7 @@
             "status": "RUNNING",
             "wait_reason": "NONE"
           },
-          "process_version_change": 1,
+          "process_version_change": 0,
           "event_sequence_change": 3,
           "emitted_domain_facts": [
             {
@@ -470,19 +458,7 @@
             {
               "event_type": "project.work.dispatched",
               "subject_ref": "run-frontend-1",
-              "note": "dependency satisfied; deterministic dispatch | Re-entrant transition: dispatch consumed while RUNNING; transient READY gap noted.",
-              "transition": {
-                "from": {
-                  "phase": "EXECUTION",
-                  "status": "RUNNING",
-                  "wait_reason": "NONE"
-                },
-                "to": {
-                  "phase": "EXECUTION",
-                  "status": "RUNNING",
-                  "wait_reason": "NONE"
-                }
-              }
+              "note": "Continuous dispatch replaces the active operation within the same consumption transaction; the triple stays RUNNING and no state transition occurs (spec section 6)."
             }
           ],
           "active_operations": [

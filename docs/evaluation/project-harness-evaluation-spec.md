@@ -145,8 +145,11 @@ observations            引用稳定 ID 的机器断言（自然语言仅作说�
 
 - `event_sequence_change == len(emitted_domain_facts)` 由测试强制（version_policy.domain_fact_advances_event_sequence）；
 - `process_version_change == len(facts with transition)` 由测试强制（only_transition_advances_process_version）；
-- 迁移链连通性：每条 transition 的 `from` 必须等于前窗末三元组（即 fact 消费时刻的实际三元组），`to` 必须等于本窗 expected_process。允许 `from == to` 的**再入迁移**（re-entrant transition）：fact 在 RUNNING 状态被消费、窗口内部经历 READY 间隙后回到 RUNNING（如 run terminal 后同轮 dispatch），间隙作为 note 说明，不锁定主链 key；
-- transition 的 `transition_key` 仅在主链迁移表冻结 key 时填写（`goal.confirmed`、`analysis.started`、`analysis.completed`、`plan.approved`、`work.dispatched`、`all_required_work_submitted`、`verification.failed`、`verification.passed`、`integration.passed`、`delivery.accepted`、`delivery.rejected`）；其余迁移（进入 WAITING/BLOCKED、sleep/wake、gate/input/budget/capacity）不锁定 key（内部矩阵 selector，非公共契约）；
+- **三元组不变的领域事实不增加 process version**：事实在 RUNNING 状态被消费且三元组保持不变时（如运行中连续调度），该事实不携带 transition，version 增量为 0；
+- **transition 必须改变三元组**：`transition.from == transition.to` 一律非法，validator 拒绝；不存在"伪再入迁移"；
+- **连续调度替换活跃操作不产生状态迁移**：同一消费事务中 orchestrator 可以把 active operation 从旧 run 换成新 run（dispatch 成功事实仍记录、sequence 前进），process 停留 RUNNING、version 不变；不再使用"隐藏 READY 间隙"解释此类步骤；
+- 迁移链连通性：每条 transition 的 `from` 必须等于前窗末三元组（即 fact 消费时刻的实际三元组），`to` 必须等于本窗 expected_process；
+- transition 的 `transition_key` 仅在主链迁移表冻结 key 时填写（`goal.confirmed`、`analysis.started`、`analysis.completed`、`plan.approved`、`work.dispatched`、`all_required_work_submitted`、`verification.failed`、`verification.passed`、`integration.passed`、`delivery.accepted`、`delivery.rejected`）；transition 的 from/to 与主链行匹配时必须携带该行的 key；非主链迁移的 `transition_key=null` 表示 fixture 不断言尚未冻结的内部矩阵 selector 名称，**不代表真实持久化事件可以没有 selector**（Guard 实现仍须为其分配内部 key）；
 - “恰好一次”断言必须落在稳定 ID / 幂等键上：run ref、command id、reservation id、manifest id、input request id、negotiation id、usage 计数器、wakeup 去重键 `(process_ref, source_event_id)`；
 - 无迁移窗口使用显式不变三元组（from == to 的负断言语义）。
 

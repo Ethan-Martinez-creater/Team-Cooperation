@@ -692,7 +692,7 @@
             "status": "RUNNING",
             "wait_reason": "NONE"
           },
-          "process_version_change": 1,
+          "process_version_change": 0,
           "event_sequence_change": 3,
           "emitted_domain_facts": [
             {
@@ -707,20 +707,7 @@
             {
               "event_type": "project.work.dispatched",
               "subject_ref": "run-frontend-1",
-              "transition_key": null,
-              "transition": {
-                "from": {
-                  "phase": "EXECUTION",
-                  "status": "RUNNING",
-                  "wait_reason": "NONE"
-                },
-                "to": {
-                  "phase": "EXECUTION",
-                  "status": "RUNNING",
-                  "wait_reason": "NONE"
-                }
-              },
-              "note": "Re-entrant transition: the fact is consumed while RUNNING; the transient READY gap after the run terminal is internal to the orchestration cycle."
+              "note": "Continuous dispatch replaces the active operation within the same consumption transaction; the triple stays RUNNING and no state transition occurs (spec section 6)."
             }
           ],
           "active_operations": [
@@ -746,7 +733,7 @@
             }
           ],
           "observations": [
-            "transition from is the interim EXECUTION/READY after backend run terminal; exactly one migration in this step."
+            "The dispatch fact replaces the active operation within the same consumption transaction while RUNNING; no state transition and no version increment in this step."
           ]
         },
         {

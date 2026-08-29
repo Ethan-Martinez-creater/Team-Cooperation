@@ -457,7 +457,7 @@
             "status": "RUNNING",
             "wait_reason": "NONE"
           },
-          "process_version_change": 1,
+          "process_version_change": 0,
           "event_sequence_change": 4,
           "emitted_domain_facts": [
             {
@@ -476,20 +476,7 @@
             {
               "event_type": "project.work.dispatched",
               "subject_ref": "run-frontend-1",
-              "transition_key": null,
-              "transition": {
-                "from": {
-                  "phase": "EXECUTION",
-                  "status": "RUNNING",
-                  "wait_reason": "NONE"
-                },
-                "to": {
-                  "phase": "EXECUTION",
-                  "status": "RUNNING",
-                  "wait_reason": "NONE"
-                }
-              },
-              "note": "Re-entrant transition: consumed while RUNNING; transient READY gap noted."
+              "note": "Continuous dispatch replaces the active operation within the same consumption transaction; the triple stays RUNNING and no state transition occurs (spec section 6)."
             }
           ],
           "active_operations": [
@@ -1042,15 +1029,12 @@
             "wait_reason": "NONE"
           },
           "process_version_change": 0,
-          "event_sequence_change": 2,
+          "event_sequence_change": 1,
           "emitted_domain_facts": [
             {
               "event_type": "approval.decided",
-              "subject_ref": "delivery-1"
-            },
-            {
-              "event_type": "project.delivery.accepted",
-              "subject_ref": "delivery-1"
+              "subject_ref": "delivery-1",
+              "note": "human acceptance decision; the project.delivery.accepted fact itself is a harness output emitted only after the completion evaluator passes"
             }
           ],
           "active_operations": [],
@@ -1058,18 +1042,18 @@
             {
               "object_type": "delivery_manifest",
               "object_ref": "delivery-1",
-              "note": "status READY->ACCEPTED in the same transaction as the facts and outbox-entry-1 (ADR-0008 decision 1)",
+              "note": "status READY->ACCEPTED in the same transaction as the decision fact and outbox-entry-1 (ADR-0008 decision 1)",
               "idempotency_key": "idem:delivery-1:accept"
             },
             {
               "object_type": "outbox_entry",
               "object_ref": "outbox-entry-1",
-              "note": "PENDING; wakeup key (process-demo-1, fact:project.delivery.accepted:delivery-1)"
+              "note": "PENDING; wakeup key (process-demo-1, source event of approval.decided s01) requiring completion evaluation"
             }
           ],
           "commands": [],
           "observations": [
-            "The terminal transition has NOT happened yet: only the successful completion evaluator may cause delivery.accepted -> TERMINAL/COMPLETED (ADR-0011 decision 8); the orchestrator has not consumed the fact."
+            "The terminal transition has NOT happened: only a successful completion evaluator may cause delivery.accepted -> TERMINAL/COMPLETED (ADR-0011 decision 8); the wakeup is still pending."
           ]
         },
         {
@@ -1099,12 +1083,11 @@
             "wait_reason": "NONE"
           },
           "process_version_change": 1,
-          "event_sequence_change": 1,
+          "event_sequence_change": 2,
           "emitted_domain_facts": [
             {
-              "event_type": "project.completion.evaluated",
-              "subject_ref": "completion-contract-1",
-              "outcome": "PASS",
+              "event_type": "project.delivery.accepted",
+              "subject_ref": "delivery-1",
               "transition_key": "delivery.accepted",
               "transition": {
                 "from": {
@@ -1118,6 +1101,12 @@
                   "wait_reason": "NONE"
                 }
               }
+            },
+            {
+              "event_type": "project.completion.evaluated",
+              "subject_ref": "completion-contract-1",
+              "outcome": "PASS",
+              "note": "deterministic evaluator PASS precedes the terminal transition"
             }
           ],
           "active_operations": [],
@@ -1131,7 +1120,7 @@
           ],
           "commands": [],
           "observations": [
-            "Both replays of outbox-entry-1 converge: orchestration executes once (wakeup key uniqueness), completion evaluation and terminal transition happen exactly once (seq +1, version +1)."
+            "Both replays of outbox-entry-1 converge: orchestration executes once (wakeup key uniqueness); the harness emits project.delivery.accepted only after the evaluator PASS, so the terminal transition happens exactly once (seq +2, version +1)."
           ]
         }
       ],
@@ -1142,7 +1131,7 @@
         },
         {
           "output_id": "ro-02",
-          "statement": "Replay of outbox-entry-1 twice equals once: completion-eval-1 created exactly once (idem:completion:process-demo-1:delivery-1); total seq delta across t03 is +1."
+          "statement": "Replay of outbox-entry-1 twice equals once: completion-eval-1 created exactly once (idem:completion:process-demo-1:delivery-1); t03 seq delta is exactly +2 (project.delivery.accepted + project.completion.evaluated), version delta exactly +1."
         },
         {
           "output_id": "ro-03",
@@ -1150,7 +1139,7 @@
         },
         {
           "output_id": "ro-04",
-          "statement": "Terminal state reached exactly once; no duplicate project.completion.evaluated fact exists (seq ledger check)."
+          "statement": "Terminal state reached exactly once: exactly one project.delivery.accepted fact carries the terminal transition and exactly one project.completion.evaluated fact exists (seq ledger check)."
         }
       ],
       "forbidden_outcomes": [

@@ -301,19 +301,47 @@ def _validate_scenario(scenario: dict, contract: dict, where: str):
             if transition is not None:
                 transition_count += 1
                 transition_key = fact.get("transition_key")
-                if transition_key is not None and transition_key not in main_chain_keys:
-                    _fail(f"{swhere}: transition_key {transition_key!r} is not a frozen main-chain key")
-                _check_triple(transition["from"], contract, f"{swhere} transition.from")
-                _check_triple(transition["to"], contract, f"{swhere} transition.to")
-                if transition["from"] != previous_triple:
+                transition_from = transition["from"]
+                transition_to = transition["to"]
+                if transition_from == transition_to:
                     _fail(
-                        f"{swhere}: transition.from {transition['from']} does not match the "
+                        f"{swhere}: transition.from == transition.to is forbidden; "
+                        f"a transition must change the triple - a triple-preserving fact "
+                        f"must not carry one"
+                    )
+                _check_triple(transition_from, contract, f"{swhere} transition.from")
+                _check_triple(transition_to, contract, f"{swhere} transition.to")
+                if transition_from != previous_triple:
+                    _fail(
+                        f"{swhere}: transition.from {transition_from} does not match the "
                         f"previous window end {previous_triple}"
                     )
-                if transition["to"] != {
+                if transition_to != {
                     k: step["expected_process"][k] for k in ("phase", "status", "wait_reason")
                 }:
                     _fail(f"{swhere}: transition.to must equal the step's expected_process")
+                # main-chain key enforcement
+                target = (transition_to["phase"], transition_to["status"], transition_to["wait_reason"])
+                chain_rows = [
+                    row
+                    for row in contract["main_transition"]
+                    if row["domain_fact"] == fact_type
+                    and ("outcome" not in row or row.get("outcome") == fact.get("outcome"))
+                    and tuple(row["to"]) == target
+                ]
+                if chain_rows:
+                    expected_key = {row["transition_key"] for row in chain_rows}
+                    if transition_key not in expected_key:
+                        _fail(
+                            f"{swhere}: fact {fact_type!r} to {target} matches frozen main-chain "
+                            f"rows {sorted(expected_key)} and must carry that transition_key, got {transition_key!r}"
+                        )
+                elif transition_key is not None:
+                    _fail(
+                        f"{swhere}: non-main-chain transition must not invent a transition_key "
+                        f"({transition_key!r}); null means the fixture does not assert the "
+                        f"unfrozen internal selector name"
+                    )
         if version_change != transition_count:
             _fail(
                 f"{swhere}: process_version_change {version_change} != number of transition facts "
@@ -557,6 +585,83 @@ def test_rejects_planner_run_executing_as_team_agent(fixtures, contract):
 def test_rejects_missing_policy_field(fixtures, contract):
     fixture = _single_scenario_fixture(fixtures, "simple_project")
     del _first_scenario(fixture)["initial_state"]["execution_policy"]["max_specialist_depth"]
+    with pytest.raises(FixtureValidationError):
+        validate_fixture(fixture, contract)
+
+
+def test_dispatch_while_running_does_not_migrate(fixtures):
+    """Continuous dispatch replaces the active operation without a state transition.
+
+    The seven run-while-RUNNING dispatch steps must keep version_change 0 and
+    carry no transition on the project.work.dispatched fact.
+    """
+    targets = {
+        ("simple_project", "eval-01-simple-project", "t10"),
+        ("dependency", "eval-02-dependency-blocking", "t05"),
+        ("cross_team_disclosure", "eval-06-malicious-context-injection", "t02"),
+        ("stale_planner", "eval-09-stale-planner-decision", "t04"),
+        ("stale_planner", "eval-09-stale-planner-decision", "t10"),
+        ("verification_failure", "eval-04-verification-failure-rework", "t01"),
+        ("verification_failure", "eval-04-verification-failure-rework", "t04"),
+    }
+    seen = set()
+    for fixture_id, fixture in fixtures.items():
+        for scenario in fixture["scenarios"]:
+            for step in scenario["expected_steps"]:
+                key = (fixture_id, scenario["scenario_id"], step["step_id"])
+                if key not in targets:
+                    continue
+                seen.add(key)
+                assert step["process_version_change"] == 0, key
+                dispatch_facts = [f for f in step["emitted_domain_facts"] if f["event_type"] == "project.work.dispatched"]
+                assert dispatch_facts, key
+                for fact in dispatch_facts:
+                    assert "transition" not in fact, key
+                    assert "transition_key" not in fact, key
+                assert step["active_operations"], key
+    assert seen == targets
+
+
+def test_no_identity_transitions_anywhere(fixtures):
+    """No transition may have from == to (validator also enforces this)."""
+    for fixture_id, fixture in fixtures.items():
+        for scenario in fixture["scenarios"]:
+            for step in scenario["expected_steps"]:
+                for fact in step["emitted_domain_facts"]:
+                    transition = fact.get("transition")
+                    if transition:
+                        assert transition["from"] != transition["to"], (
+                            f"{fixture_id}:{scenario['scenario_id']}:{step['step_id']}"
+                        )
+
+
+def test_rejects_identity_transition(fixtures, contract):
+    fixture = _single_scenario_fixture(fixtures, "simple_project")
+    scenario = _first_scenario(fixture)
+    step = next(s for s in scenario["expected_steps"] if s["step_id"] == "t06")
+    fact = next(f for f in step["emitted_domain_facts"] if f["event_type"] == "project.work.dispatched")
+    same = fact["transition"]["to"]
+    fact["transition"]["from"] = copy.deepcopy(same)
+    with pytest.raises(FixtureValidationError):
+        validate_fixture(fixture, contract)
+
+
+def test_rejects_main_chain_transition_missing_key(fixtures, contract):
+    fixture = _single_scenario_fixture(fixtures, "simple_project")
+    scenario = _first_scenario(fixture)
+    step = next(s for s in scenario["expected_steps"] if s["step_id"] == "t16")
+    fact = next(f for f in step["emitted_domain_facts"] if f["event_type"] == "project.delivery.accepted")
+    fact["transition_key"] = None
+    with pytest.raises(FixtureValidationError):
+        validate_fixture(fixture, contract)
+
+
+def test_rejects_invented_non_main_chain_key(fixtures, contract):
+    fixture = _single_scenario_fixture(fixtures, "budget_exhaustion")
+    scenario = next(s for s in fixture["scenarios"] if s["scenario_id"] == "eval-07-project-budget-exhaustion-gate")
+    step = next(s for s in scenario["expected_steps"] if s["step_id"] == "t01")
+    fact = next(f for f in step["emitted_domain_facts"] if f["event_type"] == "project.gate.opened")
+    fact["transition_key"] = "gate.opened"
     with pytest.raises(FixtureValidationError):
         validate_fixture(fixture, contract)
 
