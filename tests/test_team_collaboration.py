@@ -174,6 +174,35 @@ def test_team_task_lifecycle_keeps_external_owner_at_team_boundary():
     ]
 
 
+def test_team_task_process_projection_failure_rolls_back_product_transition():
+    engine, _, _, alpha, beta, project = setup()
+
+    class FailingShadow:
+        @staticmethod
+        def on_team_task_changed(*args, **kwargs):
+            raise RuntimeError("projection failed")
+
+    service = TeamCollaborationService(engine, process_shadow=FailingShadow())
+    task = service.create_task(
+        task_id="task-shadow-rollback",
+        project_id=project.project_id,
+        actor_id=alpha.account_id,
+        target_team_id=beta.team_id,
+        title="事务投影",
+        description="验证状态与事件同事务",
+        acceptance_criteria="投影失败时状态不提交",
+    )
+    with pytest.raises(RuntimeError, match="projection failed"):
+        service.respond_task(
+            project_id=project.project_id,
+            task_id=task.task_id,
+            actor_id=beta.account_id,
+            accept=True,
+        )
+    stored = service.list_tasks(project_id=project.project_id, actor_id=alpha.account_id)
+    assert stored[0].status is TeamTaskStatus.PROPOSED
+
+
 def test_project_notification_cursor_is_per_account_and_ignores_own_events():
     _, accounts, service, alpha, beta, project = setup()
     service.mark_project_read(project_id=project.project_id, actor_id=alpha.account_id)

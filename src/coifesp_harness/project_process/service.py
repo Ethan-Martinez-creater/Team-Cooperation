@@ -263,6 +263,8 @@ class ProjectProcessService:
                     and_(
                         PROJECT_PROCESSES.c.process_id == process_id,
                         PROJECT_PROCESSES.c.version == expected_version,
+                        PROJECT_PROCESSES.c.last_event_sequence
+                        == process.last_event_sequence,
                     )
                 )
                 .values(

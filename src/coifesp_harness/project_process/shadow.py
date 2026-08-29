@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, select
@@ -189,6 +190,84 @@ class ProjectProcessShadowAdapter:
             )
         return self.repository.process(connection, process_id)
 
+    def on_team_task_changed(
+        self,
+        connection,
+        *,
+        project_id: str,
+        task_id: str,
+        actor_id: str,
+        activity_type: str,
+        occurred_at: datetime,
+        source_aggregate_version: int | None = None,
+    ):
+        """Append a Product TeamTask fact in the caller's transaction.
+
+        This remains a shadow projection: it records and wakes durable process
+        state without dispatching an Agent or inventing a second task status.
+        """
+        event_types = {
+            "task.accepted": "team_task.accepted",
+            "task.rejected": "team_task.rejected",
+            "task.started": "team_task.started",
+            "task.submitted": "team_task.submitted",
+            "task.verified": "team_task.verified",
+            "task.changes_requested": "team_task.changes_requested",
+            "task_schedule_changed": "task.schedule.changed",
+        }
+        event_type = event_types.get(activity_type)
+        if event_type is None:
+            raise ValueError("team task activity is not a project process fact")
+        process_id = f"process:{project_id}"
+        if connection.execute(
+            select(PROJECT_PROCESSES.c.process_id).where(
+                PROJECT_PROCESSES.c.process_id == process_id
+            )
+        ).scalar_one_or_none() is None:
+            self.on_project_created(
+                connection,
+                project_id=project_id,
+                actor_id=actor_id,
+                description="",
+            )
+        process = self.repository.process(connection, process_id)
+        identity = f"{project_id}:{task_id}:{event_type}:{occurred_at.isoformat()}"
+        event_id = f"shadow:task:{hashlib.sha256(identity.encode()).hexdigest()[:32]}"
+        existing = self.repository.event(connection, event_id)
+        if existing is not None:
+            return process, existing
+        now = self.clock()
+        next_sequence = process.last_event_sequence + 1
+        updated = connection.execute(
+            PROJECT_PROCESSES.update()
+            .where(
+                and_(
+                    PROJECT_PROCESSES.c.process_id == process_id,
+                    PROJECT_PROCESSES.c.version == process.version,
+                    PROJECT_PROCESSES.c.last_event_sequence == process.last_event_sequence,
+                )
+            )
+            .values(last_event_sequence=next_sequence, updated_at=now)
+        ).rowcount
+        if updated != 1:
+            raise GovernanceConflictError("shadow project process event cursor is stale")
+        event = self._append_event(
+            connection,
+            process=process,
+            event_id=event_id,
+            event_type=event_type,
+            transition_key=None,
+            subject_type="team_task",
+            subject_id=task_id,
+            version_after=None,
+            initiated_by=actor_id,
+            executed_as=actor_id,
+            payload={"task_id": task_id, "activity_type": activity_type},
+            sequence=next_sequence,
+            source_aggregate_version=source_aggregate_version,
+        )
+        return self.repository.process(connection, process_id), event
+
     def _answer_initial_goal(self, connection, *, process, actor_id, goal_summary, draft_id):
         request_id = f"{process.process_id}:goal-input"
         row = connection.execute(
@@ -282,7 +361,8 @@ class ProjectProcessShadowAdapter:
 
     def _append_event(self, connection, *, process, event_id, event_type, transition_key,
                       subject_type, subject_id, version_after, initiated_by, executed_as,
-                      payload, sequence, process_version_before=None):
+                      payload, sequence, process_version_before=None,
+                      source_aggregate_version=1):
         validate_event_contract(
             event_type=event_type,
             transition_key=transition_key,
@@ -300,7 +380,7 @@ class ProjectProcessShadowAdapter:
                 schema_version="v1",
                 subject_type=subject_type,
                 subject_id=subject_id,
-                source_aggregate_version=1,
+                source_aggregate_version=source_aggregate_version,
                 version_after=version_after,
                 initiated_by=initiated_by,
                 executed_as=executed_as,

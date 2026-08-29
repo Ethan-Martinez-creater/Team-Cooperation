@@ -333,7 +333,9 @@ def build_application(
         )
         notification_service = NotificationService(runtime_engine)
         team_collaboration_service = TeamCollaborationService(
-            runtime_engine, notifier=notification_service
+            runtime_engine,
+            notifier=notification_service,
+            process_shadow=project_process_shadow,
         )
         project_workspace_service = ProjectWorkspaceService(runtime_engine)
         agent_exchange_service = AgentExchangeService(runtime_engine)

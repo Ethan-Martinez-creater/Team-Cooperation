@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.pool import StaticPool
@@ -102,6 +102,40 @@ def test_local_demo_project_uses_the_same_shadow_process_creation_path():
         ProjectProcessWaitReason.HUMAN_INPUT,
     )
     assert [event.event_type for event in events] == ["project.input.requested"]
+
+
+def test_team_task_fact_is_appended_without_inventing_a_process_transition():
+    _, repository, shadow, project = _stack()
+    with repository.transaction() as connection:
+        before = repository.process(connection, f"process:{project.project_id}")
+        after, event = shadow.on_team_task_changed(
+            connection,
+            project_id=project.project_id,
+            task_id="task-a",
+            actor_id="lead-a",
+            activity_type="task.accepted",
+            occurred_at=NOW,
+        )
+    assert event.event_type == "team_task.accepted"
+    assert event.transition_key is None
+    assert event.subject_id == "task-a"
+    assert after.version == before.version
+    assert after.last_event_sequence == before.last_event_sequence + 1
+
+    with repository.transaction() as connection:
+        scheduled, schedule_event = shadow.on_team_task_changed(
+            connection,
+            project_id=project.project_id,
+            task_id="task-a",
+            actor_id="lead-a",
+            activity_type="task_schedule_changed",
+            occurred_at=NOW + timedelta(seconds=1),
+            source_aggregate_version=2,
+        )
+    assert schedule_event.event_type == "task.schedule.changed"
+    assert schedule_event.source_aggregate_version == 2
+    assert scheduled.version == before.version
+    assert scheduled.last_event_sequence == before.last_event_sequence + 2
 
 
 def test_plan_approval_shadow_projection_reaches_execution_ready_idempotently():

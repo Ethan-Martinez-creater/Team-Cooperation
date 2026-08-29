@@ -34,6 +34,7 @@ from coifesp_harness.project_process import (
 from coifesp_harness.project_process import (
     ProjectProcessWaitReason as WaitReason,
 )
+from coifesp_harness.project_process.repository import PROJECT_PROCESSES
 
 NOW = datetime(2026, 8, 29, tzinfo=UTC)
 
@@ -166,6 +167,30 @@ def test_conflicting_event_retry_and_stale_transition_fail_closed():
         service.apply_transition(**_event_args(executed_as="someone-else"))
     with pytest.raises(GovernanceConflictError, match="stale"):
         service.apply_transition(**_event_args(event_id="event-other", expected_version=1))
+
+
+def test_transition_cas_rejects_a_concurrent_fact_cursor_change(monkeypatch):
+    repository, service, _ = _stack()
+    original = repository.process
+
+    def process_with_concurrent_fact(connection, process_id):
+        process = original(connection, process_id)
+        connection.execute(
+            PROJECT_PROCESSES.update()
+            .where(PROJECT_PROCESSES.c.process_id == process_id)
+            .values(last_event_sequence=process.last_event_sequence + 1)
+        )
+        return process
+
+    monkeypatch.setattr(repository, "process", process_with_concurrent_fact)
+    with pytest.raises(GovernanceConflictError, match="stale"):
+        service.apply_transition(**_event_args())
+
+    monkeypatch.setattr(repository, "process", original)
+    with repository.transaction() as connection:
+        process = repository.process(connection, "process-a")
+    assert process.version == 1
+    assert process.last_event_sequence == 1
 
 
 def test_event_catalog_rejects_unknown_fact_selector_mismatch_and_wrong_v2_schema():

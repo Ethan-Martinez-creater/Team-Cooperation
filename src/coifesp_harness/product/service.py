@@ -1553,9 +1553,10 @@ class ProjectResourceService:
 
 
 class TeamCollaborationService:
-    def __init__(self, engine: Engine, *, notifier=None) -> None:
+    def __init__(self, engine: Engine, *, notifier=None, process_shadow=None) -> None:
         self.engine = engine
         self.notifier = notifier
+        self.process_shadow = process_shadow
 
     def send_message(
         self, *, message_id: str, project_id: str, actor_id: str, target_team_id: str, content: str
@@ -1813,6 +1814,15 @@ class TeamCollaborationService:
                 "目标团队提交了任务交付",
                 now,
             )
+            if self.process_shadow is not None:
+                self.process_shadow.on_team_task_changed(
+                    connection,
+                    project_id=project_id,
+                    task_id=task_id,
+                    actor_id=actor_id,
+                    activity_type="task.submitted",
+                    occurred_at=now,
+                )
         return self._task(task)
 
     def review_task(
@@ -1930,6 +1940,16 @@ class TeamCollaborationService:
                 )
                 if self.notifier is not None:
                     self.notifier.refresh_task_reminders(connection, updated, now=now)
+                if self.process_shadow is not None:
+                    self.process_shadow.on_team_task_changed(
+                        connection,
+                        project_id=project_id,
+                        task_id=task_id,
+                        actor_id=actor_id,
+                        activity_type="task_schedule_changed",
+                        occurred_at=now,
+                        source_aggregate_version=updated["schedule_version"],
+                    )
                 return "updated", self._task(updated)
             existing_pending = (
                 connection.execute(
@@ -2143,6 +2163,16 @@ class TeamCollaborationService:
                 )
                 if self.notifier is not None:
                     self.notifier.refresh_task_reminders(connection, updated_task, now=now)
+                if self.process_shadow is not None:
+                    self.process_shadow.on_team_task_changed(
+                        connection,
+                        project_id=project_id,
+                        task_id=task_id,
+                        actor_id=actor_id,
+                        activity_type="task_schedule_changed",
+                        occurred_at=now,
+                        source_aggregate_version=updated_task["schedule_version"],
+                    )
             else:
                 self._activity(
                     connection,
@@ -3386,6 +3416,15 @@ class TeamCollaborationService:
                 and task["due_at"] is not None
             ):
                 self.notifier.refresh_task_reminders(connection, task, now=now)
+            if self.process_shadow is not None:
+                self.process_shadow.on_team_task_changed(
+                    connection,
+                    project_id=project_id,
+                    task_id=task_id,
+                    actor_id=actor_id,
+                    activity_type=event,
+                    occurred_at=now,
+                )
         return self._task(task)
 
     @staticmethod
