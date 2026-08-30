@@ -207,11 +207,14 @@ class PersistentTaskDispatchFactLoader:
     fictitious usable resource. Binary inputs are references, not invented text.
     """
 
-    def __init__(self, *, engine, artifact_content=None):
+    def __init__(self, *, engine, artifact_content=None, verification_evidence_loader=None):
         self.engine = engine
         self.artifact_content = artifact_content
+        self.verification_evidence_loader = verification_evidence_loader
 
-    def __call__(self, *, connection, process, task):
+    def __call__(
+        self, *, connection, process, task, graph=None, verification_evidence=None,
+    ):
         if connection.engine is not self.engine or not connection.in_transaction():
             raise ValueError(
                 "task contract loader requires the active dispatch transaction"
@@ -223,10 +226,18 @@ class PersistentTaskDispatchFactLoader:
         if (
             version is None
             or row["accepted_contract_version"] != version
-            or row["status"] != "accepted"
+            or row["status"] not in {"accepted", "changes_requested"}
         ):
             raise GovernanceConflictError(
                 "a version-pinned accepted task contract is required"
+            )
+        if row["status"] == "changes_requested":
+            self._require_current_rework_evidence(
+                connection,
+                process=process,
+                graph=graph,
+                verification_evidence=verification_evidence,
+                task_id=task.task_id,
             )
         if row["process_id"] != process.process_id:
             raise GovernanceConflictError("task contract belongs to another process")
@@ -313,6 +324,38 @@ class PersistentTaskDispatchFactLoader:
             contract_accepted=True,
             shared_items=(details, *inputs),
         )
+
+    def _require_current_rework_evidence(
+        self, connection, *, process, graph, verification_evidence, task_id,
+    ) -> None:
+        """Keep direct loader use fail-closed for ``changes_requested`` tasks."""
+        if graph is None:
+            from ..work_graph.repository import SQLAlchemyWorkGraphRepository
+
+            graph = SQLAlchemyWorkGraphRepository(self.engine).snapshot(
+                connection, project_id=process.project_id,
+            )
+        if verification_evidence is None:
+            loader = self.verification_evidence_loader
+            if loader is None:
+                from ..verification.project_evidence import (
+                    load_project_verification_evidence,
+                )
+
+                loader = load_project_verification_evidence
+            verification_evidence = loader(
+                connection, process=process, graph=graph,
+            )
+        if (
+            verification_evidence is None
+            or verification_evidence.graph_digest != graph.digest
+            or getattr(verification_evidence.outcome, "value", verification_evidence.outcome)
+            != "FAILED"
+            or task_id not in verification_evidence.failed_task_ids
+        ):
+            raise GovernanceConflictError(
+                "changes_requested task lacks current verification FAIL evidence"
+            )
 
     def _input(self, connection, task, entry):
         resource = (

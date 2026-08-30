@@ -21,7 +21,7 @@ from ..agent_runs.models import TERMINAL_RUN_STATES
 from ..agent_runs.repository import AGENT_RUNS
 from ..context import ContextItem
 from ..errors import GovernanceConflictError, ResourceNotFound
-from ..product import TeamTaskStatus
+from ..product import TeamProjectAgentStatus, TeamTaskStatus
 from ..product.repository import PROJECT_AGENT_RUNS, TEAM_PROJECT_AGENTS, TEAM_TASKS
 from ..product.service import TeamCollaborationService
 from ..product.workspace import ProjectWorkspaceService
@@ -47,6 +47,7 @@ from ..project_process.repository import (
     PROJECT_PROCESSES,
 )
 from ..runtime import AgentRunRequest, Message
+from ..security import Classification, ResourceLabel
 from ..work_graph import WorkNodeType
 from .identity import ORCHESTRATOR_PRINCIPAL_ID, project_orchestrator_principal
 
@@ -64,7 +65,10 @@ class TaskDispatchFacts:
 
 
 class TaskDispatchFactLoader(Protocol):
-    def __call__(self, *, connection: Connection, process, task) -> TaskDispatchFacts: ...
+    def __call__(
+        self, *, connection: Connection, process, task,
+        graph=None, verification_evidence=None,
+    ) -> TaskDispatchFacts: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,11 +82,61 @@ class TaskDispatchResult:
     duplicate: bool = False
 
 
+class _EvidenceBoundReworkContextBuilder(ProjectAgentContextBuilder):
+    """Build execution context for a contract-accepted verification rework.
+
+    The durable task deliberately remains ``changes_requested`` until this
+    transaction starts the next attempt.  The normal context builder predates
+    evidence-bound rework and hard-rejects that lifecycle status, so this
+    adapter repeats its structural checks while retaining the real status in
+    the emitted task context.  It never changes acceptance or contract data.
+    """
+
+    @staticmethod
+    def _validate(*, process, team_agent, task, contract, graph) -> None:
+        project_ids = {
+            process.project_id,
+            team_agent.project_id,
+            task.project_id,
+            contract.project_id,
+            graph.project_id,
+        }
+        if len(project_ids) != 1:
+            raise GovernanceConflictError(
+                "team Agent context belongs to multiple projects"
+            )
+        if team_agent.status is not TeamProjectAgentStatus.ACTIVE:
+            raise GovernanceConflictError("team project Agent is not active")
+        if task.status not in {
+            TeamTaskStatus.ACCEPTED,
+            TeamTaskStatus.CHANGES_REQUESTED,
+        }:
+            raise GovernanceConflictError(
+                "only an accepted or evidence-bound rework TeamTask may enter automatic execution context"
+            )
+        if (
+            task.task_id != contract.task_id
+            or task.target_team_id != team_agent.team_id
+            or contract.target_team_id != team_agent.team_id
+        ):
+            raise GovernanceConflictError(
+                "team task contract is bound to another task or team"
+            )
+        task_nodes = {
+            item.subject_id
+            for item in graph.nodes
+            if item.node_type is WorkNodeType.TASK
+        }
+        if task.task_id not in task_nodes:
+            raise GovernanceConflictError("team task is absent from the work graph")
+
+
 class TeamAgentDispatcher:
     def __init__(
         self, *, repository, work_graph_repository, capability_adapter,
         runtime_resolver, run_service: AgentRunService,
-        fact_loader: TaskDispatchFactLoader | None = None, artifact_content=None, clock=None,
+        fact_loader: TaskDispatchFactLoader | None = None, artifact_content=None,
+        clock=None, verification_evidence_loader=None,
     ) -> None:
         engine = repository.engine
         if any(other is not engine for other in (
@@ -95,11 +149,19 @@ class TeamAgentDispatcher:
         self.capabilities = capability_adapter
         self.runtime_resolver = runtime_resolver
         self.run_service = run_service
+        if verification_evidence_loader is None:
+            from ..verification.project_evidence import (
+                load_project_verification_evidence,
+            )
+
+            verification_evidence_loader = load_project_verification_evidence
+        self.verification_evidence_loader = verification_evidence_loader
         if fact_loader is None:
             from .task_contracts import PersistentTaskDispatchFactLoader
 
             fact_loader = PersistentTaskDispatchFactLoader(
                 engine=engine, artifact_content=artifact_content,
+                verification_evidence_loader=verification_evidence_loader,
             )
         self.fact_loader = fact_loader
         self.clock = clock or (lambda: datetime.now(UTC))
@@ -174,8 +236,18 @@ class TeamAgentDispatcher:
             if task_row is None:
                 raise ResourceNotFound("dispatch task is unavailable")
             task = TeamCollaborationService._task(task_row)
-            if task.status is not TeamTaskStatus.ACCEPTED:
-                raise GovernanceConflictError("only an accepted task may be automatically dispatched")
+            rework = task.status is TeamTaskStatus.CHANGES_REQUESTED
+            if task.status not in {
+                TeamTaskStatus.ACCEPTED,
+                TeamTaskStatus.CHANGES_REQUESTED,
+            }:
+                raise GovernanceConflictError(
+                    "only an accepted or evidence-bound rework task may be automatically dispatched"
+                )
+            if rework and str(process.phase) != "EXECUTION":
+                raise GovernanceConflictError(
+                    "verification rework requires an execution-phase process"
+                )
             self._assert_no_active_run(connection, process_id, task_id)
             for table in (PROJECT_GATES, PROJECT_INPUT_REQUESTS):
                 if connection.execute(select(table.c.process_id).where(and_(
@@ -192,7 +264,27 @@ class TeamAgentDispatcher:
             graph = self.work_graph.snapshot(connection, project_id=process.project_id)
             if graph.digest != decision.graph_snapshot_digest:
                 raise GovernanceConflictError("dispatch work graph snapshot is stale")
-            facts = self.fact_loader(connection=connection, process=process, task=task)
+            verification_evidence = None
+            if rework:
+                verification_evidence = self.verification_evidence_loader(
+                    connection, process=process, graph=graph,
+                )
+                if (
+                    verification_evidence is None
+                    or verification_evidence.graph_digest != graph.digest
+                    or getattr(verification_evidence.outcome, "value", verification_evidence.outcome)
+                    != "FAILED"
+                    or task_id not in verification_evidence.failed_task_ids
+                ):
+                    raise GovernanceConflictError(
+                        "changes_requested task lacks current verification FAIL evidence"
+                    )
+                facts = self.fact_loader(
+                    connection=connection, process=process, task=task,
+                    graph=graph, verification_evidence=verification_evidence,
+                )
+            else:
+                facts = self.fact_loader(connection=connection, process=process, task=task)
             if not isinstance(facts, TaskDispatchFacts):
                 raise TypeError("dispatch fact loader must return TaskDispatchFacts")
             self._validate_facts(facts, task)
@@ -225,9 +317,21 @@ class TeamAgentDispatcher:
             )
             if task_id not in {item.work_id for item in bound.evaluation.ready_work}:
                 raise GovernanceConflictError("task readiness conditions are not satisfied")
-            context = ProjectAgentContextBuilder().build(
+            feedback = self._rework_feedback(
+                connection, process=process, task=task, evidence=verification_evidence,
+            ) if rework else None
+            if rework and feedback is None:
+                raise GovernanceConflictError(
+                    "verification FAIL has no safe structured finding for rework"
+                )
+            context_builder = (
+                _EvidenceBoundReworkContextBuilder()
+                if rework else ProjectAgentContextBuilder()
+            )
+            context = context_builder.build(
                 process=process, team_agent=agent, task=task, contract=facts.contract,
-                graph=graph, shared_items=facts.shared_items,
+                graph=graph,
+                shared_items=facts.shared_items + ((feedback,) if feedback else ()),
             )
             work_node = next(node for node in graph.nodes if (
                 node.node_type is WorkNodeType.TASK and node.subject_id == task_id
@@ -298,8 +402,27 @@ class TeamAgentDispatcher:
                 checkpoint=AgentRunCheckpointCodec().initial(request),
             )
             budget.bind_agent_run(reservation_id=budget_id, agent_run_id=run_id)
+            status_condition = (
+                TEAM_TASKS.c.status == "changes_requested"
+                if rework else TEAM_TASKS.c.status == "accepted"
+            )
+            contract_condition = (
+                TEAM_TASKS.c.source_contract_version.is_(None)
+                if task_row["source_contract_version"] is None
+                else TEAM_TASKS.c.source_contract_version
+                == task_row["source_contract_version"]
+            )
+            accepted_contract_condition = (
+                TEAM_TASKS.c.accepted_contract_version.is_(None)
+                if task_row["accepted_contract_version"] is None
+                else TEAM_TASKS.c.accepted_contract_version
+                == task_row["accepted_contract_version"]
+            )
             changed = connection.execute(TEAM_TASKS.update().where(and_(
-                TEAM_TASKS.c.task_id == task_id, TEAM_TASKS.c.status == "accepted",
+                TEAM_TASKS.c.task_id == task_id,
+                status_condition,
+                contract_condition,
+                accepted_contract_condition,
             )).values(status="in_progress", updated_at=self.clock())).rowcount
             if changed != 1:
                 raise GovernanceConflictError("task changed while dispatching")
@@ -307,6 +430,75 @@ class TeamAgentDispatcher:
                 publish_dispatch(connection)
             mutation_fence(connection)
             return self._result(values)
+
+    @staticmethod
+    def _rework_feedback(connection, *, process, task, evidence):
+        """Project only structured FAIL codes safe for the target team.
+
+        Verification rows may contain policy and artifact details that are not
+        task-agent context.  Rework receives criterion/type/code only; raw
+        check payloads, source-run content, and reviewer/private explanations
+        never enter the new run checkpoint.
+        """
+        if evidence is None or not evidence.verification_ids:
+            return None
+        from ..verification.repository import TASK_VERIFICATIONS
+
+        row = connection.execute(
+            select(TASK_VERIFICATIONS)
+            .where(
+                TASK_VERIFICATIONS.c.project_id == task.project_id,
+                TASK_VERIFICATIONS.c.process_id == process.process_id,
+                TASK_VERIFICATIONS.c.task_id == task.task_id,
+                TASK_VERIFICATIONS.c.status == "FAIL",
+                TASK_VERIFICATIONS.c.verification_id.in_(evidence.verification_ids),
+            )
+            .order_by(TASK_VERIFICATIONS.c.updated_at.desc())
+            .limit(1)
+        ).mappings().one_or_none()
+        if row is None or not isinstance(row["checks_json"], list):
+            return None
+        findings = []
+        for check in row["checks_json"]:
+            if not isinstance(check, dict) or check.get("status") != "FAIL":
+                continue
+            criterion_id = check.get("criterion_id")
+            check_type = check.get("type")
+            code = check.get("code")
+            if (
+                type(criterion_id) is not str or not criterion_id
+                or len(criterion_id) > 256
+                or type(check_type) is not str or not check_type
+                or len(check_type) > 64
+                or type(code) is not str or not code
+                or len(code) > 128
+            ):
+                continue
+            findings.append({
+                "criterion_id": criterion_id,
+                "type": check_type,
+                "code": code,
+            })
+        if not findings:
+            return None
+        return ProjectAgentContextBuilder._item(
+            item_id=f"verification-rework:{row['verification_id']}",
+            source_id=f"verification:{row['verification_id']}",
+            payload={
+                "schema": "coifesp.task-rework-feedback.v1",
+                "task_id": task.task_id,
+                "verification_id": row["verification_id"],
+                "status": "FAIL",
+                "findings": findings,
+            },
+            label=ResourceLabel(
+                owner_tenant_id=task.target_team_id,
+                classification=Classification.INTERNAL,
+                compartments=frozenset({f"project:{task.project_id}"}),
+                resource_id=f"verification:{row['verification_id']}",
+            ),
+            priority=95,
+        )
 
     @staticmethod
     def _validate_facts(facts: TaskDispatchFacts, task) -> None:
