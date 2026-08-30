@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from alembic.script import ScriptDirectory
 from sqlalchemy import (
     CheckConstraint,
     Column,
@@ -230,7 +231,7 @@ def test_revision_and_upgrade_preserve_legacy_task_and_add_nullable_contract_fie
     _migrate(engine, "upgrade")
 
     columns = {item["name"]: item for item in inspect(engine).get_columns("product_team_tasks")}
-    assert SCHEMA_REVISION == "20260830_53"
+    assert ScriptDirectory(str(Path(__file__).parents[1] / "alembic")).get_heads() == [SCHEMA_REVISION]
     assert set(_CONTRACT_COLUMNS).issubset(columns)
     assert all(columns[name]["nullable"] for name in _CONTRACT_COLUMNS)
     assert _raw_row(engine, "task-legacy") == before
@@ -383,6 +384,20 @@ def test_sqlite_native_migration_preserves_inbound_graph_indexes_and_triggers():
         assert connection.exec_driver_sql("SELECT count(*) FROM task_touch_audit").scalar_one() == 3
     assert not any("DROP TABLE" in item or "RENAME TO" in item for item in statements)
     assert not any("FOREIGN_KEYS=OFF" in item.replace(" ", "") for item in statements)
+    engine.dispose()
+
+
+def test_fresh_metadata_contract_check_allows_native_downgrade():
+    engine = create_engine("sqlite+pysqlite://", poolclass=StaticPool)
+    PRODUCT_METADATA.create_all(engine)
+    _migrate(engine, "downgrade")
+    assert not set(_CONTRACT_COLUMNS) & {
+        column["name"] for column in inspect(engine).get_columns(TEAM_TASKS.name)
+    }
+    _migrate(engine, "upgrade")
+    assert set(_CONTRACT_COLUMNS) <= {
+        column["name"] for column in inspect(engine).get_columns(TEAM_TASKS.name)
+    }
     engine.dispose()
 
 

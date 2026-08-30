@@ -15,7 +15,12 @@ from sqlalchemy import select, update
 from ..artifacts.repository import ARTIFACT_MANIFESTS
 from ..context import ContentTrust, ContextSource
 from ..errors import GovernanceConflictError, PolicyDenied, ResourceNotFound
-from ..product.repository import PROJECT_RESOURCES, PROJECT_TEAMS, TEAM_TASKS
+from ..product.repository import (
+    PROJECT_AGENT_RUNS,
+    PROJECT_RESOURCES,
+    PROJECT_TEAMS,
+    TEAM_TASKS,
+)
 from ..product.service import TeamCollaborationService
 from ..project_process.capability_adapter import ProjectCapabilityRequirement
 from ..project_process.context import (
@@ -163,6 +168,23 @@ class TeamTaskContractService:
             if row["source_contract_version"] is None:
                 raise ResourceNotFound("task has no structured execution contract")
             return self._view(row)
+
+    def results(self, *, project_id, task_id, actor_id):
+        # Raw assistant summaries/limitations have not undergone disclosure
+        # approval. Only the executing team can read receipts; project-wide
+        # submission events contain already-shared resource references only.
+        with self.engine.connect() as connection:
+            actor = TeamCollaborationService._participant(connection, project_id, actor_id)
+            task = TeamCollaborationService._task_row(connection, project_id, task_id)
+            if actor["team_id"] != task["target_team_id"]:
+                raise PolicyDenied("task execution receipts belong to the executing team")
+            return list(connection.execute(select(PROJECT_AGENT_RUNS.c.task_result_json).where(
+                PROJECT_AGENT_RUNS.c.project_id == project_id,
+                PROJECT_AGENT_RUNS.c.team_task_id == task_id,
+                PROJECT_AGENT_RUNS.c.team_id == actor["team_id"],
+                PROJECT_AGENT_RUNS.c.run_kind == "task_execution",
+                PROJECT_AGENT_RUNS.c.task_result_status.is_not(None),
+            ).order_by(PROJECT_AGENT_RUNS.c.created_at, PROJECT_AGENT_RUNS.c.run_id)).scalars())
 
     @staticmethod
     def _view(row):

@@ -75,7 +75,7 @@ from ..work_graph import ProjectWorkGraphService, SQLAlchemyWorkGraphRepository
 from .app import create_app
 from .session_lifecycle import SessionLifecycleService
 
-SCHEMA_REVISION = "20260830_53"
+SCHEMA_REVISION = "20260830_54"
 REQUIRED_RLS_TABLES = (
     "audit_events",
     "audit_heads",
@@ -471,6 +471,7 @@ def build_application(
         )
 
         from ..team_agents.accounting import TeamTaskRunAccounting
+        from ..team_agents.task_projection import TeamTaskResultProjection
 
         _task_accounting = TeamTaskRunAccounting(
             repository=project_process_repository,
@@ -480,9 +481,15 @@ def build_application(
             ),
         )
 
+        _task_result_projection = TeamTaskResultProjection(
+            repository=project_process_repository,
+            run_repository=agent_run_service.repository,
+            artifact_content=artifact_content_service,
+        )
+
         def project_terminal_callback(run):
             first_error = None
-            for projector in (_projection, _planner_projection, _task_accounting):
+            for projector in (_projection, _planner_projection, _task_accounting, _task_result_projection):
                 try:
                     projector.on_run_terminal(run)
                 except Exception as exc:  # noqa: BLE001
@@ -562,6 +569,7 @@ def build_application(
     app.state.turn_projection = _projection
     app.state.project_planner_projection = _planner_projection
     app.state.team_task_run_accounting = _task_accounting
+    app.state.team_task_result_projection = _task_result_projection
     app.state.project_planner_intent_service = project_planner_intent_service
     app.state.governance_service = governance_service
     app.state.task_repository = task_repository

@@ -59,22 +59,20 @@ _BINDING_FIELDS = {
 }
 
 
-def _migration():
-    path = (
-        Path(__file__).parents[1] / "alembic" / "versions" / "20260830_52_team_task_run_bindings.py"
-    )
-    spec = spec_from_file_location("team_task_run_bindings_52", path)
+def _migration(revision="20260830_52"):
+    path = next((Path(__file__).parents[1] / "alembic" / "versions").glob(f"{revision}_*.py"))
+    spec = spec_from_file_location(f"team_task_run_bindings_{revision}", path)
     assert spec is not None and spec.loader is not None
     migration = module_from_spec(spec)
     spec.loader.exec_module(migration)
-    assert migration.revision == "20260830_52"
-    assert migration.down_revision == "20260830_51"
+    assert migration.revision == revision
+    assert migration.down_revision == {"20260830_52": "20260830_51", "20260830_54": "20260830_53"}[revision]
     return migration
 
 
-def _migrate(engine, direction):
+def _migrate(engine, direction, revision="20260830_52"):
     with engine.begin() as connection:
-        migration = _migration()
+        migration = _migration(revision)
         migration.op = Operations(MigrationContext.configure(connection))
         getattr(migration, direction)()
 
@@ -421,6 +419,10 @@ def test_non_task_run_still_requires_real_account_and_legacy_mode(binding_engine
 
 
 def test_legacy_binding_list_excludes_automatic_run_and_cannot_claim_it(binding_engine):
+    # Current application queries require the current Run table; keep the other
+    # tests at revision 52 so its constraints are still tested independently.
+    if "task_result_status" not in {column["name"] for column in inspect(binding_engine).get_columns(PROJECT_AGENT_RUNS.name)}:
+        _migrate(binding_engine, "upgrade", "20260830_54")
     service = TeamCollaborationService(binding_engine)
     _insert(binding_engine, **_automatic_run())
     service.bind_project_agent_run(
@@ -488,10 +490,15 @@ def test_postgresql_upgrade_emits_portable_constraints_and_legacy_backfill():
 
 def test_fresh_metadata_schema_can_downgrade_and_reupgrade_legacy_rows():
     engine = _engine()
+    # Revision 54 owns a CHECK referencing run_kind. Undo it before revision 52
+    # removes that column, exactly as a real ordered Alembic downgrade does.
+    _migrate(engine, "downgrade", "20260830_54")
     before = _row(engine)
     _migrate(engine, "downgrade")
     assert _row(engine) == {
         key: value for key, value in before.items() if key not in _BINDING_FIELDS
     }
     _migrate(engine, "upgrade")
+    _migrate(engine, "upgrade", "20260830_54")
     assert _row(engine)["initiated_by_principal_id"] == "account-a"
+    assert _row(engine)["task_result_status"] is None

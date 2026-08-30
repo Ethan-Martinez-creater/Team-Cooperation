@@ -114,7 +114,8 @@ def create_app(
             # still active so an interrupted projection is not lost forever.
             agent_run_service = getattr(app.state, "agent_run_service", None)
             if agent_run_service is not None:
-                for name in ("turn_projection", "project_planner_projection", "team_task_run_accounting"):
+                for name in ("turn_projection", "project_planner_projection", "team_task_run_accounting",
+                             "team_task_result_projection"):
                     projection = getattr(app.state, name, None)
                     if projection is not None:
                         await run_in_threadpool(

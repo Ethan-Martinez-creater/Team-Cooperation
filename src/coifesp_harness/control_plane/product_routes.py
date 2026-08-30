@@ -696,6 +696,19 @@ def build_product_router(
             actor_id=authenticated.principal.principal_id,
         )
 
+    @router.get("/projects/{project_id}/tasks/{task_id}/execution-results")
+    async def task_execution_results(
+        project_id: str, task_id: str,
+        authenticated: Authenticated = Depends(authenticator),
+    ):
+        from ..team_agents.task_contracts import TeamTaskContractService
+
+        return await run_in_threadpool(
+            TeamTaskContractService(_collaboration(collaboration).engine).results,
+            project_id=project_id, task_id=task_id,
+            actor_id=authenticated.principal.principal_id,
+        )
+
     @router.put("/projects/{project_id}/tasks/{task_id}/execution-contract")
     async def propose_task_execution_contract(
         project_id: str, task_id: str, body: TeamTaskContractBody,

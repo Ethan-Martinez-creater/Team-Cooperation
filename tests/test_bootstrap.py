@@ -14,6 +14,7 @@ from coifesp_harness.project_process import (
     ProjectExecutionBudgetService,
     ProjectProcessService,
 )
+from coifesp_harness.team_agents.task_projection import TeamTaskResultProjection
 
 
 class StubVerifier:
@@ -69,6 +70,9 @@ def test_bootstrap_wires_durable_memory_audit_and_readiness() -> None:
     assert app.state.governance_service.repository.engine is engine
     assert app.state.audit_log.engine is engine
     assert app.state.database_engine is engine
+    assert isinstance(app.state.team_task_result_projection, TeamTaskResultProjection)
+    assert app.state.team_task_result_projection.repository.engine is engine
+    assert app.state.team_task_result_projection.runs is app.state.agent_run_service.repository
     assert app.state.database_readiness() is True
     assert probe_calls == [True]
 

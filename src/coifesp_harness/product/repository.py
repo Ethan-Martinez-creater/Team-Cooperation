@@ -280,17 +280,8 @@ TEAM_TASKS = Table(
     Column("source_decision_id", String(128), nullable=True),
     Column("source_contract_version", Integer, nullable=True),
     Column("autonomy_requirement", String(32), nullable=True),
-    Column("accepted_contract_version", Integer, nullable=True),
-    Column("created_at", DateTime(timezone=True), nullable=False),
-    Column("updated_at", DateTime(timezone=True), nullable=False),
-    CheckConstraint("source_team_id <> target_team_id", name="different_task_teams"),
-    CheckConstraint(
-        "status IN ('proposed','accepted','in_progress','submitted','verified','changes_requested','rejected')",
-        name="status",
-    ),
-    CheckConstraint("priority IN ('low','normal','high','urgent')", name="priority"),
-    CheckConstraint("schedule_version >= 1", name="positive_schedule_version"),
-    CheckConstraint(
+    # Match migration 53's column-owned CHECK for native SQLite downgrade.
+    Column("accepted_contract_version", Integer, CheckConstraint(
         "(source_contract_version IS NULL AND "
         "process_id IS NULL AND work_node_id IS NULL AND "
         "requested_capability IS NULL AND input_manifest_json IS NULL AND "
@@ -306,7 +297,16 @@ TEAM_TASKS = Table(
         "(accepted_contract_version = source_contract_version AND "
         "accepted_contract_version >= 1)))",
         name="ck_product_team_tasks_contract",
+    ), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint("source_team_id <> target_team_id", name="different_task_teams"),
+    CheckConstraint(
+        "status IN ('proposed','accepted','in_progress','submitted','verified','changes_requested','rejected')",
+        name="status",
     ),
+    CheckConstraint("priority IN ('low','normal','high','urgent')", name="priority"),
+    CheckConstraint("schedule_version >= 1", name="positive_schedule_version"),
 )
 Index("ix_product_tasks_project_status", TEAM_TASKS.c.project_id, TEAM_TASKS.c.status)
 Index(
@@ -518,7 +518,21 @@ PROJECT_AGENT_RUNS = Table(
     Column("task_contract_version", Integer, nullable=True),
     Column("task_result_status", String(32), nullable=True),
     Column("task_result_json", JSON(none_as_null=True), nullable=True),
-    Column("task_result_at", DateTime(timezone=True), nullable=True),
+    # Keep the CHECK on its owning column, matching SQLite migration 54.
+    # Native DROP COLUMN can then remove the check without rebuilding the table.
+    Column(
+        "task_result_at", DateTime(timezone=True),
+        CheckConstraint(
+            "(task_contract_version IS NULL OR "
+            "(run_kind = 'task_execution' AND task_contract_version >= 1)) AND "
+            "((task_result_status IS NULL AND task_result_json IS NULL AND task_result_at IS NULL) OR "
+            "(task_result_status IS NOT NULL AND run_kind = 'task_execution' AND "
+            "task_result_status IN ('submitted','invalid_output','failed','cancelled') AND "
+            "task_result_json IS NOT NULL AND task_result_at IS NOT NULL))",
+            name="ck_product_project_agent_runs_task_result",
+        ),
+        nullable=True,
+    ),
     CheckConstraint("mode IN ('analysis','collaboration_actions','delivery_review')", name="mode"),
     CheckConstraint(
         "run_kind IN ('conversation','planning','task_execution','verification',"
@@ -545,15 +559,6 @@ PROJECT_AGENT_RUNS = Table(
         "initiated_by_principal_id = 'service:project-orchestrator' AND "
         "executed_as_principal_id = 'team-agent:' || team_id)",
         name="ck_product_project_agent_runs_task_execution",
-    ),
-    CheckConstraint(
-        "(task_contract_version IS NULL OR "
-        "(run_kind = 'task_execution' AND task_contract_version >= 1)) AND "
-        "((task_result_status IS NULL AND task_result_json IS NULL AND task_result_at IS NULL) OR "
-        "(task_result_status IS NOT NULL AND run_kind = 'task_execution' AND "
-        "task_result_status IN ('submitted','invalid_output','failed','cancelled') AND "
-        "task_result_json IS NOT NULL AND task_result_at IS NOT NULL))",
-        name="ck_product_project_agent_runs_task_result",
     ),
     UniqueConstraint("run_id", name="uq_product_project_agent_run"),
     UniqueConstraint(
