@@ -286,6 +286,9 @@ def test_http_retry_queues_run_but_never_accepts_caller_verdict(tmp_path):
 
 def test_worker_runtime_wiring_and_tenant_scoped_recovery(tmp_path):
     value = prepared(tmp_path)
+    from test_team_task_result_projection import attach_scheduler
+
+    attach_scheduler(value)
     verify(value)
     execute(value, callback=False)
     settings = SimpleNamespace(artifact_store_root=str(tmp_path), artifact_max_upload_bytes=100000,
