@@ -6,7 +6,13 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
-from coifesp_harness.agent_runs import AgentRunCheckpointCodec, DurableRunStatus
+from coifesp_harness.agent_runs import (
+    AgentCheckpointKeyring,
+    AgentRunCheckpointCodec,
+    AgentRunService,
+    DurableRunStatus,
+    SQLAlchemyAgentRunRepository,
+)
 from coifesp_harness.errors import GovernanceConflictError
 from coifesp_harness.product import (
     ProductAccountService,
@@ -119,26 +125,30 @@ def test_stale_snapshot_and_nonparticipant_owner_fail_closed():
         _create(service, process, graph, owner_team_id="team-outsider")
 
 
+def _run_service(engine):
+    repository = SQLAlchemyAgentRunRepository(
+        engine=engine,
+        keyring=AgentCheckpointKeyring(master_key=b"p" * 32, key_id="planner-test"),
+    )
+    repository.create_schema()
+    return AgentRunService(repository)
+
+
 def test_launch_uses_an_ordinary_toolless_durable_agent_run():
     repository, process, graph = _stack()
     service = ProjectPlannerIntentService(repository, clock=lambda: NOW)
     intent = _create(service, process, graph)
-    captured = {}
-
-    class FakeRunService:
-        def create(self, **values):
-            captured.update(values)
-            return SimpleNamespace(run_id=values["run_id"])
-
-    run = service.launch(intent=intent, graph=graph, run_service=FakeRunService())
-    checkpoint = AgentRunCheckpointCodec().decode(captured["checkpoint"])
+    runs = _run_service(repository.engine)
+    run = service.launch(intent=intent, graph=graph, run_service=runs)
+    checkpoint = AgentRunCheckpointCodec().decode(runs.repository.load_checkpoint(
+        tenant_id="team-a", run_id=run.run_id,
+    ))
     bound = service.get(intent.planner_intent_id)
 
     assert bound.status is ProjectPlannerIntentStatus.RUNNING
     assert bound.run_id == run.run_id
-    assert captured["principal"].principal_id == ORCHESTRATOR_PRINCIPAL_ID
-    assert captured["principal"].is_service is True
-    assert captured["principal"].tenant_id == "team-a"
+    assert run.owner_principal_id == ORCHESTRATOR_PRINCIPAL_ID
+    assert run.tenant_id == "team-a"
     assert checkpoint["tool_authorization"] is None
     assert checkpoint["messages"][0].role == "system"
     context = checkpoint["context_items"][0]
@@ -152,12 +162,7 @@ def test_launch_uses_an_ordinary_toolless_durable_agent_run():
 def test_request_loads_current_snapshot_and_reuses_deterministic_run():
     repository, process, graph = _stack()
     service = ProjectPlannerIntentService(repository, clock=lambda: NOW)
-    created = {}
-
-    class FakeRunService:
-        def create(self, **values):
-            created.setdefault(values["idempotency_key"], values["run_id"])
-            return SimpleNamespace(run_id=created[values["idempotency_key"]])
+    runs = _run_service(repository.engine)
 
     work_graph = SimpleNamespace(snapshot=lambda **_: graph)
     first_intent, first_run = service.request(
@@ -165,19 +170,45 @@ def test_request_loads_current_snapshot_and_reuses_deterministic_run():
         owner_team_id="team-a",
         reason="ANALYSIS",
         work_graph=work_graph,
-        run_service=FakeRunService(),
+        run_service=runs,
     )
     second_intent, second_run = service.request(
         process_id=process.process_id,
         owner_team_id="team-a",
         reason="ANALYSIS",
         work_graph=work_graph,
-        run_service=FakeRunService(),
+        run_service=runs,
     )
 
     assert first_intent == second_intent
     assert first_run.run_id == second_run.run_id
-    assert len(created) == 1
+    assert len(runs.repository.list_runs(tenant_id="team-a", owner_principal_id=None)) == 1
+
+
+def test_planner_run_and_delegation_binding_rollback_together(monkeypatch):
+    repository, process, graph = _stack()
+    service = ProjectPlannerIntentService(repository, clock=lambda: NOW)
+    intent = _create(service, process, graph)
+    runs = _run_service(repository.engine)
+    original_create = AgentRunService.create
+
+    def fail_creation(bound_service, **kwargs):
+        from sqlalchemy import select
+
+        from coifesp_harness.project_process.repository import PROJECT_PLANNER_INTENTS
+
+        connection = bound_service.repository._bound_connection
+        assert connection is not None
+        assert connection.execute(select(PROJECT_PLANNER_INTENTS.c.run_id)).scalar_one() == kwargs["run_id"]
+        original_create(bound_service, **kwargs)
+        raise RuntimeError("queue unavailable")
+
+    monkeypatch.setattr(AgentRunService, "create", fail_creation)
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        service.launch(intent=intent, graph=graph, run_service=runs)
+    persisted = service.get(intent.planner_intent_id)
+    assert persisted.run_id is None and persisted.status is ProjectPlannerIntentStatus.PENDING
+    assert runs.repository.list_runs(tenant_id="team-a", owner_principal_id=None) == ()
 
 
 def test_terminal_intent_update_is_idempotent_but_conflicts_on_different_outcome():

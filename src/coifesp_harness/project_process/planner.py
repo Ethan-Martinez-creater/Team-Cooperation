@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 
-from ..agent_runs import AgentRunCheckpointCodec
+from ..agent_runs import AgentRunCheckpointCodec, AgentRunService
 from ..context import ContentTrust, ContextItem, ContextSource, InstructionTrust
 from ..errors import GovernanceConflictError, ResourceNotFound
 from ..product.repository import PROJECT_TEAMS
@@ -211,6 +211,8 @@ class ProjectPlannerIntentService:
             ),
             content_trust=ContentTrust.AUTHORITATIVE,
             instruction_trust=InstructionTrust.DATA_ONLY,
+            created_at=(intent.created_at if intent.created_at.tzinfo is not None
+                        else intent.created_at.replace(tzinfo=UTC)),
         )
         request = AgentRunRequest(
             run_id=run_id,
@@ -230,23 +232,47 @@ class ProjectPlannerIntentService:
             tool_authorization=None,
         )
         checkpoint = AgentRunCheckpointCodec().initial(request)
-        run = run_service.create(
-            principal=principal,
-            run_id=run_id,
-            correlation_id=request.correlation_id,
-            idempotency_key=f"planner:{intent.planner_intent_id}",
-            checkpoint=checkpoint,
-            max_failures=3,
-        )
-        self.bind_run(intent.planner_intent_id, run.run_id)
-        return run
+        # The worker resolves the service principal from this exact binding.
+        # Publish binding and queued Run together so it can never claim an
+        # otherwise valid Planner before its delegation is visible.
+        if run_service.repository.engine is not self.repository.engine:
+            raise ValueError("Planner launch requires a shared database engine")
+        with self.repository.transaction() as connection:
+            bound_intents = ProjectPlannerIntentService(
+                self.repository.using_connection(connection), clock=self.clock
+            )
+            current_row = connection.execute(select(PROJECT_PLANNER_INTENTS).where(
+                PROJECT_PLANNER_INTENTS.c.planner_intent_id == intent.planner_intent_id
+            ).with_for_update()).mappings().one()
+            if current_row["run_id"] is not None:
+                existing_run = run_service.repository.using_connection(connection).get(
+                    tenant_id=intent.owner_team_id, run_id=current_row["run_id"]
+                )
+                if (existing_run.run_id != run_id
+                        or existing_run.owner_principal_id != principal.principal_id
+                        or existing_run.correlation_id != request.correlation_id):
+                    raise GovernanceConflictError("Planner Run does not match its intent binding")
+                return existing_run
+            bound_intents.bind_run(intent.planner_intent_id, run_id)
+            bound_runs = AgentRunService(
+                run_service.repository.using_connection(connection),
+                checkpoint_codec=run_service.checkpoint_codec,
+            )
+            return bound_runs.create(
+                principal=principal,
+                run_id=run_id,
+                correlation_id=request.correlation_id,
+                idempotency_key=f"planner:{intent.planner_intent_id}",
+                checkpoint=checkpoint,
+                max_failures=3,
+            )
 
     def bind_run(self, planner_intent_id: str, run_id: str) -> ProjectPlannerIntent:
         planner_intent_id = self._identifier(planner_intent_id, "planner_intent_id")
         run_id = self._identifier(run_id, "run_id")
         with self.repository.transaction() as connection:
             row = connection.execute(
-                select(PROJECT_PLANNER_INTENTS).where(
+                select(PROJECT_PLANNER_INTENTS).with_for_update().where(
                     PROJECT_PLANNER_INTENTS.c.planner_intent_id == planner_intent_id
                 )
             ).mappings().one_or_none()
@@ -286,7 +312,7 @@ class ProjectPlannerIntentService:
             error_code = self._identifier(error_code, "error_code")
         with self.repository.transaction() as connection:
             row = connection.execute(
-                select(PROJECT_PLANNER_INTENTS).where(
+                select(PROJECT_PLANNER_INTENTS).with_for_update().where(
                     PROJECT_PLANNER_INTENTS.c.planner_intent_id == planner_intent_id
                 )
             ).mappings().one_or_none()
@@ -318,7 +344,7 @@ class ProjectPlannerIntentService:
         return self.get(planner_intent_id)
 
     def get(self, planner_intent_id: str) -> ProjectPlannerIntent:
-        with self.repository.engine.connect() as connection:
+        with self.repository.transaction() as connection:
             row = connection.execute(
                 select(PROJECT_PLANNER_INTENTS).where(
                     PROJECT_PLANNER_INTENTS.c.planner_intent_id == planner_intent_id

@@ -556,9 +556,18 @@ class SQLAlchemyProjectProcessRepository:
         engine: Engine,
         *,
         event_listener: Callable[[Connection, ProjectProcessEvent], None] | None = None,
+        _bound_connection: Connection | None = None,
     ) -> None:
         self.engine = engine
         self.event_listener = event_listener
+        self._bound_connection = _bound_connection
+
+    def using_connection(self, connection: Connection) -> "SQLAlchemyProjectProcessRepository":
+        if connection.engine is not self.engine or not connection.in_transaction():
+            raise ValueError("process binding requires an active transaction on the same engine")
+        return SQLAlchemyProjectProcessRepository(
+            self.engine, event_listener=self.event_listener, _bound_connection=connection
+        )
 
     def set_event_listener(
         self,
@@ -571,6 +580,9 @@ class SQLAlchemyProjectProcessRepository:
 
     @contextmanager
     def transaction(self) -> Iterator[Connection]:
+        if self._bound_connection is not None:
+            yield self._bound_connection
+            return
         with self.engine.begin() as connection:
             yield connection
 

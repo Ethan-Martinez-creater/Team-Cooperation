@@ -408,3 +408,39 @@ def test_requirement_is_structured_and_does_not_accept_prose_substitutes():
             principal=_orchestrator(),
             requirement=_requirement(tags=["review"]),
         )
+
+
+def test_project_capacity_release_is_idempotent_and_restores_match_capacity():
+    _, _, directory, adapter, providers = _stack()
+    publisher = _publisher(providers["team-b"])
+    capability = _publish(directory, publisher).capability
+    _declare(directory, publisher, capability, slots=1)
+    requirement = _requirement()
+    match = adapter.match(principal=_orchestrator(), requirement=requirement)[0]
+    adapter.reserve(principal=_orchestrator(), requirement=requirement,
+                    match=match, reservation_id="release-me")
+    assert adapter.match(principal=_orchestrator(), requirement=requirement) == ()
+    first = adapter.release(principal=_orchestrator(), requirement=requirement,
+                            reservation_id="release-me")
+    repeated = adapter.release(principal=_orchestrator(), requirement=requirement,
+                               reservation_id="release-me")
+    assert first == repeated and first.status == "released"
+    assert len(adapter.match(principal=_orchestrator(), requirement=requirement)) == 1
+
+
+def test_shared_connection_reservation_never_commits_outside_callers_transaction():
+    engine, _, directory, adapter, providers = _stack()
+    publisher = _publisher(providers["team-b"])
+    capability = _publish(directory, publisher).capability
+    _declare(directory, publisher, capability, slots=1)
+    requirement = _requirement()
+    with pytest.raises(RuntimeError, match="rollback"):
+        with engine.begin() as connection:
+            # Force SQLite's outer transaction before the adapter savepoint.
+            connection.execute(CAPABILITY_CAPACITY.update().values(status="available"))
+            bound = adapter.using_connection(connection)
+            match = bound.match(principal=_orchestrator(), requirement=requirement)[0]
+            bound.reserve(principal=_orchestrator(), requirement=requirement,
+                          match=match, reservation_id="rollback-me")
+            raise RuntimeError("rollback")
+    assert len(adapter.match(principal=_orchestrator(), requirement=requirement)) == 1

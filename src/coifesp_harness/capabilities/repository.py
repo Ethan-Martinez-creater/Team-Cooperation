@@ -136,17 +136,30 @@ CAPACITY_NEGOTIATIONS = Table(
 
 
 class SQLAlchemyCapabilityRepository:
-    def __init__(self, *, engine: Engine, audit_log: SQLAlchemyAuditLog) -> None:
+    def __init__(self, *, engine: Engine, audit_log: SQLAlchemyAuditLog,
+                 _bound_connection: Connection | None = None) -> None:
         if audit_log.engine is not engine:
             raise ValueError("capability directory and audit must share one engine")
         self.engine = engine
         self.audit_log = audit_log
+        self._bound_connection = _bound_connection
+
+    def using_connection(self, connection: Connection) -> "SQLAlchemyCapabilityRepository":
+        if connection.engine is not self.engine or not connection.in_transaction():
+            raise ValueError("capability binding requires an active transaction on the same engine")
+        return SQLAlchemyCapabilityRepository(
+            engine=self.engine, audit_log=self.audit_log, _bound_connection=connection
+        )
 
     def create_schema(self) -> None:
         CAPABILITY_METADATA.create_all(self.engine)
 
     @contextmanager
     def transaction(self, tenant_id: str) -> Iterator[Connection]:
+        if self._bound_connection is not None:
+            self.set_tenant(self._bound_connection, tenant_id)
+            yield self._bound_connection
+            return
         with self.engine.begin() as connection:
             self.set_tenant(connection, tenant_id)
             yield connection

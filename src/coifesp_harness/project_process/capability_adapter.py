@@ -172,6 +172,41 @@ class ProjectCapabilityAdapter:
             )[:limit]
         )
 
+    def using_connection(self, connection: Connection) -> "ProjectCapabilityAdapter":
+        return ProjectCapabilityAdapter(
+            self.repository.using_connection(connection),
+            clock=self._clock,
+            reservation_ttl=self._reservation_ttl,
+        )
+
+    def release(
+        self, *, principal: Principal, requirement: ProjectCapabilityRequirement,
+        reservation_id: str,
+    ) -> CapacityReservation:
+        """Idempotently release this consumer's project reservation, even after expiry."""
+        self._validate_requirement(requirement)
+        self._validate_principal(principal, requirement)
+        self._validate_identifier(reservation_id, "reservation_id")
+        with self.repository.transaction(requirement.consumer_team_id) as connection:
+            self._assert_project_participants(connection, requirement)
+            row = connection.execute(
+                select(CAPACITY_RESERVATIONS).where(and_(
+                    CAPACITY_RESERVATIONS.c.provider_tenant_id == requirement.target_team_id,
+                    CAPACITY_RESERVATIONS.c.reservation_id == reservation_id,
+                )).with_for_update()
+            ).mappings().one_or_none()
+            if row is None or row["consumer_tenant_id"] != requirement.consumer_team_id:
+                raise PolicyDenied("project capacity reservation is absent or belongs to another consumer")
+            if row["created_by"] != SERVICE_PRINCIPAL_ID:
+                raise PolicyDenied("only orchestrator-owned reservations may be released here")
+            if row["status"] == "released":
+                return self._reservation_from_row(row)
+            return self.repository.release_reservation(
+                connection, provider_tenant_id=requirement.target_team_id,
+                reservation_id=reservation_id, actor_tenant_id=requirement.consumer_team_id,
+                actor_id=principal.principal_id,
+            )
+
     def reserve(
         self,
         *,
