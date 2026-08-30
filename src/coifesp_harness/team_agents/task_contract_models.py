@@ -34,7 +34,7 @@ _CRITERION_KEYS = frozenset({"criterion_id", "type", "required", "tool"})
 _VERIFICATION_KEYS = frozenset({"criteria"})
 
 _RESOURCE_MODES = frozenset({"team_private", "project_readonly", "portable"})
-_CRITERION_TYPES = frozenset({"tool_check", "agent_review"})
+_CRITERION_TYPES = frozenset({"tool_check", "agent_review", "human_review"})
 _REQUIRED_OUTPUT_FIELDS = frozenset({"artifact_refs", "summary"})
 _KNOWN_OUTPUT_FIELDS = frozenset(
     {"artifact_refs", "summary", "known_limitations"}
@@ -212,8 +212,10 @@ def _verification_policy(value: object) -> dict[str, Any]:
             normalized_criterion["tool"] = _nonempty_string(
                 criterion["tool"], f"verification_policy.criteria[{index}].tool"
             )
-        elif "tool" in criterion:
+        elif criterion_type == "agent_review" and "tool" in criterion:
             raise ValueError("agent_review criteria do not accept tool")
+        elif criterion_type == "human_review" and "tool" in criterion:
+            raise ValueError("human_review criteria do not accept tool")
         criteria.append(normalized_criterion)
 
     return {"criteria": criteria}

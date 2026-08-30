@@ -279,6 +279,8 @@ def _evaluate_criterion(
 ) -> dict[str, Any]:
     if criterion["type"] == "agent_review":
         status, code = "PENDING", "agent_review_unavailable"
+    elif criterion["type"] == "human_review":
+        status, code = "PENDING", "human_review_unavailable"
     else:
         tool = criterion["tool"]
         if tool == "artifact.sha256":
