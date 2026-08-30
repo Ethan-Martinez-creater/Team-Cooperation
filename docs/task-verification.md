@@ -137,3 +137,11 @@ decision 仅允许 ACCEPT/REJECT；reason 必填且最多 2,000 字符；idempot
 决定、验证聚合、任务状态和相应事件/outbox 同事务落库。人审拒绝使任务 changes_requested，并将其它尚未决定的人审项置 STALE；契约变更、任务撤回或共享资源失效后，旧请求不能批准新提交，恢复验证时会关闭旧请求。重启不会丢失或重建重复请求，等待期间不占用 Agent Run。
 
 本轮任务级人审提供 Verification 证据，不改变全局 ProjectProcess 三元组；预算和最终交付仍使用原来的 ProjectGate。新增 opened/decided/closed 项目事实通过既有事务监听器唤醒编排器，事件只携带绑定 ID、状态、版本和摘要，不传播人工理由或原始正文。详见 ADR-0012。
+
+## 项目级验证证据与受控迁移
+
+`load_project_verification_evidence` 在调用方事务内读取当前 WorkGraph 的任务、最新执行尝试、固定提交和验证记录。现有图任务没有 optional 标记，全部按必需工作检查；空图不会自动通过。仅修改任务为 verified 不能代替证据。历史 PASS/FAIL 不被改写，但契约、提交、制品共享状态变化后的旧 PASS 不再授权当前项目进入集成。
+
+`VerificationOrchestrationEffect` 与持久 Runner 配合，在执行迁移的事务内再次核对 graph digest、process version/event sequence、decision 和工作租约。当前 PASS 才通过 Guard 进入 INTEGRATION；当前 FAIL 才返回 EXECUTION/READY。它不重写任务、已接受契约或历史证据，不增加 Planner replan/generated-task 计数；实际重跑仍须正常预留执行预算与团队容量。
+
+这些是编排装配组件，尚不表示生产后台消费者已完整接线，也不表示 IntegrationRun、DeliveryManifest 或最终 CompletionEvaluator 已完成。任务重新派发、生产快照及后台运行时正在后续切片集成。项目级 verification.completed 事实明确携带 PASS/FAIL outcome；通过验证不等于项目完成。

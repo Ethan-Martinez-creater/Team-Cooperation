@@ -281,6 +281,7 @@ class ProjectOrchestratorRunner:
         needs_external_effect = decision.action in {
             DeterministicAction.DISPATCH_WORK,
             DeterministicAction.REOPEN_WORK,
+            DeterministicAction.ENTER_INTEGRATION,
         }
         if needs_external_effect:
             if self.effect is None:
@@ -351,6 +352,10 @@ class ProjectOrchestratorRunner:
             },
             "mutation_fence": mutation_fence,
         }
+        if decision.transition_key in {"verification.passed", "verification.failed"}:
+            kwargs["payload"]["outcome"] = (
+                "PASS" if decision.transition_key == "verification.passed" else "FAIL"
+            )
         if decision.transition_key is not None:
             service.apply_transition(
                 **kwargs,
