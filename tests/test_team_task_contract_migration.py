@@ -341,6 +341,51 @@ def test_legacy_rows_roundtrip_upgrade_downgrade_and_reupgrade_without_contract_
     engine.dispose()
 
 
+def test_sqlite_native_migration_preserves_inbound_graph_indexes_and_triggers():
+    engine = _engine()
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE TABLE task_child (id INTEGER PRIMARY KEY, task_id VARCHAR(128) NOT NULL "
+            "REFERENCES product_team_tasks(task_id))"
+        )
+        connection.exec_driver_sql(
+            "CREATE TABLE task_grandchild (id INTEGER PRIMARY KEY, child_id INTEGER "
+            "NOT NULL REFERENCES task_child(id))"
+        )
+        connection.exec_driver_sql("CREATE INDEX ix_task_child_task ON task_child(task_id)")
+        connection.exec_driver_sql("CREATE TABLE task_touch_audit (task_id VARCHAR(128))")
+        connection.exec_driver_sql(
+            "CREATE TRIGGER task_title_touched AFTER UPDATE OF title ON product_team_tasks "
+            "BEGIN INSERT INTO task_touch_audit VALUES (NEW.task_id); END"
+        )
+        connection.exec_driver_sql("INSERT INTO task_child VALUES (1, 'task-legacy')")
+        connection.exec_driver_sql("INSERT INTO task_grandchild VALUES (1, 1)")
+
+    statements = []
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def capture(_connection, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement.upper())
+
+    for direction in ("upgrade", "downgrade", "upgrade"):
+        _migrate(engine, direction)
+        with engine.begin() as connection:
+            assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
+            assert connection.exec_driver_sql("PRAGMA foreign_key_check").all() == []
+            assert connection.exec_driver_sql("SELECT count(*) FROM task_grandchild").scalar_one() == 1
+            connection.exec_driver_sql("UPDATE product_team_tasks SET title='touched' WHERE task_id='task-legacy'")
+        assert inspect(engine).get_foreign_keys("task_child")[0]["referred_table"] == "product_team_tasks"
+        assert "ix_task_child_task" in {item["name"] for item in inspect(engine).get_indexes("task_child")}
+        with pytest.raises(IntegrityError), engine.begin() as connection:
+            connection.exec_driver_sql("INSERT INTO task_child VALUES (2, 'missing-task')")
+
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql("SELECT count(*) FROM task_touch_audit").scalar_one() == 3
+    assert not any("DROP TABLE" in item or "RENAME TO" in item for item in statements)
+    assert not any("FOREIGN_KEYS=OFF" in item.replace(" ", "") for item in statements)
+    engine.dispose()
+
+
 def test_postgresql_team_task_ddl_has_contract_check_without_cross_metadata_foreign_keys():
     ddl = str(CreateTable(TEAM_TASKS).compile(dialect=postgresql.dialect()))
     assert "CONSTRAINT ck_product_team_tasks_contract CHECK" in ddl

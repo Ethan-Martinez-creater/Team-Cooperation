@@ -51,21 +51,33 @@ def upgrade() -> None:
     # Every field is nullable to leave pre-contract TeamTasks untouched.  The
     # service validates process/node ownership because those tables belong to
     # separate metadata domains and must not become cross-metadata FKs here.
+    columns = [
+        sa.Column("process_id", sa.String(128), nullable=True),
+        sa.Column("work_node_id", sa.String(128), nullable=True),
+        sa.Column("requested_capability", sa.JSON(none_as_null=True), nullable=True),
+        sa.Column("input_manifest_json", sa.JSON(none_as_null=True), nullable=True),
+        sa.Column("output_contract_json", sa.JSON(none_as_null=True), nullable=True),
+        sa.Column("verification_policy_json", sa.JSON(none_as_null=True), nullable=True),
+        sa.Column("source_decision_id", sa.String(128), nullable=True),
+        sa.Column("source_contract_version", sa.Integer(), nullable=True),
+        sa.Column("autonomy_requirement", sa.String(32), nullable=True),
+        sa.Column("accepted_contract_version", sa.Integer(), nullable=True),
+    ]
+    if op.get_bind().dialect.name == "sqlite":
+        # Native ADD preserves incoming FKs, triggers and dependent tables. The
+        # last column owns the row CHECK; all referenced columns now exist.
+        # Do not batch-copy the parent (or temporarily rewrite its children).
+        columns[-1] = sa.Column(
+            "accepted_contract_version", sa.Integer(),
+            sa.CheckConstraint(_CONTRACT_CHECK, name="ck_product_team_tasks_contract"),
+            nullable=True,
+        )
+        for column in columns:
+            op.add_column(_TABLE, column)
+        return
     with op.batch_alter_table(_TABLE) as batch:
-        batch.add_column(sa.Column("process_id", sa.String(128), nullable=True))
-        batch.add_column(sa.Column("work_node_id", sa.String(128), nullable=True))
-        batch.add_column(
-            sa.Column("requested_capability", sa.JSON(none_as_null=True), nullable=True)
-        )
-        batch.add_column(sa.Column("input_manifest_json", sa.JSON(none_as_null=True), nullable=True))
-        batch.add_column(sa.Column("output_contract_json", sa.JSON(none_as_null=True), nullable=True))
-        batch.add_column(
-            sa.Column("verification_policy_json", sa.JSON(none_as_null=True), nullable=True)
-        )
-        batch.add_column(sa.Column("source_decision_id", sa.String(128), nullable=True))
-        batch.add_column(sa.Column("source_contract_version", sa.Integer(), nullable=True))
-        batch.add_column(sa.Column("autonomy_requirement", sa.String(32), nullable=True))
-        batch.add_column(sa.Column("accepted_contract_version", sa.Integer(), nullable=True))
+        for column in columns:
+            batch.add_column(column)
         batch.create_check_constraint("ck_product_team_tasks_contract", _CONTRACT_CHECK)
 
 
@@ -82,6 +94,14 @@ def downgrade() -> None:
             "cannot be represented by the legacy schema; preserve the contract fields."
         )
 
+    if op.get_bind().dialect.name == "sqlite":
+        version = op.get_bind().execute(sa.text("SELECT sqlite_version()")).scalar_one()
+        if tuple(int(part) for part in version.split(".")) < (3, 35, 0):
+            raise RuntimeError("SQLite 3.35+ is required for lossless contract column downgrade")
+        # Drop the column owning the CHECK first. No table rebuild or FK toggle.
+        for column in reversed(_CONTRACT_COLUMNS):
+            op.drop_column(_TABLE, column)
+        return
     with op.batch_alter_table(_TABLE) as batch:
         batch.drop_constraint("ck_product_team_tasks_contract", type_="check")
         for column in reversed(_CONTRACT_COLUMNS):
