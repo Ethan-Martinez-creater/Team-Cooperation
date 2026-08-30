@@ -1698,7 +1698,8 @@ class TeamCollaborationService:
         return self._task(values)
 
     def respond_task(
-        self, *, project_id: str, task_id: str, actor_id: str, accept: bool
+        self, *, project_id: str, task_id: str, actor_id: str, accept: bool,
+        expected_contract_version: int | None = None,
     ) -> TeamTask:
         target = TeamTaskStatus.ACCEPTED if accept else TeamTaskStatus.REJECTED
         return self._transition(
@@ -1710,6 +1711,7 @@ class TeamCollaborationService:
             side="target",
             event="task.accepted" if accept else "task.rejected",
             summary="目标团队接受了任务" if accept else "目标团队拒绝了任务",
+            expected_contract_version=expected_contract_version,
         )
 
     def assign_internal(
@@ -3381,6 +3383,7 @@ class TeamCollaborationService:
         summary,
         require_assignment=False,
         review_note=None,
+        expected_contract_version=None,
     ):
         now = datetime.now(UTC)
         with self.engine.begin() as connection:
@@ -3392,13 +3395,30 @@ class TeamCollaborationService:
             if require_assignment and not task["assigned_account_id"]:
                 raise GovernanceConflictError("target team must assign an internal owner first")
             values = {"status": target.value, "updated_at": now}
+            if target in {TeamTaskStatus.ACCEPTED, TeamTaskStatus.REJECTED}:
+                version = task["source_contract_version"]
+                if version is not None and (
+                    type(expected_contract_version) is not int or expected_contract_version != version
+                ):
+                    raise GovernanceConflictError("confirm the current task contract version first")
+                if version is None and expected_contract_version is not None:
+                    raise GovernanceConflictError("task has no structured contract version")
+                values["accepted_contract_version"] = version if target is TeamTaskStatus.ACCEPTED else None
             if review_note is not None:
                 values["review_note"] = review_note
             if target is TeamTaskStatus.VERIFIED:
                 values["completed_at"] = now
-            connection.execute(
-                update(TEAM_TASKS).where(TEAM_TASKS.c.task_id == task_id).values(**values)
+            changed = connection.execute(
+                update(TEAM_TASKS).where(
+                    TEAM_TASKS.c.task_id == task_id,
+                    TEAM_TASKS.c.status == task["status"],
+                    TEAM_TASKS.c.source_contract_version.is_(None)
+                    if task["source_contract_version"] is None
+                    else TEAM_TASKS.c.source_contract_version == task["source_contract_version"],
+                ).values(**values)
             )
+            if changed.rowcount != 1:
+                raise GovernanceConflictError("task or contract changed concurrently")
             task = dict(task)
             task.update(values)
             self._activity(

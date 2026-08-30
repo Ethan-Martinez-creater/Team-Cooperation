@@ -98,6 +98,7 @@ class ProjectAgentContextBuilder:
                 "input_resource_ids": list(contract.input_resource_ids),
             },
         }
+        visible_nodes = {item.node_id for item in graph.nodes if item.node_type is not WorkNodeType.ARTIFACT}
         graph_payload = {
             "schema": "coifesp.team-task-work-graph.v1",
             "project_id": graph.project_id,
@@ -109,6 +110,7 @@ class ProjectAgentContextBuilder:
                     "subject_id": item.subject_id,
                 }
                 for item in graph.nodes
+                if item.node_id in visible_nodes
             ],
             "relations": [
                 {
@@ -117,8 +119,9 @@ class ProjectAgentContextBuilder:
                     "target_node_id": item.target_node_id,
                 }
                 for item in graph.relations
+                if item.source_node_id in visible_nodes and item.target_node_id in visible_nodes
             ],
-            "subjects": list(graph.subjects),
+            "subjects": self._execution_subjects(graph.subjects),
         }
         generated = (
             self._item(
@@ -147,6 +150,24 @@ class ProjectAgentContextBuilder:
                 raise GovernanceConflictError("team Agent context item id is duplicated")
             item_ids.add(item.item_id)
         return generated + tuple(shared_items)
+
+    @staticmethod
+    def _execution_subjects(subjects):
+        # Full graph hashing remains authoritative, but raw manifests are not
+        # broadcast to other teams. The accepted task's filtered input manifest
+        # is separately supplied by the transaction-bound fact loader.
+        result = []
+        hidden = {"input_manifest_json", "requested_capability", "output_contract_json",
+                  "verification_policy_json", "artifact_resource_ids"}
+        for subject in subjects:
+            if subject.get("node_type") == "artifact":
+                # Resource references/content only enter through input policy.
+                continue
+            value = subject.get("value")
+            if isinstance(value, dict) and subject.get("node_type") == "task":
+                subject = {**subject, "value": {k: v for k, v in value.items() if k not in hidden}}
+            result.append(subject)
+        return result
 
     @staticmethod
     def _validate(*, process, team_agent, task, contract, graph) -> None:

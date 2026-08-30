@@ -5,6 +5,7 @@ from pathlib import Path
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect
 
 from coifesp_harness.control_plane.bootstrap import SCHEMA_REVISION
@@ -80,7 +81,7 @@ def test_bootstrap_revision_includes_project_orchestration_decision_head():
     migration = _module()
     assert migration.revision == "20260829_47"
     assert migration.down_revision == "20260829_46"
-    assert SCHEMA_REVISION == "20260830_52"
+    assert ScriptDirectory(str(Path(__file__).parents[1] / "alembic")).get_heads() == [SCHEMA_REVISION]
 
 
 def test_revision_50_creates_and_drops_project_planner_intents():

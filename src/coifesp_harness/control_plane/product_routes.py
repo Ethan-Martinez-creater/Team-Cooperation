@@ -93,6 +93,7 @@ from .product_models import (
     TeamTaskAssignBody,
     TeamTaskCreateBody,
     TeamTaskDecisionBody,
+    TeamTaskContractBody,
     TeamTaskReviewBody,
     TeamTaskSubmitBody,
     TeamTaskView,
@@ -679,7 +680,34 @@ def build_product_router(
             task_id=task_id,
             actor_id=authenticated.principal.principal_id,
             accept=body.accept,
+            expected_contract_version=body.expected_contract_version,
         ))
+
+    @router.get("/projects/{project_id}/tasks/{task_id}/execution-contract")
+    async def get_task_execution_contract(
+        project_id: str, task_id: str,
+        authenticated: Authenticated = Depends(authenticator),
+    ):
+        from ..team_agents.task_contracts import TeamTaskContractService
+
+        return await run_in_threadpool(
+            TeamTaskContractService(_collaboration(collaboration).engine).get,
+            project_id=project_id, task_id=task_id,
+            actor_id=authenticated.principal.principal_id,
+        )
+
+    @router.put("/projects/{project_id}/tasks/{task_id}/execution-contract")
+    async def propose_task_execution_contract(
+        project_id: str, task_id: str, body: TeamTaskContractBody,
+        authenticated: Authenticated = Depends(authenticator),
+    ):
+        from ..team_agents.task_contracts import TeamTaskContractService
+
+        return await run_in_threadpool(
+            TeamTaskContractService(_collaboration(collaboration).engine).propose,
+            project_id=project_id, task_id=task_id,
+            actor_id=authenticated.principal.principal_id, **body.model_dump(),
+        )
 
     @router.post("/projects/{project_id}/tasks/{task_id}:assign", response_model=TeamTaskView)
     async def assign_team_task(

@@ -218,6 +218,18 @@ class TeamTaskCreateBody(StrictModel):
 
 class TeamTaskDecisionBody(StrictModel):
     accept: bool
+    expected_contract_version: int | None = Field(default=None, ge=1, strict=True)
+
+
+class TeamTaskContractBody(StrictModel):
+    expected_version: int = Field(ge=0, strict=True)
+    process_id: str = Field(min_length=1, max_length=128)
+    work_node_id: str = Field(min_length=1, max_length=128)
+    requested_capability: dict
+    input_manifest: dict
+    output_contract: dict
+    verification_policy: dict
+    autonomy_requirement: str = Field(min_length=1, max_length=32)
 
 
 class TeamTaskAssignBody(StrictModel):

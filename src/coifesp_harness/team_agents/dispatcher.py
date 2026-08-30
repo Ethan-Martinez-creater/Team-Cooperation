@@ -82,7 +82,7 @@ class TeamAgentDispatcher:
     def __init__(
         self, *, repository, work_graph_repository, capability_adapter,
         runtime_resolver, run_service: AgentRunService,
-        fact_loader: TaskDispatchFactLoader, clock=None,
+        fact_loader: TaskDispatchFactLoader | None = None, artifact_content=None, clock=None,
     ) -> None:
         engine = repository.engine
         if any(other is not engine for other in (
@@ -95,6 +95,12 @@ class TeamAgentDispatcher:
         self.capabilities = capability_adapter
         self.runtime_resolver = runtime_resolver
         self.run_service = run_service
+        if fact_loader is None:
+            from .task_contracts import PersistentTaskDispatchFactLoader
+
+            fact_loader = PersistentTaskDispatchFactLoader(
+                engine=engine, artifact_content=artifact_content,
+            )
         self.fact_loader = fact_loader
         self.clock = clock or (lambda: datetime.now(UTC))
 

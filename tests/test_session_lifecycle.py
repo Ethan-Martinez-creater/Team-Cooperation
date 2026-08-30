@@ -1,5 +1,5 @@
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -83,13 +83,25 @@ def bearer(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_builtin_session_renewal_rotates_token_and_extends_expiry():
+def test_builtin_session_renewal_rotates_token_and_extends_expiry(monkeypatch):
+    import coifesp_harness.product.service as product_service
+
+    instant = datetime.now(UTC)
+
+    class ControlledDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return instant.astimezone(tz) if tz else instant.replace(tzinfo=None)
+
+    monkeypatch.setattr(product_service, "datetime", ControlledDatetime)
     app = builtin_app()
     username, initial_password, _ = register_admin(app)
     login = admin_login(app, username, initial_password)
     old_token = login["access_token"]
     assert asyncio.run(call(app, "GET", "/v1/auth/me", headers=bearer(old_token))).status_code == 200
 
+    # Advance logical time without sleeps or relying on host clock resolution.
+    instant += timedelta(seconds=1)
     renewed = asyncio.run(
         call(app, "POST", "/v1/sessions/current:renew", headers=bearer(old_token))
     )
