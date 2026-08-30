@@ -163,3 +163,109 @@ Index(
     AGENT_REVIEWS.c.status,
     AGENT_REVIEWS.c.created_at,
 )
+
+
+HUMAN_REVIEWS = Table(
+    "task_human_reviews",
+    VERIFICATION_METADATA,
+    Column("review_id", String(128), primary_key=True),
+    Column("verification_id", String(128), nullable=False),
+    Column("project_id", String(128), nullable=False),
+    Column("process_id", String(128), nullable=False),
+    Column("task_id", String(128), nullable=False),
+    Column("source_run_id", String(128), nullable=False),
+    Column("reviewer_team_id", String(128), nullable=False),
+    Column("criterion_id", Text, nullable=False),
+    Column("criterion_key", String(64), nullable=False),
+    Column("subject_digest", String(64), nullable=False),
+    Column("contract_version", Integer, nullable=False),
+    Column("status", String(16), nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    Column("completed_at", DateTime(timezone=True), nullable=True),
+    Column("decision", String(16), nullable=True),
+    Column("decision_key", String(128), nullable=True),
+    Column("decision_digest", String(64), nullable=True),
+    Column("decided_by", String(256), nullable=True),
+    Column("reason", Text, nullable=True),
+    Column("decided_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint(
+        "length(criterion_id) > 0",
+        name="ck_task_human_reviews_criterion_id",
+    ),
+    CheckConstraint(
+        "length(criterion_key) = 64",
+        name="ck_task_human_reviews_criterion_key",
+    ),
+    CheckConstraint(
+        "length(subject_digest) = 64",
+        name="ck_task_human_reviews_subject_digest",
+    ),
+    CheckConstraint(
+        "contract_version >= 1",
+        name="ck_task_human_reviews_contract_version",
+    ),
+    CheckConstraint(
+        "status IN ('OPEN','ACCEPTED','REJECTED','STALE')",
+        name="ck_task_human_reviews_status",
+    ),
+    CheckConstraint(
+        "version >= 1",
+        name="ck_task_human_reviews_version",
+    ),
+    CheckConstraint(
+        "(status = 'OPEN' AND completed_at IS NULL) OR "
+        "(status IN ('ACCEPTED','REJECTED','STALE') AND completed_at IS NOT NULL)",
+        name="ck_task_human_reviews_completion",
+    ),
+    CheckConstraint(
+        "decision IS NULL OR decision IN ('ACCEPT','REJECT')",
+        name="ck_task_human_reviews_decision",
+    ),
+    CheckConstraint(
+        "(decision IS NULL AND decision_key IS NULL AND decision_digest IS NULL "
+        "AND decided_by IS NULL AND reason IS NULL AND decided_at IS NULL) OR "
+        "(decision IS NOT NULL AND decision_key IS NOT NULL AND decision_digest IS NOT NULL "
+        "AND decided_by IS NOT NULL AND reason IS NOT NULL AND decided_at IS NOT NULL)",
+        name="ck_task_human_reviews_decision_fields",
+    ),
+    CheckConstraint(
+        "decision_digest IS NULL OR length(decision_digest) = 64",
+        name="ck_task_human_reviews_decision_digest",
+    ),
+    CheckConstraint(
+        "(status <> 'OPEN') OR "
+        "(decision IS NULL AND decision_key IS NULL AND decision_digest IS NULL "
+        "AND decided_by IS NULL AND reason IS NULL AND decided_at IS NULL)",
+        name="ck_task_human_reviews_open_decision",
+    ),
+    CheckConstraint(
+        "(status <> 'ACCEPTED') OR "
+        "(decision = 'ACCEPT' AND decision_key IS NOT NULL AND decision_digest IS NOT NULL "
+        "AND decided_by IS NOT NULL AND reason IS NOT NULL AND decided_at IS NOT NULL)",
+        name="ck_task_human_reviews_accepted_decision",
+    ),
+    CheckConstraint(
+        "(status <> 'REJECTED') OR "
+        "(decision = 'REJECT' AND decision_key IS NOT NULL AND decision_digest IS NOT NULL "
+        "AND decided_by IS NOT NULL AND reason IS NOT NULL AND decided_at IS NOT NULL)",
+        name="ck_task_human_reviews_rejected_decision",
+    ),
+    UniqueConstraint(
+        "verification_id",
+        "criterion_key",
+        name="uq_task_human_reviews_verification_criterion",
+    ),
+)
+
+Index(
+    "ix_task_human_reviews_reviewer_status_created",
+    HUMAN_REVIEWS.c.reviewer_team_id,
+    HUMAN_REVIEWS.c.status,
+    HUMAN_REVIEWS.c.created_at,
+)
+Index(
+    "ix_task_human_reviews_verification_id",
+    HUMAN_REVIEWS.c.verification_id,
+)
