@@ -282,6 +282,36 @@ class ProjectProcessCommandService:
 
     finish_orchestration_decision = finish_decision
 
+    def invalidate_unapplied_decision(self, *, decision_id, current_graph_snapshot_digest,
+                                     mutation_fence):
+        """Retire a stale deterministic decision, never a materialized command batch."""
+        if not callable(mutation_fence):
+            raise TypeError("decision invalidation requires a live worker fence")
+        with self.repository.transaction() as connection:
+            mutation_fence(connection)
+            decision = self.repository.decision(connection, decision_id)
+            if decision is None:
+                raise GovernanceConflictError("project orchestration decision is unavailable")
+            if decision.status is not ProjectOrchestrationDecisionStatus.PENDING:
+                return decision
+            if self.repository.event(connection, f"event:{decision_id}") is not None:
+                return decision
+            if self.repository.commands_for_decision(connection, decision_id):
+                raise GovernanceConflictError("command batches require command-level stale handling")
+            process = self.repository.process(connection, decision.process_id)
+            if (decision.based_on_process_version == process.version
+                    and decision.based_on_event_sequence == process.last_event_sequence
+                    and decision.graph_snapshot_digest == current_graph_snapshot_digest):
+                return decision
+            changed = connection.execute(PROJECT_ORCHESTRATION_DECISIONS.update().where(
+                PROJECT_ORCHESTRATION_DECISIONS.c.decision_id == decision_id,
+                PROJECT_ORCHESTRATION_DECISIONS.c.status == "PENDING",
+            ).values(status="STALE", applied_at=self.clock())).rowcount
+            if changed != 1:
+                raise GovernanceConflictError("project orchestration decision changed concurrently")
+            mutation_fence(connection)
+            return self.repository.decision(connection, decision_id)
+
     @staticmethod
     def compute_command_batch_digest(command_specs: Iterable[Mapping]) -> str:
         """Return a stable digest for a normalized command batch.

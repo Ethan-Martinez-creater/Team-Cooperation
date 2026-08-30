@@ -200,6 +200,22 @@ class ProjectOrchestratorRunner:
                 )
             decision = self._decision_from_json(existing.decision_json)
             process = self._process(wakeup.process_id)
+            if self._event(self._effect_event_id(decision_id)) is None:
+                snapshot = self.snapshot_loader(process)
+                if not isinstance(snapshot, ProjectOrchestrationSnapshot):
+                    raise TypeError("snapshot_loader must return ProjectOrchestrationSnapshot")
+                current = self.command_service.invalidate_unapplied_decision(
+                    decision_id=decision_id, current_graph_snapshot_digest=snapshot.graph_digest,
+                    mutation_fence=fence,
+                )
+                if current.status is ProjectOrchestrationDecisionStatus.STALE:
+                    self._emit_stale(wakeup=wakeup, decision_id=decision_id,
+                                     worker_id=worker_id, mutation_fence=fence)
+                    self._complete(wakeup=wakeup, worker_id=worker_id)
+                    return ProjectOrchestratorWorkerOutcome(
+                        ProjectOrchestratorWorkerStatus.STALE, wakeup.wakeup_id,
+                        decision_id, decision.action,
+                    )
         else:
             process = self._process(wakeup.process_id)
             snapshot = self.snapshot_loader(process)
