@@ -81,7 +81,7 @@ class ToolManifest:
         )
 
 
-def sandbox_code_manifest(profile_ids: Iterable[str]) -> ToolManifest:
+def sandbox_code_manifest(profile_ids: Iterable[str], *, timeout_seconds: float = 90.0) -> ToolManifest:
     return ToolManifest(
         tool_id="code.run_profile",
         version="1",
@@ -105,7 +105,7 @@ def sandbox_code_manifest(profile_ids: Iterable[str]) -> ToolManifest:
         required_roles=frozenset({"contributor"}),
         risk=RiskLevel.MEDIUM,
         executor=TOOL_EXECUTOR_DURABLE,
-        timeout_seconds=90.0,
+        timeout_seconds=timeout_seconds,
         max_output_chars=1_000_000,
     )
 
@@ -210,12 +210,13 @@ def project_context_manifests() -> tuple[ToolManifest, ToolManifest]:
 def build_builtin_manifests(
     *,
     sandbox_profile_ids: Iterable[str] = (),
+    sandbox_timeout_seconds: float = 90.0,
     office_connector_configured: bool = False,
 ) -> tuple[ToolManifest, ...]:
     manifests: list[ToolManifest] = []
     profiles = tuple(sandbox_profile_ids)
     if profiles:
-        manifests.append(sandbox_code_manifest(profiles))
+        manifests.append(sandbox_code_manifest(profiles, timeout_seconds=sandbox_timeout_seconds))
     if office_connector_configured:
         manifests.append(office_message_manifest())
     manifests.extend(skill_catalog_manifests())

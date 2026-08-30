@@ -173,14 +173,16 @@ async def build_worker_runtime(settings: Settings) -> WorkerRuntime:
         # Declarations carry no handlers: durable tools dispatch to Tool Jobs,
         # and run-scoped skill handlers are attached per run by the loop.
         sandbox_profile_ids = ()
+        sandbox_timeout_seconds = 90.0
         if settings.sandbox_profiles_json:
             from .sandbox import load_code_profiles
 
-            sandbox_profile_ids = tuple(
-                profile.profile_id for profile in load_code_profiles(settings.sandbox_profiles_json)
-            )
+            sandbox_profiles = load_code_profiles(settings.sandbox_profiles_json)
+            sandbox_profile_ids = tuple(profile.profile_id for profile in sandbox_profiles)
+            sandbox_timeout_seconds = max(profile.limits.timeout_seconds for profile in sandbox_profiles) + 10
         manifests = build_builtin_manifests(
             sandbox_profile_ids=sandbox_profile_ids,
+            sandbox_timeout_seconds=sandbox_timeout_seconds,
             office_connector_configured=bool(settings.connectors_json),
         )
         registry = build_agent_worker_registry(manifests)

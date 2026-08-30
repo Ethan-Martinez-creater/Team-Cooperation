@@ -69,10 +69,12 @@ def _time(value):
 
 
 class TaskVerificationService:
-    def __init__(self, *, repository, artifact_content=None, notifier=None, clock=None):
+    def __init__(self, *, repository, artifact_content=None, notifier=None, clock=None,
+                 tool_checks=None):
         self.repository = repository
         self.artifact_content = artifact_content
         self.notifier = notifier
+        self.tool_checks = tool_checks
         self.clock = clock or (lambda: datetime.now(UTC))
 
     @staticmethod
@@ -81,7 +83,7 @@ class TaskVerificationService:
         if actor["team_id"] not in {task["source_team_id"], task["target_team_id"]}:
             raise PolicyDenied("verification belongs to the task parties")
 
-    def verify_task(self, *, project_id, task_id, actor_id):
+    def verify_task(self, *, project_id, task_id, actor_id, retry_tools=False):
         with self.repository.transaction() as connection:
             task = TeamCollaborationService._task_row(connection, project_id, task_id)
             self._authorize(connection, task, actor_id)
@@ -102,7 +104,7 @@ class TaskVerificationService:
             if run_id is None:
                 raise GovernanceConflictError("verification requires a structured Agent submission")
         # Reauthorize under the process/task locks before doing any work.
-        return self.verify_run(run_id=run_id, actor_id=actor_id)
+        return self.verify_run(run_id=run_id, actor_id=actor_id, retry_tools=retry_tools)
 
     def results(self, *, project_id, task_id, actor_id):
         with self.repository.transaction() as connection:
@@ -121,7 +123,9 @@ class TaskVerificationService:
     def on_run_terminal(self, run):
         return self.verify_run(run_id=run.run_id)
 
-    def verify_run(self, *, run_id, actor_id=None):
+    def verify_run(self, *, run_id, actor_id=None, retry_tools=False):
+        if retry_tools and actor_id is None:
+            raise PolicyDenied("tool retries require an authorized task participant")
         with self.repository.transaction() as connection:
             binding = (
                 connection.execute(
@@ -240,6 +244,14 @@ class TaskVerificationService:
                     artifacts=artifacts,
                     artifact_content=self.artifact_content,
                 )
+                if self.tool_checks is not None:
+                    outcome = self.tool_checks.evaluate(
+                        connection=connection, outcome=outcome,
+                        existing_checks=existing["checks_json"] if existing else [],
+                        verification_id=verification_id, subject_digest=subject_digest,
+                        run_id=run_id, tenant_id=task["target_team_id"],
+                        retry_tools=retry_tools,
+                    )
                 status = outcome["status"]
             now = self.clock()
             values = {

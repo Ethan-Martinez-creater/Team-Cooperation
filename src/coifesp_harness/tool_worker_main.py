@@ -17,8 +17,22 @@ from .auth import (
     OIDCWorkerIdentityProvider,
 )
 from .config import ConfigurationError, Environment, Settings
+from .connectors import (
+    ConnectorCatalog,
+    OfficeMessageTools,
+    SecureConnectorClient,
+    load_connector_endpoints,
+)
 from .control_plane.bootstrap import DatabaseReadinessProbe, load_environment_settings
 from .postgres_audit import AuditSigningKeyring, SQLAlchemyAuditLog
+from .sandbox import (
+    OCISandbox,
+    SandboxedCodeTools,
+    SandboxWorkspaceManager,
+    load_code_profiles,
+)
+from .security import Classification
+from .tool_catalog import build_builtin_manifests, validate_registry_manifests
 from .tool_jobs import (
     DurableToolWorkerRunner,
     SQLAlchemyToolJobRepository,
@@ -26,20 +40,6 @@ from .tool_jobs import (
     ToolJobKeyring,
 )
 from .tools import ToolRegistry
-from .tool_catalog import build_builtin_manifests, validate_registry_manifests
-from .sandbox import (
-    OCISandbox,
-    SandboxedCodeTools,
-    SandboxWorkspaceManager,
-    load_code_profiles,
-)
-from .connectors import (
-    ConnectorCatalog,
-    OfficeMessageTools,
-    SecureConnectorClient,
-    load_connector_endpoints,
-)
-from .security import Classification
 
 logger = logging.getLogger("coifesp.tool_worker")
 
@@ -117,6 +117,7 @@ async def build_tool_worker_runtime(
         )
         effective_registry = registry
         workspace_manager = None
+        reconciler = coordinator
         if effective_registry is None:
             assert settings.sandbox_runtime is not None
             assert settings.sandbox_workspace_root is not None
@@ -154,15 +155,53 @@ async def build_tool_worker_runtime(
                 )
             manifests = build_builtin_manifests(
                 sandbox_profile_ids=(item.profile_id for item in profiles),
+                sandbox_timeout_seconds=max(item.limits.timeout_seconds for item in profiles) + 10,
                 office_connector_configured=bool(settings.connectors_json),
             )
             validate_registry_manifests(manifests, effective_registry, executor="tool_worker")
+            # This is a Harness-internal executable, not a model-visible tool.
+            # Keep the existing Agent catalog contract unchanged. Its handler
+            # independently requires a persisted verification/job binding.
+            if settings.artifact_store_root:
+                from .artifacts.content import ArtifactContentService
+                from .artifacts.repository import SQLAlchemyArtifactRepository
+                from .artifacts.storage import LocalImmutableArtifactStore
+                from .product.notifications import NotificationService
+                from .project_process.repository import (
+                    SQLAlchemyProjectProcessRepository,
+                )
+                from .verification.sandbox_tool import SandboxedVerificationTool
+                from .verification.service import TaskVerificationService
+                from .verification.tool_checks import (
+                    DurableVerificationChecks,
+                    VerificationToolReconciler,
+                )
+
+                content = ArtifactContentService(
+                    SQLAlchemyArtifactRepository(engine=engine, audit_log=audit),
+                    LocalImmutableArtifactStore(
+                        Path(settings.artifact_store_root),
+                        max_object_bytes=settings.artifact_max_upload_bytes,
+                    ),
+                )
+                effective_registry.register(SandboxedVerificationTool(
+                    engine=engine, sandbox=sandbox, profiles=profiles,
+                    workspace_root=workspace_root, artifact_content=content,
+                ).definition())
+                verification = TaskVerificationService(
+                    repository=SQLAlchemyProjectProcessRepository(engine),
+                    artifact_content=content, notifier=NotificationService(engine),
+                    tool_checks=DurableVerificationChecks(jobs=jobs, profiles=profiles),
+                )
+                reconciler = VerificationToolReconciler(
+                    coordinator=coordinator, verifier=verification,
+                )
             workspace_manager = SandboxWorkspaceManager(root=workspace_root)
         return ToolWorkerRuntime(
             runner=DurableToolWorkerRunner(
                 repository=jobs,
                 registry=effective_registry,
-                reconciler=coordinator,
+                reconciler=reconciler,
                 identity_provider=identity,
                 tenant_id=settings.tool_worker_tenant_id,
                 idle_poll_seconds=settings.tool_worker_idle_poll_seconds,
@@ -212,7 +251,7 @@ def main() -> int:
         asyncio.run(run_tool_worker(settings))
     except KeyboardInterrupt:
         return 0
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI boundary reports failure without secrets
         logger.error("durable Tool Worker failed error_type=%s", type(exc).__name__)
         return 1
     return 0

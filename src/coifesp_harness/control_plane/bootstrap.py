@@ -403,17 +403,19 @@ def build_application(
 
         skill_catalog = build_skill_catalog_from_settings(settings)
         sandbox_profile_ids = ()
+        sandbox_timeout_seconds = 90.0
         if settings.sandbox_profiles_json:
             from ..sandbox import load_code_profiles
 
-            sandbox_profile_ids = tuple(
-                profile.profile_id for profile in load_code_profiles(settings.sandbox_profiles_json)
-            )
+            sandbox_profiles = load_code_profiles(settings.sandbox_profiles_json)
+            sandbox_profile_ids = tuple(profile.profile_id for profile in sandbox_profiles)
+            sandbox_timeout_seconds = max(profile.limits.timeout_seconds for profile in sandbox_profiles) + 10
         from .agent_capabilities import AgentCapabilityService
 
         agent_capabilities = AgentCapabilityService(
             manifests=build_builtin_manifests(
                 sandbox_profile_ids=sandbox_profile_ids,
+                sandbox_timeout_seconds=sandbox_timeout_seconds,
                 office_connector_configured=bool(settings.connectors_json),
             ),
             skill_catalog=skill_catalog,
@@ -472,7 +474,9 @@ def build_application(
 
         from ..team_agents.accounting import TeamTaskRunAccounting
         from ..team_agents.task_projection import TeamTaskResultProjection
+        from ..tool_jobs import SQLAlchemyToolJobRepository, ToolJobKeyring
         from ..verification.service import TaskVerificationService
+        from ..verification.tool_checks import DurableVerificationChecks
 
         _task_accounting = TeamTaskRunAccounting(
             repository=project_process_repository,
@@ -491,6 +495,13 @@ def build_application(
         task_verification_service = TaskVerificationService(
             repository=project_process_repository, artifact_content=artifact_content_service,
             notifier=notification_service,
+            tool_checks=DurableVerificationChecks(
+                jobs=SQLAlchemyToolJobRepository(
+                    engine=runtime_engine, keyring=ToolJobKeyring.from_settings(settings),
+                    audit_log=audit,
+                ),
+                profiles=load_code_profiles(settings.sandbox_profiles_json),
+            ) if settings.sandbox_profiles_json else None,
         )
 
         def project_terminal_callback(run):
