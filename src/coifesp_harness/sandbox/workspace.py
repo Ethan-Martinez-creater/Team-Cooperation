@@ -9,6 +9,30 @@ from pathlib import Path
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
+def filesystem_path(path: Path) -> Path:
+    """Use native extended paths for local Windows I/O, not container CLI syntax."""
+    if os.name != "nt":
+        return path
+    value = str(path)
+    if value.startswith("\\\\?\\"):
+        return path
+    if not path.is_absolute():
+        raise ValueError("sandbox filesystem path must be absolute")
+    if value.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + value[2:])
+    return Path("\\\\?\\" + value)
+
+
+def container_host_path(path: Path) -> str:
+    """OCI accepts ordinary host paths; the extended prefix is local I/O only."""
+    value = str(path)
+    if value.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + value[8:]
+    if value.startswith("\\\\?\\"):
+        return value[4:]
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class SandboxWorkspace:
     tenant_id: str
@@ -22,7 +46,7 @@ class SandboxWorkspaceManager:
     def __init__(self, *, root: Path) -> None:
         if not root.is_absolute():
             raise ValueError("sandbox workspace root must be absolute")
-        self.root = root.resolve(strict=False)
+        self.root = filesystem_path(root.resolve(strict=False))
 
     def prepare(self, *, tenant_id: str, job_id: str) -> SandboxWorkspace:
         if not _ID.fullmatch(tenant_id) or not _ID.fullmatch(job_id):

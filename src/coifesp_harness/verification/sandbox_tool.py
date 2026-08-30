@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -23,6 +24,7 @@ from ..product.repository import PROJECT_AGENT_RUNS
 from ..sandbox.models import SandboxErrorCode, SandboxRequest, WorkspaceAccess
 from ..sandbox.oci import OCISandbox
 from ..sandbox.tools import CodeProfile
+from ..sandbox.workspace import filesystem_path
 from ..security import RiskLevel
 from ..tool_jobs import (
     PermanentToolError,
@@ -86,7 +88,7 @@ class SandboxedVerificationTool:
         self.engine = engine
         self.sandbox = sandbox
         self.profiles = {item.profile_id: item for item in values}
-        self.workspace_root = workspace_root.resolve(strict=False)
+        self.workspace_root = filesystem_path(workspace_root.resolve(strict=False))
         self.artifact_content = artifact_content
 
     def definition(self) -> ToolDefinition:
@@ -120,7 +122,7 @@ class SandboxedVerificationTool:
             # reach its configured deadline and for cleanup/reconciliation.
             timeout_seconds=max(item.limits.timeout_seconds for item in self.profiles.values())
             + 60,
-            max_output_chars=10_000,
+            max_output_chars=1_000_000,
             executor="tool_worker",
         )
 
@@ -141,6 +143,29 @@ class SandboxedVerificationTool:
         except (TypeError, ValueError, ValidationError) as exc:
             raise PermanentToolError("verification_profile_denied") from exc
 
+        # Storage reads must not stop the durable worker's lease heartbeat.
+        # Cancellation stops before execution; a late staging thread can only
+        # finish its own fresh directory, never launch an OCI process.
+        execution_workspace = await asyncio.to_thread(
+            self._prepare_execution_workspace, request=request, context=context,
+        )
+        try:
+            sandbox_request = SandboxRequest(
+                execution_id=context.job_id,
+                image=profile.image,
+                argv=(profile.executable, *profile.fixed_arguments),
+                workspace=execution_workspace,
+                workspace_access=WorkspaceAccess.READ_ONLY,
+                limits=profile.limits,
+            )
+            result = await self.sandbox.execute(sandbox_request)
+        except ValueError as exc:
+            raise PermanentToolError("verification_sandbox_invalid_request") from exc
+        if getattr(result, "execution_id", None) != context.job_id:
+            raise PermanentToolError("verification_sandbox_result_invalid")
+        return self._sandbox_result(result, request)
+
+    def _prepare_execution_workspace(self, *, request, context):
         row = self._load_authorized_verification(
             verification_id=request["verification_id"],
             subject_digest=request["subject_digest"],
@@ -172,20 +197,7 @@ class SandboxedVerificationTool:
                 continue
         else:
             raise PermanentToolError("verification_workspace_denied")
-
-        try:
-            sandbox_request = SandboxRequest(
-                execution_id=context.job_id,
-                image=profile.image,
-                argv=(profile.executable, *profile.fixed_arguments),
-                workspace=execution_workspace,
-                workspace_access=WorkspaceAccess.READ_ONLY,
-                limits=profile.limits,
-            )
-            result = await self.sandbox.execute(sandbox_request)
-        except ValueError as exc:
-            raise PermanentToolError("verification_sandbox_invalid_request") from exc
-        return self._sandbox_result(result, request)
+        return execution_workspace
 
     @staticmethod
     def _request(arguments: object) -> dict[str, str]:
@@ -399,7 +411,6 @@ class SandboxedVerificationTool:
                     raise _ContentUnavailable from exc
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.chmod(temporary, 0o444)
             if size != artifact["size_bytes"] or digest.hexdigest() != artifact["sha256"]:
                 raise _ArtifactCorrupt
             try:
@@ -408,6 +419,11 @@ class SandboxedVerificationTool:
                 self._require_regular(target)
                 if not self._file_matches(target, artifact):
                     raise _StageConflict
+            # Windows read-only attributes apply to all hard links. Remove
+            # our temporary name before making the final input read-only.
+            temporary.unlink()
+            temporary = None
+            os.chmod(target, 0o444)
         except _ArtifactCorrupt as exc:
             raise PermanentToolError("verification_artifact_corrupt") from exc
         except _ContentUnavailable as exc:
@@ -538,6 +554,8 @@ class SandboxedVerificationTool:
         }
         if error_code not in structured_errors or type(exit_code) is not int:
             raise PermanentToolError("verification_sandbox_failed")
+        if error_code is SandboxErrorCode.EXECUTION_FAILED and exit_code == 0:
+            raise PermanentToolError("verification_sandbox_result_invalid")
         if error_code is SandboxErrorCode.TIMED_OUT:
             timed_out = True
         if error_code is SandboxErrorCode.OUTPUT_LIMIT:

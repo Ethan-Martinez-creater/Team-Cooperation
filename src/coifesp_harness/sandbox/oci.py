@@ -4,10 +4,11 @@ import asyncio
 import hashlib
 import os
 import re
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Awaitable, Callable
 
 from .models import SandboxErrorCode, SandboxRequest, SandboxResult, WorkspaceAccess
+from .workspace import container_host_path, filesystem_path
 
 _RUNTIME = frozenset({"docker", "podman"})
 _NAME = re.compile(r"[^a-z0-9_.-]+")
@@ -32,13 +33,13 @@ class OCISandbox:
         if not allowed_images:
             raise ValueError("sandbox image allowlist cannot be empty")
         self.runtime = runtime
-        self.workspace_root = workspace_root.resolve(strict=False)
+        self.workspace_root = filesystem_path(workspace_root.resolve(strict=False))
         self.allowed_images = allowed_images
         self._process_factory = process_factory
 
     async def execute(self, request: SandboxRequest) -> SandboxResult:
         try:
-            workspace = request.workspace.resolve(strict=True)
+            workspace = filesystem_path(request.workspace).resolve(strict=True)
             if not workspace.is_dir() or not workspace.is_relative_to(self.workspace_root):
                 raise ValueError("sandbox workspace is outside its configured root")
             if request.image not in self.allowed_images:
@@ -118,7 +119,7 @@ class OCISandbox:
 
     def _command(self, request: SandboxRequest, workspace: Path, name: str) -> tuple[str, ...]:
         limits = request.limits
-        mount = f"type=bind,src={workspace},dst=/workspace"
+        mount = f"type=bind,src={container_host_path(workspace)},dst=/workspace"
         if request.workspace_access is WorkspaceAccess.READ_ONLY:
             mount += ",readonly"
         return (
