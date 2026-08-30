@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ from coifesp_harness.agent_runs import (
     AgentCheckpointKeyring,
     AgentRunCheckpointCodec,
     AgentRunService,
+    DurableAgentWorker,
     SQLAlchemyAgentRunRepository,
 )
 from coifesp_harness.agent_runs.repository import AGENT_RUNS
@@ -38,12 +40,13 @@ from coifesp_harness.project_process.repository import (
     PROJECT_PROCESS_EVENTS,
     PROJECT_PROCESSES,
 )
-from coifesp_harness.security import Classification
+from coifesp_harness.security import Classification, Principal
 from coifesp_harness.team_agents.accounting import TeamTaskRunAccounting
 from coifesp_harness.team_agents.dispatcher import (
     TaskDispatchFacts,
     TeamAgentDispatcher,
 )
+from coifesp_harness.team_agents.identity import TeamAgentPrincipalResolver
 from coifesp_harness.team_agents.profiles import TeamAgentCapabilityResolver
 from coifesp_harness.work_graph import (
     ProjectWorkGraphService,
@@ -360,3 +363,115 @@ def test_terminal_accounting_is_atomic_when_capacity_release_fails(monkeypatch):
         assert connection.execute(select(PROJECT_EXECUTION_RESERVATIONS.c.status)).scalar_one() == "RESERVED"
     monkeypatch.setattr(type(value.capabilities), "release_reservation", original)
     assert accounting.replay_pending() == 1
+
+
+def test_dispatched_task_executes_through_real_worker_and_accounts_automatically():
+    from test_agent_run_worker import Provider
+    from test_agent_run_worker import stack as worker_stack
+
+    value = stack()
+    result = dispatch(value)
+    accounting = TeamTaskRunAccounting(
+        repository=value.repository, run_repository=value.runs,
+        capability_repository=value.capabilities,
+    )
+    value.dispatcher.run_service.terminal_callback = accounting.on_run_terminal
+    _, _, loop = worker_stack(provider=Provider())
+
+    class NoHumanResolver:
+        async def resolve(self, **kwargs):
+            raise AssertionError("a Team Agent must not resolve as a human")
+
+    worker = DurableAgentWorker(
+        service=value.dispatcher.run_service, loop=loop,
+        principal_resolver=TeamAgentPrincipalResolver(
+            engine=value.engine, human_resolver=NoHumanResolver(),
+        ),
+    )
+    outcome = asyncio.run(worker.process_once(worker=Principal(
+        "worker-test", "team-b", roles=frozenset({"agent_worker"}), is_service=True,
+    )))
+    assert outcome.status.value == "completed"
+    assert value.runs.get(tenant_id="team-b", run_id=result.run_id).status.value == "completed"
+    assert accounting.replay_pending() == 0
+    with value.engine.connect() as connection:
+        assert value.repository.usage(connection, "process-a").active_agent_runs == 0
+        assert connection.execute(select(CAPACITY_RESERVATIONS.c.status)).scalar_one() == "released"
+
+
+def _runner(value):
+    from coifesp_harness.project_process import (
+        ProjectProcessScheduler,
+        SQLAlchemyProjectProcessWakeupRepository,
+    )
+    from coifesp_harness.project_process.readiness import (
+        ProjectReadinessEvaluator,
+        ProjectReadinessSnapshot,
+        WorkItemSnapshot,
+    )
+    from coifesp_harness.project_process.runner import (
+        ProjectOrchestrationSnapshot,
+        ProjectOrchestratorRunner,
+    )
+
+    wakeups = SQLAlchemyProjectProcessWakeupRepository(value.engine)
+    wakeups.create_schema()
+    scheduler = ProjectProcessScheduler(wakeups, retry_delay=lambda **_: 0)
+    scheduler.enqueue(
+        process_id="process-a", project_id="project-a", source_event_id="fixture:approved",
+        source_event_type="project.plan.approved", payload={}, retry_budget=3,
+    )
+
+    def snapshot(process):
+        graph = value.graph.snapshot(project_id=process.project_id)
+        readiness = ProjectReadinessEvaluator().evaluate(ProjectReadinessSnapshot(tasks=(
+            WorkItemSnapshot("task-a", "accepted", "team-b", contract_required=False),
+        )))
+        return ProjectOrchestrationSnapshot(graph.digest, readiness)
+
+    return ProjectOrchestratorRunner(
+        repository=value.repository, process_service=ProjectProcessService(value.repository),
+        command_service=ProjectProcessCommandService(value.repository), scheduler=scheduler,
+        snapshot_loader=snapshot, effect=value.dispatcher,
+    )
+
+
+def test_runner_commits_dispatch_event_and_run_together_before_wakeup_ack():
+    value = stack()
+    runner = _runner(value)
+    calls = 0
+
+    def crash_once():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("crash after dispatch commit")
+
+    runner.after_effect = crash_once
+    first = runner.process_once(worker_id="project-worker")
+    assert first.status.value == "RETRY"
+    with value.engine.connect() as connection:
+        assert value.repository.process(connection, "process-a").status.value == "RUNNING"
+        assert value.repository.event(connection, f"event:{first.decision_id}") is not None
+        assert connection.execute(select(func.count()).select_from(AGENT_RUNS)).scalar_one() == 1
+    second = runner.process_once(worker_id="project-worker")
+    assert second.status.value == "APPLIED"
+    with value.engine.connect() as connection:
+        assert connection.execute(select(func.count()).select_from(AGENT_RUNS)).scalar_one() == 1
+
+
+def test_dispatch_event_publication_failure_rolls_back_run_and_reservations():
+    value = stack()
+    runner = _runner(value)
+
+    def fail_publish(connection, event):
+        raise RuntimeError("outbox unavailable")
+
+    value.repository.set_event_listener(fail_publish)
+    result = runner.process_once(worker_id="project-worker")
+    assert result.status.value == "RETRY"
+    assert result.error == "outbox unavailable"
+    assert_no_dispatch(value)
+    with value.engine.connect() as connection:
+        assert value.repository.event(connection, f"event:{result.decision_id}") is None
+        assert value.repository.process(connection, "process-a").status.value == "READY"

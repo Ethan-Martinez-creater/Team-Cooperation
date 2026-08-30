@@ -287,16 +287,51 @@ class ProjectOrchestratorRunner:
                 raise GovernanceConflictError(
                     "orchestrator decision requires an idempotent effect adapter"
                 )
+            atomic_effect = getattr(self.effect, "apply_with_event", None)
+            if callable(atomic_effect):
+                atomic_effect(
+                    decision_id=decision_id, process=process, decision=decision,
+                    mutation_fence=mutation_fence,
+                    publish_dispatch=lambda connection: self._publish_effect(
+                        wakeup=wakeup, decision_id=decision_id, process=process,
+                        decision=decision, mutation_fence=mutation_fence,
+                        connection=connection,
+                    ),
+                )
+                if self._event(event_id) is None:
+                    raise GovernanceConflictError("atomic orchestration effect omitted its domain event")
+                return
             self.effect(
                 decision_id=decision_id,
                 process=process,
                 decision=decision,
                 mutation_fence=mutation_fence,
             )
+        self._publish_effect(
+            wakeup=wakeup, decision_id=decision_id, process=process,
+            decision=decision, mutation_fence=mutation_fence,
+        )
+
+    def _publish_effect(
+        self, *, wakeup, decision_id, process, decision, mutation_fence,
+        connection: Connection | None = None,
+    ) -> None:
         event_type = self._event_type(decision)
         if event_type is None:
             return
-        current = self._process(process.process_id)
+        event_id = self._effect_event_id(decision_id)
+        if connection is None:
+            service = self.process_service
+            current = self._process(process.process_id)
+            initiated_by = self._initiated_by(wakeup)
+        else:
+            repository = self.repository.using_connection(connection)
+            service = ProjectProcessService(
+                repository, guard=self.process_service.guard, clock=self.process_service.clock
+            )
+            current = repository.process(connection, process.process_id)
+            source = repository.event(connection, wakeup.source_event_id)
+            initiated_by = source.initiated_by if source else ORCHESTRATOR_PRINCIPAL_ID
         kwargs = {
             "process_id": current.process_id,
             "event_id": event_id,
@@ -304,7 +339,7 @@ class ProjectOrchestratorRunner:
             "expected_version": current.version,
             "subject_type": "work" if decision.work_id else "project",
             "subject_id": decision.work_id or current.project_id,
-            "initiated_by": self._initiated_by(wakeup),
+            "initiated_by": initiated_by,
             "executed_as": ORCHESTRATOR_PRINCIPAL_ID,
             "correlation_id": self._correlation_id(wakeup),
             "causation_id": wakeup.source_event_id,
@@ -317,12 +352,12 @@ class ProjectOrchestratorRunner:
             "mutation_fence": mutation_fence,
         }
         if decision.transition_key is not None:
-            self.process_service.apply_transition(
+            service.apply_transition(
                 **kwargs,
                 transition_key=decision.transition_key,
             )
         else:
-            self.process_service.append_fact(
+            service.append_fact(
                 **kwargs,
                 expected_event_sequence=current.last_event_sequence,
             )

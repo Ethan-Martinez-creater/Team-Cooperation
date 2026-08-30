@@ -99,16 +99,26 @@ class TeamAgentDispatcher:
         self.clock = clock or (lambda: datetime.now(UTC))
 
     def __call__(self, *, decision_id, process, decision, mutation_fence) -> None:
+        self.apply_with_event(
+            decision_id=decision_id, process=process, decision=decision,
+            mutation_fence=mutation_fence, publish_dispatch=None,
+        )
+
+    def apply_with_event(
+        self, *, decision_id, process, decision, mutation_fence, publish_dispatch,
+    ) -> None:
         if decision.action is not DeterministicAction.DISPATCH_WORK:
             raise GovernanceConflictError("Team Agent dispatcher only handles dispatch decisions")
         self.dispatch(
             process_id=process.process_id, decision_id=decision_id,
             task_id=decision.work_id, mutation_fence=mutation_fence,
+            publish_dispatch=publish_dispatch,
         )
 
     def dispatch(
         self, *, process_id: str, decision_id: str, task_id: str,
         mutation_fence: Callable[[Connection], object],
+        publish_dispatch: Callable[[Connection], object] | None = None,
     ) -> TaskDispatchResult:
         if not callable(mutation_fence):
             raise TypeError("automatic task dispatch requires a live worker mutation fence")
@@ -141,6 +151,9 @@ class TeamAgentDispatcher:
                 )
                 if run.owner_principal_id != existing["executed_as_principal_id"]:
                     raise GovernanceConflictError("persisted task run owner differs from binding")
+                if publish_dispatch is not None:
+                    publish_dispatch(connection)
+                mutation_fence(connection)
                 return self._result(existing, duplicate=True)
             if decision.status is not ProjectOrchestrationDecisionStatus.PENDING:
                 raise GovernanceConflictError("dispatch decision is not pending")
@@ -279,6 +292,8 @@ class TeamAgentDispatcher:
             )).values(status="in_progress", updated_at=self.clock())).rowcount
             if changed != 1:
                 raise GovernanceConflictError("task changed while dispatching")
+            if publish_dispatch is not None:
+                publish_dispatch(connection)
             mutation_fence(connection)
             return self._result(values)
 
