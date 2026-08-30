@@ -30,6 +30,7 @@ from coifesp_harness.connectors import CONNECTOR_METADATA  # noqa: E402
 from coifesp_harness.memory.repository import MEMORY_METADATA  # noqa: E402
 from coifesp_harness.postgres_audit import AUDIT_METADATA  # noqa: E402
 from coifesp_harness.tool_jobs import TOOL_JOB_METADATA  # noqa: E402
+from coifesp_harness.verification.repository import VERIFICATION_METADATA  # noqa: E402
 
 config = context.config
 if config.config_file_name:
@@ -54,6 +55,7 @@ target_metadata = [
     CHECKPOINT_METADATA,
     ARTIFACT_METADATA,
     CONNECTOR_METADATA,
+    VERIFICATION_METADATA,
 ]
 
 

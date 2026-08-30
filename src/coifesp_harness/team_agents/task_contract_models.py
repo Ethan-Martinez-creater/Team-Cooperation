@@ -191,6 +191,8 @@ def _verification_policy(value: object) -> dict[str, Any]:
         )
         if criterion_id in criterion_ids:
             raise ValueError("verification_policy.criteria contains duplicate criterion_id")
+        if criterion_id == "__artifact_integrity__":
+            raise ValueError("verification_policy criterion_id is reserved for artifact integrity")
         criterion_ids.add(criterion_id)
         criterion_type = _choice(
             criterion["type"], _CRITERION_TYPES, f"verification_policy.criteria[{index}].type"

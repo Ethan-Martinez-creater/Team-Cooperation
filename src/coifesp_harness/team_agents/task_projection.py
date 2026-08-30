@@ -127,6 +127,7 @@ class TeamTaskResultProjection:
                 and task["work_node_id"] == binding["work_node_id"]
             )
             result = None
+            artifact_manifests = []
             error_code = None
             if not current:
                 status, error_code = "invalid_output", "stale_or_unbound_task_contract"
@@ -149,7 +150,7 @@ class TeamTaskResultProjection:
                     result = parse_task_result(
                         assistant.content, output_contract=task["output_contract_json"]
                     )
-                    self._validate_artifacts(connection, task, result)
+                    artifact_manifests = self._validate_artifacts(connection, task, result)
                     status = "submitted"
                 except (ValueError, PolicyDenied, ResourceNotFound, IntegrityError):
                     # No raw model output or private artifact identifiers in a
@@ -169,6 +170,8 @@ class TeamTaskResultProjection:
                 "status": status,
                 "error_code": error_code,
                 "artifact_refs": result["artifact_refs"] if result else [],
+                "artifact_manifests": artifact_manifests if result else [],
+                "verification_policy": task["verification_policy_json"] if result else None,
                 "summary": result["summary"] if result else "",
                 "known_limitations": result["known_limitations"] if result else [],
             }
@@ -246,6 +249,7 @@ class TeamTaskResultProjection:
         if result["artifact_refs"] and self.artifact_content is None:
             raise RuntimeError("task artifact content reader is unavailable")
         media_types = {}
+        snapshots = []
         for resource_id in result["artifact_refs"]:
             resource = (
                 connection.execute(
@@ -288,11 +292,22 @@ class TeamTaskResultProjection:
             if size != manifest["size_bytes"] or actual.hexdigest() != resource["artifact_sha256"]:
                 raise ValueError("task output artifact integrity mismatch")
             media_types[resource_id] = manifest["media_type"]
+            snapshots.append(
+                {
+                    "resource_id": resource_id,
+                    "owner_team_id": resource["artifact_owner_team_id"],
+                    "artifact_id": resource["artifact_id"],
+                    "sha256": resource["artifact_sha256"],
+                    "media_type": manifest["media_type"],
+                    "size_bytes": manifest["size_bytes"],
+                }
+            )
         validate_task_artifact_types(
             result,
             media_types=media_types,
             output_contract=task["output_contract_json"],
         )
+        return snapshots
 
     def replay_pending(self, _run_service=None):
         with self.repository.transaction() as connection:

@@ -73,6 +73,8 @@ def test_bootstrap_wires_durable_memory_audit_and_readiness() -> None:
     assert isinstance(app.state.team_task_result_projection, TeamTaskResultProjection)
     assert app.state.team_task_result_projection.repository.engine is engine
     assert app.state.team_task_result_projection.runs is app.state.agent_run_service.repository
+    assert app.state.task_verification_service.repository.engine is engine
+    assert app.state.task_verification_service.notifier is app.state.notification_service
     assert app.state.database_readiness() is True
     assert probe_calls == [True]
 

@@ -3407,6 +3407,10 @@ class TeamCollaborationService:
             if review_note is not None:
                 values["review_note"] = review_note
             if target is TeamTaskStatus.VERIFIED:
+                if task["source_contract_version"] is not None:
+                    raise GovernanceConflictError(
+                        "structured tasks require verification evidence; use task verification"
+                    )
                 values["completed_at"] = now
             changed = connection.execute(
                 update(TEAM_TASKS).where(

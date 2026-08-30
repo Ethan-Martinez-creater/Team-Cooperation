@@ -53,6 +53,7 @@ from .middleware import BoundedBodyMiddleware, RequestContextMiddleware
 from .models import HealthResponse, IdentityResponse
 from .planning_routes import build_planning_router
 from .product_routes import build_product_router
+from .verification_routes import build_task_verification_router
 from .workspace_routes import build_workspace_router
 
 logger = logging.getLogger("coifesp.control_plane")
@@ -67,6 +68,7 @@ def create_app(
     task_execution_service=None,
     approval_service=None,
     agent_run_service=None,
+    task_verification_service=None,
     capability_service=None,
     memory_lifecycle_service=None,
     semantic_checkpoint_service=None,
@@ -115,7 +117,7 @@ def create_app(
             agent_run_service = getattr(app.state, "agent_run_service", None)
             if agent_run_service is not None:
                 for name in ("turn_projection", "project_planner_projection", "team_task_run_accounting",
-                             "team_task_result_projection"):
+                             "team_task_result_projection", "task_verification_service"):
                     projection = getattr(app.state, name, None)
                     if projection is not None:
                         await run_in_threadpool(
@@ -258,6 +260,11 @@ def create_app(
         app.include_router(build_code_workspace_router(authenticator=authenticator))
     if document_workspace_service is not None:
         app.include_router(build_document_workspace_router(authenticator=authenticator))
+    app.state.task_verification_service = task_verification_service
+    if task_verification_service is not None:
+        app.include_router(build_task_verification_router(
+            authenticator=authenticator, service=task_verification_service,
+        ))
     if agent_capabilities is not None:
         app.include_router(build_agent_capability_router(
             authenticator=authenticator,
