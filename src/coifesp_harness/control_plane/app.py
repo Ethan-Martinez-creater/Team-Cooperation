@@ -146,7 +146,7 @@ def create_app(
                         result = callback()
                         if inspect.isawaitable(result):
                             await result
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001 - release remaining independent resources
                         logger.error(
                             "control-plane shutdown callback failed error_type=%s",
                             type(exc).__name__,
@@ -222,7 +222,7 @@ def create_app(
             return HealthResponse(status="ready")
         try:
             is_ready = await run_in_threadpool(readiness_probe)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - health probe must return unavailable, not expose errors
             logger.warning(
                 "control-plane readiness check failed error_type=%s",
                 type(exc).__name__,
@@ -236,7 +236,7 @@ def create_app(
 
     @app.get("/v1/auth/me", response_model=IdentityResponse)
     async def current_identity(
-        authenticated: Authenticated = Depends(authenticator),
+        authenticated: Authenticated = Depends(authenticator),  # noqa: B008 - FastAPI dependency declaration
     ) -> IdentityResponse:
         identity = authenticated.identity
         principal = identity.principal
