@@ -515,6 +515,10 @@ PROJECT_AGENT_RUNS = Table(
     Column("capacity_reservation_id", String(128), nullable=True),
     Column("project_budget_reservation_id", String(128), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("task_contract_version", Integer, nullable=True),
+    Column("task_result_status", String(32), nullable=True),
+    Column("task_result_json", JSON(none_as_null=True), nullable=True),
+    Column("task_result_at", DateTime(timezone=True), nullable=True),
     CheckConstraint("mode IN ('analysis','collaboration_actions','delivery_review')", name="mode"),
     CheckConstraint(
         "run_kind IN ('conversation','planning','task_execution','verification',"
@@ -541,6 +545,15 @@ PROJECT_AGENT_RUNS = Table(
         "initiated_by_principal_id = 'service:project-orchestrator' AND "
         "executed_as_principal_id = 'team-agent:' || team_id)",
         name="ck_product_project_agent_runs_task_execution",
+    ),
+    CheckConstraint(
+        "(task_contract_version IS NULL OR "
+        "(run_kind = 'task_execution' AND task_contract_version >= 1)) AND "
+        "((task_result_status IS NULL AND task_result_json IS NULL AND task_result_at IS NULL) OR "
+        "(task_result_status IS NOT NULL AND run_kind = 'task_execution' AND "
+        "task_result_status IN ('submitted','invalid_output','failed','cancelled') AND "
+        "task_result_json IS NOT NULL AND task_result_at IS NOT NULL))",
+        name="ck_product_project_agent_runs_task_result",
     ),
     UniqueConstraint("run_id", name="uq_product_project_agent_run"),
     UniqueConstraint(
