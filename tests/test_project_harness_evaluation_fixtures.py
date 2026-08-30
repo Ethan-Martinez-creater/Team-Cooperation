@@ -212,9 +212,9 @@ def _validate_scenario(scenario: dict, contract: dict, where: str):
         if request.get("status") is not None and request["status"] not in contract["input_request_status"]:
             _fail(f"{where}: unknown input request status {request['status']!r}")
     delivery = initial.get("delivery")
-    if isinstance(delivery, dict) and delivery.get("status") is not None:
-        if delivery["status"] not in contract["delivery_status"]:
-            _fail(f"{where}: unknown delivery status {delivery['status']!r}")
+    if (isinstance(delivery, dict) and delivery.get("status") is not None
+            and delivery["status"] not in contract["delivery_status"]):
+        _fail(f"{where}: unknown delivery status {delivery['status']!r}")
 
     # identity rules on runs present in the initial state
     _validate_runs(initial.get("runs", []) or [], contract, where)
@@ -252,6 +252,9 @@ def _validate_scenario(scenario: dict, contract: dict, where: str):
                 "project.verification.completed",
                 "team_task.verified",
                 "team_task.changes_requested",
+                "task_verification.human_review.opened",
+                "task_verification.human_review.decided",
+                "task_verification.human_review.closed",
                 "project.delivery.accepted",
                 "project.delivery.rejected",
                 "project.completion.evaluated",
@@ -268,7 +271,6 @@ def _validate_scenario(scenario: dict, contract: dict, where: str):
     steps = scenario["expected_steps"]
     if len(steps) != len(stimuli):
         _fail(f"{where}: expected {len(stimuli)} steps for {len(stimuli)} stimuli, got {len(steps)}")
-    main_chain_keys = {entry["transition_key"] for entry in contract["main_transition"]}
     previous_triple = {k: process[k] for k in ("phase", "status", "wait_reason")}
     for step, stimulus in zip(steps, stimuli):
         sid = stimulus["source_event_id"]
@@ -376,11 +378,10 @@ def _validate_runs(runs: list, contract: dict, where: str):
                 _fail(
                     f"{where} run {ref}: planner-family runs must execute as {planner_identity!r}, got {executed_as!r}"
                 )
-        elif kind == "task_execution":
-            if not executed_as.startswith(task_prefix):
-                _fail(
-                    f"{where} run {ref}: task runs must execute as {task_prefix}<team-id>, got {executed_as!r}"
-                )
+        elif kind == "task_execution" and not executed_as.startswith(task_prefix):
+            _fail(
+                f"{where} run {ref}: task runs must execute as {task_prefix}<team-id>, got {executed_as!r}"
+            )
         if executed_as.startswith("human:"):
             _fail(f"{where} run {ref}: a real user must never be the execution principal")
 
@@ -415,7 +416,7 @@ def validate_fixture(fixture: dict, contract: dict) -> None:
 
 
 def test_all_fixtures_parse_and_validate(fixtures, contract):
-    for fixture_id, fixture in fixtures.items():
+    for fixture in fixtures.values():
         validate_fixture(fixture, contract)
 
 
@@ -441,7 +442,7 @@ def test_no_banned_content(fixtures):
 
 
 def test_no_uuid_or_absolute_paths(fixtures):
-    uuid_like = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
+    uuid_like = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
     for fixture_id, fixture in fixtures.items():
         raw = json.dumps(fixture, ensure_ascii=False)
         assert uuid_like.search(raw) is None, f"{fixture_id}: UUID values are not allowed"
@@ -486,9 +487,12 @@ def test_rejects_unknown_event_type(fixtures, contract):
         validate_fixture(fixture, contract)
 
 
-def test_rejects_injected_harness_result(fixtures, contract):
+@pytest.mark.parametrize("event_type", ["project.work.dispatched",
+    "task_verification.human_review.opened", "task_verification.human_review.decided",
+    "task_verification.human_review.closed"])
+def test_rejects_injected_harness_result(fixtures, contract, event_type):
     fixture = _single_scenario_fixture(fixtures, "simple_project")
-    _first_scenario(fixture)["stimuli"][0]["event_type"] = "project.work.dispatched"
+    _first_scenario(fixture)["stimuli"][0]["event_type"] = event_type
     with pytest.raises(FixtureValidationError):
         validate_fixture(fixture, contract)
 

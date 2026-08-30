@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 ADR_DIR = ROOT / "docs" / "adr"
 CONTRACT_PATH = ADR_DIR / "project-harness-contract-v1.json"
@@ -18,6 +17,7 @@ ADR_FILES = {
     "0009-human-gates-and-input.md",
     "0010-capability-directory-integration.md",
     "0011-integration-and-delivery.md",
+    "0012-task-verification-human-evidence.md",
 }
 
 
@@ -95,3 +95,21 @@ def test_policy_planner_identity_and_fixture_vocabularies_are_unique():
     assert contract["execution_identity"]["task_executed_as_prefix"] == (
         "team-agent:"
     )
+
+
+def test_task_human_evidence_facts_are_canonical_without_global_gate_transition():
+    from coifesp_harness.project_process.event_catalog import (
+        DOMAIN_FACTS,
+        validate_event_contract,
+    )
+
+    for suffix in ("opened", "decided", "closed"):
+        event = "task_verification.human_review." + suffix
+        assert event in DOMAIN_FACTS and event in _contract()["domain_fact"]
+        validate_event_contract(event_type=event, transition_key=None, schema_version="v1")
+        try:
+            validate_event_contract(event_type=event, transition_key="human_approval.opened", schema_version="v1")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("task evidence must not force a global approval wait")

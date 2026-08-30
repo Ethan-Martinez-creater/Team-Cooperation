@@ -44,6 +44,10 @@ delivery readiness and completion are outputs under observation; the fixture
 must not inject them to make its own assertion pass. Fault injection is control
 input, never a domain event.
 
+The ADR-0012 `task_verification.human_review.opened/decided/closed` facts are also
+server-produced observations, never injected evidence. Test human commands via
+the authorized decision operation rather than constructing accepted records.
+
 ## Expected steps
 
 There is exactly one expected step for every stimulus, in order. A step records:

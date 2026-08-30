@@ -36,6 +36,7 @@
 | 0009 | Human Gates and Input | 持久化、可恢复、可审计的人类等待点 |
 | 0010 | Capability Directory Integration | 复用唯一能力/容量事实源 |
 | 0011 | Integration and Delivery | DeliveryManifest 接受后才允许完成 |
+| 0012 | Task Verification Human Evidence | 任务级人工证据与项目级 Gate 分离；所有必需检查组合通过 |
 
 ## 规范性附录
 

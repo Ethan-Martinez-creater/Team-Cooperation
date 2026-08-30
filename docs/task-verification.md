@@ -8,7 +8,8 @@
 - `artifact.json`：在完整性通过后验证 JSON；解析预算不足时保持 PENDING，不猜测通过。
 - `sandbox.profile:<profile_id>`：将必需检查派发给持久 Tool Worker，执行管理员配置的固定程序。
 - `agent_review`：必需工具检查通过后启动独立、受预算约束的审核 Run，读取固定共享制品，产生结构化审核证据。
-- 尚未接入的工具和人工审核保持 PENDING，不能以空实现代替实际检查。
+- `human_review`：必需自动检查通过后，等待任务发起团队的真实用户确认固定证据；不能由执行 Agent 自行通过。
+- 尚未接入的工具保持 PENDING，不能以空实现代替实际检查。
 
 例如任务的 `verification_policy`：
 
@@ -60,7 +61,7 @@ POST /v1/projects/{project_id}/tasks/{task_id}:retry-verification-tools
 
 ## 范围
 
-这条链路是任务级工具与 Agent 验证，不等于完整项目验收。Human Review、组合审批、自动返工调度、IntegrationRun、DeliveryManifest 和项目完成判定仍须分别接通。单元测试中的模拟 OCI/模型结果也不代表真实 Docker、PostgreSQL 或 LLM 环境验收。
+这条链路已包含任务级工具、Agent、Human 与必需检查组合验证，不等于完整项目验收。自动返工调度、IntegrationRun、DeliveryManifest 和项目完成判定仍须分别接通。人工审核已有服务/API，原生前端审核面板属于后续 UI 阶段；没有声称浏览器已经可完成本轮新增操作。单元测试中的模拟 OCI/模型结果也不代表真实 Docker、PostgreSQL 或 LLM 环境验收。
 
 ## 独立 Agent Review
 
@@ -103,3 +104,36 @@ POST /v1/projects/{project_id}/tasks/{task_id}:retry-agent-review
 该接口不接收人工 PASS/FAIL。仅 UNAVAILABLE 结果可新增尝试，QUEUED 不重复派发，业务 FAIL 不被覆盖；每个提交的每个 criterion 最多 3 次独立审核尝试，旧记录保留。PENDING 预算/输入问题修复后可重新调用 verify。当前预算不足尚未自动打开 Human Gate，审核失败后的自动 Replan 也属于后续编排接线。
 
 提交失效或制品撤回时，未执行的审核 Run 会在同一事务取消、置 STALE 并归还预算；已持有执行租约的 Run 不会被提前清零，待真实终态或租约恢复后处理，避免丢失实际用量。即使先收到审核终态、后检测父验证失效，也会核对当前契约和资源，不把旧审核记为当前 PASS。
+
+## Human Review 与 Composite
+
+例如把三个必需检查合并进已接受的任务契约：
+
+```json
+{"criteria": [
+  {"criterion_id": "sha", "type": "tool_check", "tool": "artifact.sha256", "required": true},
+  {"criterion_id": "semantic", "type": "agent_review", "required": true},
+  {"criterion_id": "business", "type": "human_review", "required": true}
+]}
+```
+
+Composite 采用现有 criteria 数组的所有必需项 AND 聚合，不另造嵌套策略或多数票。工具和 Agent 必需检查全部 PASS 后，才创建持久人工审核项。人工 ACCEPT 仅通过对应人审项；其它必需项 FAIL/PENDING 仍不能使任务 verified。多个必需人审 criterion 必须逐项接受；并不隐含必须由不同用户签署。可选人审当前不创建请求，明确显示 `optional_human_review_not_requested`。
+
+审核项固定绑定提交 Run、契约版本、制品摘要及 criterion。只有任务发起团队内仍启用且注册状态 active 的用户可 ACCEPT/REJECT；执行团队可查看反馈，但不能自验收，服务身份禁止调用决定接口。审核理由会对任务双方可见，请勿填写仅团队内部可知的信息。
+
+```text
+GET  /v1/projects/{project_id}/tasks/{task_id}/human-reviews
+POST /v1/projects/{project_id}/tasks/{task_id}/human-reviews/{review_id}:decide
+```
+
+GET 返回审核项、固定制品引用/摘要、自动检查证据及当前版本。POST 恰好包含：
+
+```json
+{"decision": "ACCEPT", "reason": "交付物符合已约定的验收要求", "idempotency_key": "accept-business-1", "expected_version": 1}
+```
+
+decision 仅允许 ACCEPT/REJECT；reason 必填且最多 2,000 字符；idempotency_key 以字母或数字开头，允许字母数字、点、下划线、冒号、连字符，最多 128 字符；expected_version 为正整数。拒绝传入 actor、team、passed、status 等额外字段。精确重试返回原结果；同键不同内容或第二次决定冲突。
+
+决定、验证聚合、任务状态和相应事件/outbox 同事务落库。人审拒绝使任务 changes_requested，并将其它尚未决定的人审项置 STALE；契约变更、任务撤回或共享资源失效后，旧请求不能批准新提交，恢复验证时会关闭旧请求。重启不会丢失或重建重复请求，等待期间不占用 Agent Run。
+
+本轮任务级人审提供 Verification 证据，不改变全局 ProjectProcess 三元组；预算和最终交付仍使用原来的 ProjectGate。新增 opened/decided/closed 项目事实通过既有事务监听器唤醒编排器，事件只携带绑定 ID、状态、版本和摘要，不传播人工理由或原始正文。详见 ADR-0012。

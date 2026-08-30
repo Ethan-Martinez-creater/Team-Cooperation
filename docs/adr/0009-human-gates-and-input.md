@@ -4,6 +4,10 @@
 
 Accepted. Main-thread review completed on 2026-08-28.
 
+Task-scoped Verification evidence is clarified by ADR-0012 (2026-08-31).
+The waits and Gate requirements below govern project-wide input/authorization;
+task subjective acceptance cannot authorize project advancement by itself.
+
 ## Context
 
 Projects may wait hours or days for information or approval. A wait-reason

@@ -26,6 +26,7 @@ from ..project_process.repository import PROJECT_PROCESSES
 from ..project_process.service import ProjectProcessService
 from ..team_agents.identity import ORCHESTRATOR_PRINCIPAL_ID
 from .checks import evaluate_checks
+from .human_reviews import HumanReviewChecks
 from .repository import TASK_VERIFICATIONS
 from .subjects import submission_is_current
 
@@ -71,13 +72,25 @@ def _time(value):
 
 class TaskVerificationService:
     def __init__(self, *, repository, artifact_content=None, notifier=None, clock=None,
-                 tool_checks=None, review_checks=None):
+                 tool_checks=None, review_checks=None, human_checks=None):
         self.repository = repository
         self.artifact_content = artifact_content
         self.notifier = notifier
         self.tool_checks = tool_checks
         self.review_checks = review_checks
         self.clock = clock or (lambda: datetime.now(UTC))
+        self.human_checks = human_checks or HumanReviewChecks(repository=repository, clock=self.clock)
+
+    def using_connection(self, connection):
+        return TaskVerificationService(repository=self.repository.using_connection(connection),
+            artifact_content=self.artifact_content, notifier=self.notifier, clock=self.clock,
+            tool_checks=self.tool_checks, review_checks=self.review_checks, human_checks=self.human_checks)
+
+    def human_reviews(self, **kwargs):
+        return self.human_checks.list_reviews(verifier=self, **kwargs)
+
+    def decide_human_review(self, **kwargs):
+        return self.human_checks.decide(verifier=self, **kwargs)
 
     @staticmethod
     def _authorize(connection, task, actor_id):
@@ -247,6 +260,10 @@ class TaskVerificationService:
                         subject_digest=subject_digest, binding=binding, task=task,
                         artifacts=artifacts, retry_reviews=retry_reviews,
                     )
+                outcome = self.human_checks.evaluate(
+                    connection=connection, outcome=outcome, verification_id=verification_id,
+                    subject_digest=subject_digest, binding=binding, task=task,
+                )
                 status = outcome["status"]
             now = self.clock()
             values = {
@@ -288,6 +305,8 @@ class TaskVerificationService:
                 connection.execute(TASK_VERIFICATIONS.insert().values(**values))
             if status in {"STALE", "FAIL"} and self.review_checks is not None:
                 self.review_checks.close_stale(connection, verification_id)
+            if status in {"STALE", "FAIL"}:
+                self.human_checks.close_stale(connection, verification_id)
             if current and status in {"PASS", "FAIL"}:
                 task_status = "verified" if status == "PASS" else "changes_requested"
                 changed = connection.execute(

@@ -17,6 +17,11 @@ The terminal object status, resolver identity, object version and stable
 resolution idempotency key are committed with the fact. Resolving one object
 never assigns the next ProjectProcess phase directly.
 
+ADR-0012 additionally defines task-verification evidence facts
+`task_verification.human_review.opened`, `.decided`, and `.closed` with schema
+`v1`. They do not use the project-wide Human Gate selectors below; all are
+triple-preserving facts committed with their evidence records.
+
 ## Frozen non-main-chain selectors
 
 | Domain fact | Transition selector | Target rule |
