@@ -31,6 +31,8 @@ from .models import AgentRunLease
 
 CHECKPOINT_SCHEMA = "coifesp.agent-run-checkpoint.v1"
 _MESSAGE_ROLES = frozenset({"system", "user", "assistant", "tool"})
+_ORCHESTRATOR_PRINCIPAL_ID = "service:project-orchestrator"
+_TEAM_AGENT_PREFIX = "team-agent:"
 
 
 class AgentRunCheckpointCodec:
@@ -81,11 +83,35 @@ class AgentRunCheckpointCodec:
         lease: AgentRunLease,
         principal: Principal,
         control_source: RuntimeControlSource | None = None,
+        verified: bool = False,
     ) -> AgentRunRequest:
+        if not isinstance(verified, bool):
+            raise IntegrityError("service verification flag is invalid")
+        principal_id = principal.principal_id
+        canonical_service_id = isinstance(principal_id, str) and (
+            principal_id == _ORCHESTRATOR_PRINCIPAL_ID
+            or principal_id.startswith(_TEAM_AGENT_PREFIX)
+        )
+        service_owner_verified = (
+            principal.is_service is True
+            and verified
+            and (
+                principal_id == _ORCHESTRATOR_PRINCIPAL_ID
+                or (
+                    isinstance(principal_id, str)
+                    and principal_id.startswith(_TEAM_AGENT_PREFIX)
+                    and principal_id[
+                        len(_TEAM_AGENT_PREFIX) :
+                    ]
+                    == principal.tenant_id
+                )
+            )
+        )
         if (
             principal.tenant_id != lease.run.tenant_id
             or principal.principal_id != lease.run.owner_principal_id
-            or principal.is_service
+            or (canonical_service_id and not principal.is_service)
+            or (principal.is_service is True and not service_owner_verified)
         ):
             raise IntegrityError("resolved run principal does not match the durable owner")
         value = self.decode(lease.checkpoint)

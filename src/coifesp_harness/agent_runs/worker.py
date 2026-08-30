@@ -28,6 +28,15 @@ class PrincipalResolver(Protocol):
     async def resolve(self, *, tenant_id: str, principal_id: str) -> Principal:
         """Resolve current authorization attributes; stale checkpoint claims are forbidden."""
 
+    async def resolve_for_run(
+        self,
+        *,
+        tenant_id: str,
+        principal_id: str,
+        run_id: str,
+    ) -> Principal:
+        """Resolve a principal against the run's authoritative delegation binding."""
+
 
 class WorkerIdentityProvider(Protocol):
     async def resolve(self) -> Principal:
@@ -188,10 +197,20 @@ class DurableAgentWorker:
                 run_id=run_id,
                 lease_token=lease.lease_token,
             )
-            principal = await self.principal_resolver.resolve(
-                tenant_id=lease.run.tenant_id,
-                principal_id=lease.run.owner_principal_id,
-            )
+            resolve_for_run = getattr(self.principal_resolver, "resolve_for_run", None)
+            if callable(resolve_for_run):
+                principal = await resolve_for_run(
+                    tenant_id=lease.run.tenant_id,
+                    principal_id=lease.run.owner_principal_id,
+                    run_id=run_id,
+                )
+                verified = True
+            else:
+                principal = await self.principal_resolver.resolve(
+                    tenant_id=lease.run.tenant_id,
+                    principal_id=lease.run.owner_principal_id,
+                )
+                verified = False
             control_source = DurableAgentControlSource(
                 service=self.service,
                 worker=worker,
@@ -201,6 +220,7 @@ class DurableAgentWorker:
                 lease=lease,
                 principal=principal,
                 control_source=control_source,
+                verified=verified,
             )
             result = await self._run_with_heartbeat(
                 worker=worker,
