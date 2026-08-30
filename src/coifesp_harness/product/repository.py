@@ -269,6 +269,18 @@ TEAM_TASKS = Table(
     Column("due_changed_at", DateTime(timezone=True), nullable=True),
     Column("due_changed_by", String(128), ForeignKey("product_accounts.account_id"), nullable=True),
     Column("completed_at", DateTime(timezone=True), nullable=True),
+    # Structured execution-contract fields are nullable so revision 53 can
+    # preserve legacy TeamTasks without inferring a contract for them.
+    Column("process_id", String(128), nullable=True),
+    Column("work_node_id", String(128), nullable=True),
+    Column("requested_capability", JSON(none_as_null=True), nullable=True),
+    Column("input_manifest_json", JSON(none_as_null=True), nullable=True),
+    Column("output_contract_json", JSON(none_as_null=True), nullable=True),
+    Column("verification_policy_json", JSON(none_as_null=True), nullable=True),
+    Column("source_decision_id", String(128), nullable=True),
+    Column("source_contract_version", Integer, nullable=True),
+    Column("autonomy_requirement", String(32), nullable=True),
+    Column("accepted_contract_version", Integer, nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     CheckConstraint("source_team_id <> target_team_id", name="different_task_teams"),
@@ -278,6 +290,23 @@ TEAM_TASKS = Table(
     ),
     CheckConstraint("priority IN ('low','normal','high','urgent')", name="priority"),
     CheckConstraint("schedule_version >= 1", name="positive_schedule_version"),
+    CheckConstraint(
+        "(source_contract_version IS NULL AND "
+        "process_id IS NULL AND work_node_id IS NULL AND "
+        "requested_capability IS NULL AND input_manifest_json IS NULL AND "
+        "output_contract_json IS NULL AND verification_policy_json IS NULL AND "
+        "source_decision_id IS NULL AND autonomy_requirement IS NULL AND "
+        "accepted_contract_version IS NULL) OR "
+        "(source_contract_version IS NOT NULL AND source_contract_version >= 1 AND "
+        "process_id IS NOT NULL AND work_node_id IS NOT NULL AND "
+        "requested_capability IS NOT NULL AND input_manifest_json IS NOT NULL AND "
+        "output_contract_json IS NOT NULL AND verification_policy_json IS NOT NULL AND "
+        "autonomy_requirement IS NOT NULL AND "
+        "(accepted_contract_version IS NULL OR "
+        "(accepted_contract_version = source_contract_version AND "
+        "accepted_contract_version >= 1)))",
+        name="ck_product_team_tasks_contract",
+    ),
 )
 Index("ix_product_tasks_project_status", TEAM_TASKS.c.project_id, TEAM_TASKS.c.status)
 Index(
