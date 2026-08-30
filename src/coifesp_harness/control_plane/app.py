@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from collections.abc import Callable, Sequence
@@ -107,6 +108,8 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        orchestration_stop = asyncio.Event()
+        orchestration_task = None
         try:
             if readiness_probe is not None:
                 ready = await run_in_threadpool(readiness_probe)
@@ -123,20 +126,33 @@ def create_app(
                         await run_in_threadpool(
                             projection.replay_pending, agent_run_service
                         )
+            orchestration_worker = getattr(app.state, "project_orchestrator_worker", None)
+            if orchestration_worker is not None:
+                orchestration_task = asyncio.create_task(
+                    orchestration_worker.run(stop=orchestration_stop),
+                    name="project-orchestrator",
+                )
             yield
         finally:
-            for callback in reversed(tuple(shutdown_callbacks)):
-                try:
-                    result = callback()
-                    if inspect.isawaitable(result):
-                        await result
-                except Exception as exc:
-                    logger.error(
-                        "control-plane shutdown callback failed error_type=%s",
-                        type(exc).__name__,
-                    )
-            if verifier is None:
-                await identity_verifier.aclose()
+            orchestration_stop.set()
+            try:
+                if orchestration_task is not None:
+                    await orchestration_task
+            finally:
+                # Do not dispose the engine until the consumer has drained its
+                # current transaction, including cancellation during shutdown.
+                for callback in reversed(tuple(shutdown_callbacks)):
+                    try:
+                        result = callback()
+                        if inspect.isawaitable(result):
+                            await result
+                    except Exception as exc:
+                        logger.error(
+                            "control-plane shutdown callback failed error_type=%s",
+                            type(exc).__name__,
+                        )
+                if verifier is None:
+                    await identity_verifier.aclose()
 
     expose_docs = settings.environment is not Environment.PRODUCTION
     app = FastAPI(
