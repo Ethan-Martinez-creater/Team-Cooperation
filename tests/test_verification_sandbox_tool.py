@@ -434,3 +434,32 @@ def test_runtime_unavailable_is_retryable(case, monkeypatch):
     assert exc.value.error_code == "verification_runtime_unavailable"
     assert len(case.content.calls) == 1
     assert len(case.sandbox.requests) == 1
+
+
+@pytest.mark.parametrize("count,size", [(129, 1), (1, 64 * 1024 * 1024 + 1)])
+def test_snapshot_limits_refuse_before_reading_or_execution(case, monkeypatch, count, size):
+    artifacts = [{**case.artifacts[0], "resource_id": f"resource-{index}", "size_bytes": size}
+                 for index in range(count)]
+    with case.value.engine.begin() as connection:
+        connection.execute(TASK_VERIFICATIONS.update().values(artifacts_json=artifacts))
+    _set_context(monkeypatch, case)
+    with pytest.raises(PermanentToolError, match="verification_snapshot_denied"):
+        _run(case.tool, case.arguments)
+    assert not case.content.calls and not case.sandbox.requests
+
+
+@pytest.mark.parametrize("wrong_id", [True, False])
+def test_inconsistent_oci_result_cannot_become_pass(case, monkeypatch, wrong_id):
+    async def inconsistent(request):
+        case.sandbox.requests.append(request)
+        return SandboxResult(
+            "another-job" if wrong_id else request.execution_id,
+            0, b"", b"", None if wrong_id else SandboxErrorCode.EXECUTION_FAILED,
+        )
+
+    monkeypatch.setattr(case.sandbox, "execute", inconsistent)
+    _set_context(monkeypatch, case)
+    with pytest.raises(PermanentToolError, match="verification_sandbox_result_invalid"):
+        _run(case.tool, case.arguments)
+    assert len(case.content.calls) == 1
+    assert len(case.sandbox.requests) == 1

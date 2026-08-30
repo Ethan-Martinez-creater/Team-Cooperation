@@ -1,5 +1,9 @@
 # OS 级 Sandbox
 
+任务提交后的固定程序验证使用内部 `verification.run_profile`，不同于模型可调用的
+`code.run_profile`。配置、输入快照、结果判定和恢复入口见[任务交付物验证](task-verification.md)。
+两者复用现有 OCI 执行边界；工具清单超时随实际 profile 计算，不再固定为 90 秒。
+
 ## 安全边界
 
 编程工具不得在 Tool Worker 宿主进程中直接运行命令。生产实现使用 Docker 或 Podman 创建一次性 OCI
