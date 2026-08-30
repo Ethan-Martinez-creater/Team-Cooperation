@@ -16,6 +16,7 @@ from coifesp_harness.agent_runs import (
 )
 from coifesp_harness.audit import InMemoryAuditSink
 from coifesp_harness.errors import IntegrityError, PolicyDenied
+from coifesp_harness.idempotency import InMemoryIdempotencyStore
 from coifesp_harness.product import (
     ProductAccountService,
     ProjectDirectoryService,
@@ -43,7 +44,6 @@ from coifesp_harness.runtime import (
 from coifesp_harness.security import PolicyEngine, Principal
 from coifesp_harness.team_agents import TeamAgentPrincipalResolver
 from coifesp_harness.tools import ToolExecutor, ToolRegistry
-from coifesp_harness.idempotency import InMemoryIdempotencyStore
 
 
 class _HumanResolver:
