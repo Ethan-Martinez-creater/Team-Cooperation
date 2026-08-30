@@ -44,6 +44,7 @@ from .tool_catalog import (
 )
 from .tool_jobs import SQLAlchemyToolJobRepository, ToolBatchCoordinator, ToolJobKeyring
 from .tools import ToolExecutor
+from .verification.worker_runtime import configure_worker_reviews
 
 logger = logging.getLogger("coifesp.worker")
 
@@ -169,6 +170,10 @@ async def build_worker_runtime(settings: Settings) -> WorkerRuntime:
             agent_runs=run_repository,
             tool_jobs=tool_repository,
         )
+        review_reconciler = configure_worker_reviews(
+            settings=settings, engine=engine, service=service,
+            jobs=tool_repository, audit=audit,
+        )
         # The Agent Worker exposes the same manifests the Tool Worker executes.
         # Declarations carry no handlers: durable tools dispatch to Tool Jobs,
         # and run-scoped skill handlers are attached per run by the loop.
@@ -252,6 +257,7 @@ async def build_worker_runtime(settings: Settings) -> WorkerRuntime:
                 worker=worker,
                 identity_provider=identity,
                 idle_poll_seconds=settings.worker_idle_poll_seconds,
+                terminal_reconciler=review_reconciler,
             ),
             worker_tokens=worker_tokens,
             directory_tokens=directory_tokens,
@@ -303,7 +309,7 @@ def main() -> int:
         asyncio.run(run_worker(settings))
     except KeyboardInterrupt:
         return 0
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - process entry point
         logging.getLogger("coifesp.worker").error(
             "durable agent worker failed error_type=%s", type(exc).__name__
         )

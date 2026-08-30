@@ -75,7 +75,7 @@ from ..work_graph import ProjectWorkGraphService, SQLAlchemyWorkGraphRepository
 from .app import create_app
 from .session_lifecycle import SessionLifecycleService
 
-SCHEMA_REVISION = "20260830_55"
+SCHEMA_REVISION = "20260830_56"
 REQUIRED_RLS_TABLES = (
     "audit_events",
     "audit_heads",
@@ -475,6 +475,7 @@ def build_application(
         from ..team_agents.accounting import TeamTaskRunAccounting
         from ..team_agents.task_projection import TeamTaskResultProjection
         from ..tool_jobs import SQLAlchemyToolJobRepository, ToolJobKeyring
+        from ..verification.agent_reviews import AgentReviewChecks
         from ..verification.service import TaskVerificationService
         from ..verification.tool_checks import DurableVerificationChecks
 
@@ -495,6 +496,10 @@ def build_application(
         task_verification_service = TaskVerificationService(
             repository=project_process_repository, artifact_content=artifact_content_service,
             notifier=notification_service,
+            review_checks=AgentReviewChecks(
+                repository=project_process_repository, runs=agent_run_service.repository,
+                artifact_content=artifact_content_service,
+            ),
             tool_checks=DurableVerificationChecks(
                 jobs=SQLAlchemyToolJobRepository(
                     engine=runtime_engine, keyring=ToolJobKeyring.from_settings(settings),

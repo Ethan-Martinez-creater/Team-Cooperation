@@ -4,9 +4,10 @@ import json
 import re
 import secrets
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Any, Iterator
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -40,15 +41,15 @@ from ..audit import AuditEvent
 from ..errors import HarnessError, IdempotencyConflict, ResourceNotFound
 from ..postgres_audit import SQLAlchemyAuditLog
 from ..security.redaction import SecretRedactor
-from .crypto import AgentCheckpointKeyring
 from .control_crypto import AgentControlKeyring
 from .control_models import AgentControlCommand, AgentControlStatus, AgentControlType
+from .crypto import AgentCheckpointKeyring
 from .models import (
+    TERMINAL_RUN_STATES,
     AgentRunLease,
     DurableAgentEvent,
     DurableAgentRun,
     DurableRunStatus,
-    TERMINAL_RUN_STATES,
 )
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -240,7 +241,7 @@ class SQLAlchemyAgentRunRepository:
     def create_schema(self) -> None:
         AGENT_RUN_METADATA.create_all(self.engine)
 
-    def using_connection(self, connection: Connection) -> "SQLAlchemyAgentRunRepository":
+    def using_connection(self, connection: Connection) -> SQLAlchemyAgentRunRepository:
         if connection.engine is not self.engine:
             raise AgentRunPersistenceError("bound connection belongs to a different engine")
         return SQLAlchemyAgentRunRepository(
@@ -856,6 +857,31 @@ class SQLAlchemyAgentRunRepository:
                     "error_code": error_code,
                 },
             )
+            return self._load(connection, tenant_id, run_id)
+
+    def cancel_queued(self, *, tenant_id: str, run_id: str, owner_principal_id: str) -> DurableAgentRun:
+        """Owner-bound cancellation before execution; never revoke an active lease.
+
+        Internal Harness lifecycle operation. Leased/running work must first
+        finish or expire so its actual usage is not discarded by cancellation.
+        """
+        now = datetime.now(UTC)
+        with self._transaction(tenant_id) as connection:
+            row = self._row(connection, tenant_id, run_id, lock=True)
+            if row["owner_principal_id"] != owner_principal_id:
+                raise AgentRunPersistenceError("queued cancellation owner mismatch")
+            if row["status"] != DurableRunStatus.QUEUED.value:
+                return self._record(row)
+            self._reencrypt_status(connection, row, target=DurableRunStatus.CANCELLED,
+                                   now=now, clear_lease=True,
+                                   extra_values={"next_attempt_at": None, "completed_at": now,
+                                                 "last_error_code": "submission_changed"})
+            self._reject_pending_controls(connection, tenant_id=tenant_id, run_id=run_id,
+                                          now=now, rejection_code="run_cancelled")
+            self._event(connection, tenant_id=tenant_id, run_id=run_id,
+                        actor_id=owner_principal_id, event_type="agent_run.cancelled",
+                        data={"status": "cancelled", "version": int(row["version"]) + 1,
+                              "error_code": "submission_changed"})
             return self._load(connection, tenant_id, run_id)
 
     def get(self, *, tenant_id: str, run_id: str) -> DurableAgentRun:

@@ -109,6 +109,8 @@ class TeamAgentPrincipalResolver:
         if not isinstance(run_id, str) or not _ID.fullmatch(run_id):
             raise IntegrityError("delegated run identity is invalid")
         if principal_id == ORCHESTRATOR_PRINCIPAL_ID:
+            if run_id.startswith("run-review-"):
+                return await self._resolve_review_run(tenant_id=tenant_id, run_id=run_id)
             return await self._resolve_planner_run(
                 tenant_id=tenant_id,
                 principal_id=principal_id,
@@ -121,6 +123,32 @@ class TeamAgentPrincipalResolver:
                 run_id=run_id,
             )
         return await self.resolve(tenant_id=tenant_id, principal_id=principal_id)
+
+    async def _resolve_review_run(self, *, tenant_id, run_id):
+        from ..verification.repository import AGENT_REVIEWS, TASK_VERIFICATIONS
+
+        with self.engine.connect() as connection:
+            row = connection.execute(select(AGENT_REVIEWS.c.project_id).join(
+                TASK_VERIFICATIONS,
+                TASK_VERIFICATIONS.c.verification_id == AGENT_REVIEWS.c.verification_id,
+            ).join(PROJECT_TEAMS, and_(
+                PROJECT_TEAMS.c.project_id == AGENT_REVIEWS.c.project_id,
+                PROJECT_TEAMS.c.team_id == AGENT_REVIEWS.c.owner_team_id,
+            )).where(
+                AGENT_REVIEWS.c.run_id == run_id, AGENT_REVIEWS.c.owner_team_id == tenant_id,
+                AGENT_REVIEWS.c.status == "QUEUED", TASK_VERIFICATIONS.c.status == "PENDING",
+                AGENT_REVIEWS.c.subject_digest == TASK_VERIFICATIONS.c.subject_digest,
+                AGENT_REVIEWS.c.source_run_id == TASK_VERIFICATIONS.c.source_run_id,
+                AGENT_REVIEWS.c.project_id == TASK_VERIFICATIONS.c.project_id,
+                AGENT_REVIEWS.c.process_id == TASK_VERIFICATIONS.c.process_id,
+                AGENT_REVIEWS.c.task_id == TASK_VERIFICATIONS.c.task_id,
+                AGENT_REVIEWS.c.contract_version == TASK_VERIFICATIONS.c.contract_version,
+                AGENT_REVIEWS.c.executed_as == ORCHESTRATOR_PRINCIPAL_ID,
+                AGENT_REVIEWS.c.initiated_by == ORCHESTRATOR_PRINCIPAL_ID,
+            )).mappings().one_or_none()
+        if row is None:
+            raise PolicyDenied("review run has no active project delegation")
+        return project_orchestrator_principal(row["project_id"], tenant_id)
 
     async def _resolve_planner_run(
         self,

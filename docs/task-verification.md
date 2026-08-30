@@ -7,7 +7,8 @@
 - `artifact.sha256`：从制品存储读取字节并核对大小与 SHA256。
 - `artifact.json`：在完整性通过后验证 JSON；解析预算不足时保持 PENDING，不猜测通过。
 - `sandbox.profile:<profile_id>`：将必需检查派发给持久 Tool Worker，执行管理员配置的固定程序。
-- 尚未接入的工具和 `agent_review` 保持 PENDING。不能以空实现代替独立审核。
+- `agent_review`：必需工具检查通过后启动独立、受预算约束的审核 Run，读取固定共享制品，产生结构化审核证据。
+- 尚未接入的工具和人工审核保持 PENDING，不能以空实现代替实际检查。
 
 例如任务的 `verification_policy`：
 
@@ -59,4 +60,46 @@ POST /v1/projects/{project_id}/tasks/{task_id}:retry-verification-tools
 
 ## 范围
 
-这条链路是任务级工具验证，不等于完整项目验收。独立 Agent/Human Review、自动返工调度、IntegrationRun、DeliveryManifest 和项目完成判定仍须分别接通。单元测试中的模拟 OCI 结果也不代表真实 Docker、PostgreSQL 或 LLM 环境验收。
+这条链路是任务级工具与 Agent 验证，不等于完整项目验收。Human Review、组合审批、自动返工调度、IntegrationRun、DeliveryManifest 和项目完成判定仍须分别接通。单元测试中的模拟 OCI/模型结果也不代表真实 Docker、PostgreSQL 或 LLM 环境验收。
+
+## 独立 Agent Review
+
+在上述 policy 的 criteria 中加入：
+
+```json
+{"criterion_id": "requirements-and-design", "type": "agent_review", "required": true}
+```
+
+审核使用单独的 Durable Agent Run，`initiated_by` 和 `executed_as` 均为 `service:project-orchestrator`，归属于任务发起团队，而非执行任务的 Team Agent。模型路由限制沿用源 Run 的已批准配置；不会复制其对话、内部总结、记忆、工具和技能权限。审核输入只有已接受任务的要求、criterion 与提交时固定的共享制品全文及引用 ID。输入 JSON 是待审数据，不是授权指令。
+
+当前审核支持 UTF-8 文本、JSON/XML 制品；整个输入 JSON 上限 16,000 字节，不静默截断。二进制、过大输入或读取能力不可用时保持 PENDING/`review_input_unavailable`。可选 Agent Review 当前不派发，显示 `optional_review_not_scheduled`。每个必需 criterion 对应独立 Run；任务双方应在接受契约时明确 criterion 与验收要求。
+
+单次文本审核最多接收 32 个制品引用，超过上限在派发前保持待验证，不消耗模型预算。
+
+独立 Run 使用现有全项目预算预留与实际用量结算，每次上限 16,000 token / 1,000,000 micro-USD / 1 个模型回合；工具与技能白名单为空。预算不足保持 PENDING，不绕过策略派发。Run 绑定、预算预留与验证记录同事务保存，终态、用量结算与项目 Run 事实同事务投影。重复通知不重复收费或通过任务。
+
+模型输出必须是唯一 JSON 对象，恰好包含：
+
+```json
+{
+  "schema": "coifesp.verification-result.v1",
+  "passed": true,
+  "findings": [],
+  "required_changes": [],
+  "evidence_refs": ["resource-id-from-submission"]
+}
+```
+
+引用只能来自固定提交；有制品时 PASS 必须引用证据且不得包含 required_changes，FAIL 必须包含 findings 与 required_changes。拒绝重复键、额外字段、伪布尔、超限或非 JSON 输出。非法回复或运行故障记为 UNAVAILABLE，任务仍 PENDING；业务 FAIL 则进入 changes_requested。模型不能直接决定项目完成。
+
+控制面与独立 Agent Worker 均已接入回写；Worker 每轮前后按当前团队分批恢复，包括审核落库后、任务状态更新前的崩溃窗口。Worker 与控制面需配置同一数据库、制品存储和工具 profile，并为任务发起团队运行对应 Worker。任务/契约变化使旧验证失效，不允许旧审核批准新提交。Control-plane 启动仍提供补偿重放。
+
+环境或结果格式问题解决后，任务双方可以调用：
+
+```text
+POST /v1/projects/{project_id}/tasks/{task_id}:retry-agent-review
+```
+
+该接口不接收人工 PASS/FAIL。仅 UNAVAILABLE 结果可新增尝试，QUEUED 不重复派发，业务 FAIL 不被覆盖；每个提交的每个 criterion 最多 3 次独立审核尝试，旧记录保留。PENDING 预算/输入问题修复后可重新调用 verify。当前预算不足尚未自动打开 Human Gate，审核失败后的自动 Replan 也属于后续编排接线。
+
+提交失效或制品撤回时，未执行的审核 Run 会在同一事务取消、置 STALE 并归还预算；已持有执行租约的 Run 不会被提前清零，待真实终态或租约恢复后处理，避免丢失实际用量。即使先收到审核终态、后检测父验证失效，也会核对当前契约和资源，不把旧审核记为当前 PASS。

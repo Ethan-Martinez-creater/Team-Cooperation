@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import random
 from dataclasses import dataclass
 from enum import Enum
@@ -22,6 +23,8 @@ from .checkpoint import AgentRunCheckpointCodec
 from .models import AgentRunLease, DurableAgentRun, DurableRunStatus
 from .repository import AgentRunPersistenceError
 from .service import AgentRunService
+
+logger = logging.getLogger("coifesp.agent_runs.worker")
 
 
 class PrincipalResolver(Protocol):
@@ -294,7 +297,7 @@ class DurableAgentWorker:
                 run_id=run_id,
                 error_code="lease_lost",
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - classify durable execution failures
             disposition = self.failure_classifier.classify(exc)
             if disposition.retryable:
                 delay = self._retry_delay(lease)
@@ -476,6 +479,7 @@ class DurableAgentWorkerRunner:
         identity_backoff_base_seconds: float = 1.0,
         identity_backoff_cap_seconds: float = 60.0,
         random_source: random.Random | None = None,
+        terminal_reconciler=None,
     ) -> None:
         if not 0.05 <= idle_poll_seconds <= 60:
             raise ValueError("worker idle poll interval is invalid")
@@ -487,6 +491,7 @@ class DurableAgentWorkerRunner:
         self.identity_backoff_base_seconds = identity_backoff_base_seconds
         self.identity_backoff_cap_seconds = identity_backoff_cap_seconds
         self.random = random_source or random.SystemRandom()
+        self.terminal_reconciler = terminal_reconciler
 
     async def run(self, *, stop: asyncio.Event) -> None:
         failures = 0
@@ -494,7 +499,9 @@ class DurableAgentWorkerRunner:
             try:
                 principal = await self.identity_provider.resolve()
                 failures = 0
+                await self._reconcile(principal)
                 outcome = await self.worker.process_once(worker=principal)
+                await self._reconcile(principal)
             except asyncio.CancelledError:
                 raise
             except (AuthenticationError, IdentityProviderUnavailable):
@@ -503,6 +510,15 @@ class DurableAgentWorkerRunner:
                 continue
             if outcome.status is AgentWorkerOutcomeStatus.IDLE:
                 await self._wait(stop, self.idle_poll_seconds)
+
+    async def _reconcile(self, principal):
+        if self.terminal_reconciler is None:
+            return
+        try:
+            await asyncio.to_thread(self.terminal_reconciler.reconcile,
+                                    tenant_id=principal.tenant_id)
+        except Exception as exc:  # noqa: BLE001 - polling retries independent projection failures
+            logger.warning("terminal reconciliation deferred error_type=%s", type(exc).__name__)
 
     def _identity_delay(self, failures: int) -> float:
         value = min(

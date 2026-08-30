@@ -170,6 +170,7 @@ async def build_tool_worker_runtime(
                 from .project_process.repository import (
                     SQLAlchemyProjectProcessRepository,
                 )
+                from .verification.agent_reviews import AgentReviewChecks
                 from .verification.sandbox_tool import SandboxedVerificationTool
                 from .verification.service import TaskVerificationService
                 from .verification.tool_checks import (
@@ -192,6 +193,10 @@ async def build_tool_worker_runtime(
                     repository=SQLAlchemyProjectProcessRepository(engine),
                     artifact_content=content, notifier=NotificationService(engine),
                     tool_checks=DurableVerificationChecks(jobs=jobs, profiles=profiles),
+                    review_checks=AgentReviewChecks(
+                        repository=SQLAlchemyProjectProcessRepository(engine),
+                        runs=runs, artifact_content=content,
+                    ),
                 )
                 reconciler = VerificationToolReconciler(
                     coordinator=coordinator, verifier=verification,

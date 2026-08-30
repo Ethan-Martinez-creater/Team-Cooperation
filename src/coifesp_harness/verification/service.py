@@ -11,7 +11,7 @@ import json
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from ..artifacts.repository import ARTIFACT_MANIFESTS
 from ..errors import GovernanceConflictError, PolicyDenied
@@ -27,6 +27,7 @@ from ..project_process.service import ProjectProcessService
 from ..team_agents.identity import ORCHESTRATOR_PRINCIPAL_ID
 from .checks import evaluate_checks
 from .repository import TASK_VERIFICATIONS
+from .subjects import submission_is_current
 
 logger = logging.getLogger("coifesp.verification")
 VERIFIER_PRINCIPAL = "service:project-verifier"
@@ -70,11 +71,12 @@ def _time(value):
 
 class TaskVerificationService:
     def __init__(self, *, repository, artifact_content=None, notifier=None, clock=None,
-                 tool_checks=None):
+                 tool_checks=None, review_checks=None):
         self.repository = repository
         self.artifact_content = artifact_content
         self.notifier = notifier
         self.tool_checks = tool_checks
+        self.review_checks = review_checks
         self.clock = clock or (lambda: datetime.now(UTC))
 
     @staticmethod
@@ -83,7 +85,7 @@ class TaskVerificationService:
         if actor["team_id"] not in {task["source_team_id"], task["target_team_id"]}:
             raise PolicyDenied("verification belongs to the task parties")
 
-    def verify_task(self, *, project_id, task_id, actor_id, retry_tools=False):
+    def verify_task(self, *, project_id, task_id, actor_id, retry_tools=False, retry_reviews=False):
         with self.repository.transaction() as connection:
             task = TeamCollaborationService._task_row(connection, project_id, task_id)
             self._authorize(connection, task, actor_id)
@@ -104,7 +106,8 @@ class TaskVerificationService:
             if run_id is None:
                 raise GovernanceConflictError("verification requires a structured Agent submission")
         # Reauthorize under the process/task locks before doing any work.
-        return self.verify_run(run_id=run_id, actor_id=actor_id, retry_tools=retry_tools)
+        return self.verify_run(run_id=run_id, actor_id=actor_id, retry_tools=retry_tools,
+                               retry_reviews=retry_reviews)
 
     def results(self, *, project_id, task_id, actor_id):
         with self.repository.transaction() as connection:
@@ -121,11 +124,15 @@ class TaskVerificationService:
             return [self._view(row) for row in rows]
 
     def on_run_terminal(self, run):
+        if self.review_checks is not None:
+            source = self.review_checks.project_terminal(run.run_id)
+            if source is not None:
+                return self.verify_run(run_id=source)
         return self.verify_run(run_id=run.run_id)
 
-    def verify_run(self, *, run_id, actor_id=None, retry_tools=False):
-        if retry_tools and actor_id is None:
-            raise PolicyDenied("tool retries require an authorized task participant")
+    def verify_run(self, *, run_id, actor_id=None, retry_tools=False, retry_reviews=False):
+        if (retry_tools or retry_reviews) and actor_id is None:
+            raise PolicyDenied("verification retries require an authorized task participant")
         with self.repository.transaction() as connection:
             binding = (
                 connection.execute(
@@ -206,25 +213,7 @@ class TaskVerificationService:
             if existing is not None and existing["status"] != "PENDING":
                 return self._view(existing)
             process = self.repository.process(connection, binding["process_id"])
-            latest_attempt = connection.execute(
-                select(func.max(PROJECT_AGENT_RUNS.c.execution_attempt)).where(
-                    PROJECT_AGENT_RUNS.c.process_id == binding["process_id"],
-                    PROJECT_AGENT_RUNS.c.team_task_id == task["task_id"],
-                    PROJECT_AGENT_RUNS.c.run_kind == "task_execution",
-                )
-            ).scalar_one()
-            current = (
-                task["status"] == "submitted"
-                and process.project_id == task["project_id"]
-                and process.status.value not in {"COMPLETED", "FAILED", "CANCELLED"}
-                and task["process_id"] == binding["process_id"]
-                and task["work_node_id"] == binding["work_node_id"]
-                and task["source_contract_version"] == binding["task_contract_version"]
-                and task["accepted_contract_version"] == binding["task_contract_version"]
-                and latest_attempt == binding["execution_attempt"]
-                and _time(task["updated_at"]) == _time(binding["task_result_at"])
-                and json.loads(task["artifact_resource_ids"]) == receipt["artifact_refs"]
-            )
+            current = submission_is_current(connection, process=process, binding=binding, task=task)
             if not current:
                 outcome = _baseline("PENDING", "submission_changed")
                 status = "STALE"
@@ -251,6 +240,12 @@ class TaskVerificationService:
                         verification_id=verification_id, subject_digest=subject_digest,
                         run_id=run_id, tenant_id=task["target_team_id"],
                         retry_tools=retry_tools,
+                    )
+                if self.review_checks is not None:
+                    outcome = self.review_checks.evaluate(
+                        connection=connection, outcome=outcome, verification_id=verification_id,
+                        subject_digest=subject_digest, binding=binding, task=task,
+                        artifacts=artifacts, retry_reviews=retry_reviews,
                     )
                 status = outcome["status"]
             now = self.clock()
@@ -291,6 +286,8 @@ class TaskVerificationService:
                     raise GovernanceConflictError("verification evidence changed concurrently")
             else:
                 connection.execute(TASK_VERIFICATIONS.insert().values(**values))
+            if status in {"STALE", "FAIL"} and self.review_checks is not None:
+                self.review_checks.close_stale(connection, verification_id)
             if current and status in {"PASS", "FAIL"}:
                 task_status = "verified" if status == "PASS" else "changes_requested"
                 changed = connection.execute(
@@ -318,6 +315,9 @@ class TaskVerificationService:
                         {**task, "status": task_status, "completed_at": now, "updated_at": now},
                         now=now,
                     )
+                # Opportunistic review projection may append a Run terminal
+                # fact in this same transaction. Use the resulting sequence.
+                process = self.repository.process(connection, binding["process_id"])
                 ProjectProcessService(
                     self.repository.using_connection(connection), clock=self.clock
                 ).append_fact(
@@ -392,6 +392,8 @@ class TaskVerificationService:
         return True
 
     def replay_pending(self, _run_service=None):
+        if self.review_checks is not None:
+            self.review_checks.replay_pending()
         with self.repository.transaction() as connection:
             run_ids = (
                 connection.execute(
