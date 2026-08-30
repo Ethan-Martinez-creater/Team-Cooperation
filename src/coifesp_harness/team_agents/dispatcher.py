@@ -22,7 +22,12 @@ from ..agent_runs.repository import AGENT_RUNS
 from ..context import ContextItem
 from ..errors import GovernanceConflictError, ResourceNotFound
 from ..product import TeamProjectAgentStatus, TeamTaskStatus
-from ..product.repository import PROJECT_AGENT_RUNS, TEAM_PROJECT_AGENTS, TEAM_TASKS
+from ..product.repository import (
+    PROJECT_AGENT_RUNS,
+    PROJECT_RESOURCES,
+    TEAM_PROJECT_AGENTS,
+    TEAM_TASKS,
+)
 from ..product.service import TeamCollaborationService
 from ..product.workspace import ProjectWorkspaceService
 from ..project_process.budget_service import ProjectExecutionBudgetService
@@ -436,9 +441,10 @@ class TeamAgentDispatcher:
         """Project only structured FAIL codes safe for the target team.
 
         Verification rows may contain policy and artifact details that are not
-        task-agent context.  Rework receives criterion/type/code only; raw
-        check payloads, source-run content, and reviewer/private explanations
-        never enter the new run checkpoint.
+        task-agent context.  Rework receives criterion/type/code plus the
+        bounded, already-validated Agent Review feedback or public Human
+        Review reason.  Raw check payloads, source-run content, and private
+        reviewer explanations never enter the new run checkpoint.
         """
         if evidence is None or not evidence.verification_ids:
             return None
@@ -474,11 +480,24 @@ class TeamAgentDispatcher:
                 or len(code) > 128
             ):
                 continue
-            findings.append({
+            finding = {
                 "criterion_id": criterion_id,
                 "type": check_type,
                 "code": code,
-            })
+            }
+            if check_type == "agent_review" and code == "agent_review_requires_changes":
+                feedback = TeamAgentDispatcher._agent_review_feedback(
+                    connection, task=task, verification=row, check=check,
+                )
+                if feedback is not None:
+                    finding.update(feedback)
+            elif check_type == "human_review" and code == "human_review_rejected":
+                feedback = TeamAgentDispatcher._human_review_feedback(
+                    connection, process=process, task=task, verification=row, check=check,
+                )
+                if feedback is not None:
+                    finding.update(feedback)
+            findings.append(finding)
         if not findings:
             return None
         return ProjectAgentContextBuilder._item(
@@ -499,6 +518,117 @@ class TeamAgentDispatcher:
             ),
             priority=95,
         )
+
+    @staticmethod
+    def _agent_review_feedback(connection, *, task, verification, check):
+        from ..verification.repository import AGENT_REVIEWS
+
+        conditions = [
+            AGENT_REVIEWS.c.verification_id == verification["verification_id"],
+            AGENT_REVIEWS.c.project_id == task.project_id,
+            AGENT_REVIEWS.c.process_id == verification["process_id"],
+            AGENT_REVIEWS.c.task_id == task.task_id,
+            AGENT_REVIEWS.c.owner_team_id == task.source_team_id,
+            AGENT_REVIEWS.c.criterion_id == check["criterion_id"],
+            AGENT_REVIEWS.c.source_run_id == verification["source_run_id"],
+            AGENT_REVIEWS.c.subject_digest == verification["subject_digest"],
+            AGENT_REVIEWS.c.status == "FAIL",
+        ]
+        review_id = check.get("review_id")
+        if type(review_id) is str and review_id:
+            conditions.append(AGENT_REVIEWS.c.review_id == review_id)
+        row = connection.execute(
+            select(AGENT_REVIEWS).where(and_(*conditions))
+            .order_by(AGENT_REVIEWS.c.attempt.desc())
+            .limit(1)
+        ).mappings().one_or_none()
+        if row is None or type(row["result_json"]) is not dict:
+            return None
+        result = row["result_json"]
+        if (
+            set(result) != {
+                "schema", "passed", "findings", "required_changes", "evidence_refs",
+            }
+            or result.get("schema") != "coifesp.verification-result.v1"
+            or result.get("passed") is not False
+        ):
+            return None
+        review_findings = TeamAgentDispatcher._bounded_text_list(result.get("findings"))
+        required_changes = TeamAgentDispatcher._bounded_text_list(result.get("required_changes"))
+        evidence_refs = TeamAgentDispatcher._bounded_text_list(result.get("evidence_refs"))
+        if not review_findings or not required_changes or evidence_refs is None:
+            return None
+        return {
+            "findings": review_findings,
+            "required_changes": required_changes,
+            "evidence_refs": TeamAgentDispatcher._current_shared_evidence_refs(
+                connection, task=task, verification=verification, refs=evidence_refs,
+            ),
+        }
+
+    @staticmethod
+    def _human_review_feedback(connection, *, process, task, verification, check):
+        from ..verification.repository import HUMAN_REVIEWS
+
+        conditions = [
+            HUMAN_REVIEWS.c.verification_id == verification["verification_id"],
+            HUMAN_REVIEWS.c.project_id == task.project_id,
+            HUMAN_REVIEWS.c.process_id == process.process_id,
+            HUMAN_REVIEWS.c.task_id == task.task_id,
+            HUMAN_REVIEWS.c.reviewer_team_id == task.source_team_id,
+            HUMAN_REVIEWS.c.criterion_id == check["criterion_id"],
+            HUMAN_REVIEWS.c.source_run_id == verification["source_run_id"],
+            HUMAN_REVIEWS.c.subject_digest == verification["subject_digest"],
+            HUMAN_REVIEWS.c.status == "REJECTED",
+        ]
+        review_id = check.get("human_review_id")
+        if type(review_id) is str and review_id:
+            conditions.append(HUMAN_REVIEWS.c.review_id == review_id)
+        row = connection.execute(
+            select(HUMAN_REVIEWS).where(and_(*conditions))
+            .order_by(HUMAN_REVIEWS.c.version.desc())
+            .limit(1)
+        ).mappings().one_or_none()
+        if row is None or row["decision"] != "REJECT":
+            return None
+        reason = row["reason"]
+        if type(reason) is not str or not reason.strip() or len(reason) > 2_000:
+            return None
+        return {"decision": "REJECT", "reason": reason}
+
+    @staticmethod
+    def _bounded_text_list(value):
+        if type(value) is not list or len(value) > 32:
+            return None
+        if any(
+            type(item) is not str or not item.strip() or len(item) > 2_000
+            for item in value
+        ):
+            return None
+        return list(value)
+
+    @staticmethod
+    def _current_shared_evidence_refs(connection, *, task, verification, refs):
+        artifacts = verification["artifacts_json"]
+        if type(artifacts) is not list:
+            return []
+        artifact_ids = {
+            item.get("resource_id")
+            for item in artifacts
+            if type(item) is dict and type(item.get("resource_id")) is str
+        }
+        candidates = [ref for ref in refs if ref in artifact_ids]
+        if not candidates:
+            return []
+        visible = set(connection.execute(
+            select(PROJECT_RESOURCES.c.resource_id).where(
+                PROJECT_RESOURCES.c.project_id == task.project_id,
+                PROJECT_RESOURCES.c.owner_team_id == task.target_team_id,
+                PROJECT_RESOURCES.c.propagation.in_(("project_readonly", "portable")),
+                PROJECT_RESOURCES.c.resource_id.in_(candidates),
+            )
+        ).scalars())
+        return [ref for ref in candidates if ref in visible]
 
     @staticmethod
     def _validate_facts(facts: TaskDispatchFacts, task) -> None:

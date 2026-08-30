@@ -3,6 +3,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
+from test_agent_review_service import execute as execute_agent_review
+from test_agent_review_service import prepared as agent_review_setup
+from test_agent_review_service import result as agent_review_result
+from test_human_review_service import decide as decide_human_review
+from test_human_review_service import stack as human_review_setup
 from test_task_verification_service import setup as verification_setup
 from test_task_verification_service import verify
 from test_team_agent_dispatcher import dispatch, record
@@ -169,3 +174,71 @@ def test_rework_budget_exhaustion_leaves_task_and_binding_unchanged(tmp_path):
     assert len(_binding_rows(value)) == 1
     with value.engine.connect() as connection:
         assert connection.execute(select(TEAM_TASKS.c.status)).scalar_one() == "changes_requested"
+
+
+def _rework_checkpoint(value, decision_id):
+    value.dispatcher.fact_loader = PersistentTaskDispatchFactLoader(engine=value.engine)
+    record(value, decision_id)
+    result = dispatch(value, decision_id=decision_id)
+    checkpoint = value.runs.load_checkpoint(tenant_id="team-b", run_id=result.run_id)
+    return value.dispatcher.run_service.checkpoint_codec.decode(checkpoint)
+
+
+def test_agent_review_fail_projects_validated_changes_and_shared_refs(tmp_path):
+    value = agent_review_setup(tmp_path)
+    assert verify(value)["status"] == "PENDING"
+    execute_agent_review(value, agent_review_result(False))
+
+    checkpoint = _rework_checkpoint(value, "decision-agent-rework")
+    feedback = next(
+        json.loads(item.content)
+        for item in checkpoint["context_items"]
+        if json.loads(item.content).get("schema") == "coifesp.task-rework-feedback.v1"
+    )
+    agent = next(item for item in feedback["findings"] if item["type"] == "agent_review")
+    assert agent["code"] == "agent_review_requires_changes"
+    assert agent["findings"] == ["Missing design rationale"]
+    assert agent["required_changes"] == ["Document design rationale"]
+    assert agent["evidence_refs"] == ["resource-input"]
+    assert "private team note" not in json.dumps(feedback)
+
+
+def test_agent_review_refs_are_filtered_when_output_is_no_longer_shared(tmp_path):
+    value = agent_review_setup(tmp_path)
+    assert verify(value)["status"] == "PENDING"
+    execute_agent_review(value, agent_review_result(False))
+    with value.engine.begin() as connection:
+        connection.execute(PROJECT_RESOURCES.update().values(propagation="team_private"))
+
+    checkpoint = _rework_checkpoint(value, "decision-agent-private-ref")
+    feedback = next(
+        json.loads(item.content)
+        for item in checkpoint["context_items"]
+        if json.loads(item.content).get("schema") == "coifesp.task-rework-feedback.v1"
+    )
+    agent = next(item for item in feedback["findings"] if item["type"] == "agent_review")
+    assert agent["required_changes"] == ["Document design rationale"]
+    assert agent["evidence_refs"] == []
+
+
+def test_human_review_reject_projects_public_reason_without_source_content(tmp_path):
+    value = human_review_setup(tmp_path)
+    result = decide_human_review(value, decision="REJECT")
+    assert result["verification"]["status"] == "FAIL"
+    TeamTaskRunAccounting(
+        repository=value.repository,
+        run_repository=value.runs,
+        capability_repository=value.capabilities,
+    ).settle(run_id=value.dispatched.run_id)
+
+    checkpoint = _rework_checkpoint(value, "decision-human-rework")
+    feedback = next(
+        json.loads(item.content)
+        for item in checkpoint["context_items"]
+        if json.loads(item.content).get("schema") == "coifesp.task-rework-feedback.v1"
+    )
+    human = next(item for item in feedback["findings"] if item["type"] == "human_review")
+    assert human["code"] == "human_review_rejected"
+    assert human["decision"] == "REJECT"
+    assert human["reason"] == "Checked the supplied deliverable"
+    assert "private team note" not in json.dumps(feedback)
