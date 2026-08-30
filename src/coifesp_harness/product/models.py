@@ -131,6 +131,16 @@ class ProjectAgentMode(str, Enum):
     DELIVERY_REVIEW = "delivery_review"
 
 
+class ProjectAgentRunKind(str, Enum):
+    CONVERSATION = "conversation"
+    PLANNING = "planning"
+    TASK_EXECUTION = "task_execution"
+    VERIFICATION = "verification"
+    REPLANNING = "replanning"
+    EXCHANGE_DRAFT = "exchange_draft"
+    SPECIALIST = "specialist"
+
+
 class InboxAgentMode(str, Enum):
     PRIORITIZATION = "prioritization"
     STATUS_BRIEFING = "status_briefing"

@@ -456,13 +456,70 @@ PROJECT_AGENT_RUNS = Table(
     Column("project_id", String(128), ForeignKey("product_projects.project_id"), primary_key=True),
     Column("run_id", String(128), primary_key=True),
     Column("team_id", String(128), ForeignKey("product_teams.team_id"), nullable=False),
-    Column("created_by", String(128), ForeignKey("product_accounts.account_id"), nullable=False),
-    Column("mode", String(32), nullable=False),
+    Column("created_by", String(128), ForeignKey("product_accounts.account_id"), nullable=True),
+    Column("mode", String(32), nullable=True),
     Column("conversation_id", String(128), nullable=True),
     Column("turn_id", String(128), nullable=True),
+    # Cross-metadata process/graph/decision and reservation ownership is checked
+    # by the dispatcher, without coupling product schema creation to them.
+    Column("process_id", String(128), nullable=True),
+    Column(
+        "team_agent_id",
+        String(128),
+        ForeignKey("product_team_project_agents.agent_id", name="fk_project_run_team_agent"),
+        nullable=True,
+    ),
+    Column("work_node_id", String(128), nullable=True),
+    Column(
+        "team_task_id",
+        String(128),
+        ForeignKey("product_team_tasks.task_id", name="fk_project_run_team_task"),
+        nullable=True,
+    ),
+    Column("parent_run_id", String(128), nullable=True),
+    Column("orchestration_decision_id", String(128), nullable=True),
+    Column("run_kind", String(32), nullable=False, server_default="conversation"),
+    Column("initiated_by_principal_id", String(256), nullable=True),
+    Column("executed_as_principal_id", String(256), nullable=True),
+    Column("delegation_scope_digest", String(64), nullable=True),
+    Column("execution_attempt", Integer, nullable=True),
+    Column("capacity_reservation_id", String(128), nullable=True),
+    Column("project_budget_reservation_id", String(128), nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
     CheckConstraint("mode IN ('analysis','collaboration_actions','delivery_review')", name="mode"),
+    CheckConstraint(
+        "run_kind IN ('conversation','planning','task_execution','verification',"
+        "'replanning','exchange_draft','specialist')",
+        name="ck_product_project_agent_runs_kind",
+    ),
+    CheckConstraint(
+        "run_kind = 'task_execution' OR (created_by IS NOT NULL AND mode IS NOT NULL)",
+        name="ck_product_project_agent_runs_legacy_identity",
+    ),
+    CheckConstraint(
+        "run_kind <> 'task_execution' OR ("
+        "process_id IS NOT NULL AND team_agent_id IS NOT NULL AND "
+        "work_node_id IS NOT NULL AND team_task_id IS NOT NULL AND "
+        "orchestration_decision_id IS NOT NULL AND "
+        "initiated_by_principal_id IS NOT NULL AND "
+        "executed_as_principal_id IS NOT NULL AND "
+        "delegation_scope_digest IS NOT NULL AND "
+        "execution_attempt IS NOT NULL AND "
+        "capacity_reservation_id IS NOT NULL AND "
+        "project_budget_reservation_id IS NOT NULL AND "
+        "created_by IS NULL AND mode IS NULL AND "
+        "execution_attempt >= 1 AND length(delegation_scope_digest) = 64 AND "
+        "initiated_by_principal_id = 'service:project-orchestrator' AND "
+        "executed_as_principal_id = 'team-agent:' || team_id)",
+        name="ck_product_project_agent_runs_task_execution",
+    ),
     UniqueConstraint("run_id", name="uq_product_project_agent_run"),
+    UniqueConstraint(
+        "process_id",
+        "team_task_id",
+        "execution_attempt",
+        name="uq_product_project_agent_run_task_attempt",
+    ),
 )
 
 INBOX_AGENT_RUNS = Table(

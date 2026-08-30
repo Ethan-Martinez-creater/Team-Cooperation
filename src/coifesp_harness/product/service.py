@@ -2734,6 +2734,7 @@ class TeamCollaborationService:
                         and_(
                             PROJECT_AGENT_RUNS.c.project_id == project_id,
                             PROJECT_AGENT_RUNS.c.team_id == actor["team_id"],
+                            PROJECT_AGENT_RUNS.c.created_by.is_not(None),
                         )
                     )
                     .order_by(PROJECT_AGENT_RUNS.c.created_at.desc())
