@@ -4,9 +4,9 @@ import pytest
 
 from coifesp_harness.security import RiskLevel
 from coifesp_harness.tool_catalog import (
-    RunScopedToolRegistry,
     TOOL_EXECUTOR_AGENT,
     TOOL_EXECUTOR_DURABLE,
+    RunScopedToolRegistry,
     build_agent_worker_registry,
     build_builtin_manifests,
     build_project_context_run_tools,
@@ -54,6 +54,16 @@ def test_catalog_digest_orders_tools_deterministically():
         )
     )
     assert catalog_digest(left) == catalog_digest(right)
+
+
+def test_task_artifact_tool_only_advertised_when_storage_is_configured():
+    plain = build_builtin_manifests()
+    enabled = build_builtin_manifests(task_artifact_publication_configured=True)
+    assert "project.publish_artifact" not in {item.tool_id for item in plain}
+    manifest = next(item for item in enabled if item.tool_id == "project.publish_artifact")
+    assert manifest.executor == TOOL_EXECUTOR_DURABLE
+    assert manifest.required_roles == frozenset({"team_agent"})
+    assert catalog_digest(plain) != catalog_digest(enabled)
 
 
 def test_verify_catalog_match_reports_ok_and_each_mismatch_kind():
@@ -158,9 +168,9 @@ def test_skill_run_tools_pin_versions_and_reject_unselected():
 
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-    from coifesp_harness.skills import SkillCatalog, SkillTrustStore
     from coifesp_harness.security.models import Classification, Principal
     from coifesp_harness.security.policy import PolicyEngine
+    from coifesp_harness.skills import SkillCatalog, SkillTrustStore
 
     private = Ed25519PrivateKey.generate()
     trust = SkillTrustStore()
@@ -177,17 +187,17 @@ def test_skill_run_tools_pin_versions_and_reject_unselected():
         package = root / "team-a" / "review" / "1.0.0"
         package.mkdir(parents=True)
         body = (
-            "---\n"
-            "name: review\n"
-            "version: 1.0.0\n"
-            "description: Review shared contracts.\n"
-            "tenant_id: team-a\n"
-            "classification: INTERNAL\n"
-            "compartments: []\n"
-            "required_tools: []\n"
-            "signer_key_id: key-1\n"
-            "---\nReview carefully.\n"
-        ).encode()
+            b"---\n"
+            b"name: review\n"
+            b"version: 1.0.0\n"
+            b"description: Review shared contracts.\n"
+            b"tenant_id: team-a\n"
+            b"classification: INTERNAL\n"
+            b"compartments: []\n"
+            b"required_tools: []\n"
+            b"signer_key_id: key-1\n"
+            b"---\nReview carefully.\n"
+        )
         (package / "SKILL.md").write_bytes(body)
         (package / "SKILL.sig").write_bytes(base64.b64encode(private.sign(body)))
         catalog = SkillCatalog(root=root, trust_store=trust, policy=PolicyEngine())

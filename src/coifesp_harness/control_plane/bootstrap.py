@@ -75,7 +75,7 @@ from ..work_graph import ProjectWorkGraphService, SQLAlchemyWorkGraphRepository
 from .app import create_app
 from .session_lifecycle import SessionLifecycleService
 
-SCHEMA_REVISION = "20260831_58"
+SCHEMA_REVISION = "20260831_59"
 REQUIRED_RLS_TABLES = (
     "audit_events",
     "audit_heads",
@@ -417,6 +417,7 @@ def build_application(
                 sandbox_profile_ids=sandbox_profile_ids,
                 sandbox_timeout_seconds=sandbox_timeout_seconds,
                 office_connector_configured=bool(settings.connectors_json),
+                task_artifact_publication_configured=bool(settings.artifact_store_root),
             ),
             skill_catalog=skill_catalog,
             policy=PolicyEngine(),

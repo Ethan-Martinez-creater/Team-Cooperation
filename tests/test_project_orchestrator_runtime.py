@@ -34,10 +34,23 @@ def test_factory_reuses_existing_database_services_without_launching_runs(tmp_pa
     assert dispatcher.fact_loader is captures[0]["fact_loader"]
     assert dispatcher.capabilities is captures[0]["capability_adapter"]
     assert dispatcher.work_graph is captures[0]["work_graph_repository"]
+    resolved = dispatcher.runtime_resolver.resolve(agent_id=value.agent.agent_id, project_id="project-a")
+    assert [tool.tool_id for tool in resolved.tool_authorization.tools] == ["project.publish_artifact"]
     assert isinstance(worker.runner.snapshot_loader, Loader)
     with value.engine.connect() as connection:
         assert len(connection.execute(select(AGENT_RUNS)).all()) == 1
         assert value.repository.usage(connection, "process-a").agent_runs_started == 1
+
+
+def test_factory_without_artifact_store_keeps_default_tool_policy_empty(tmp_path):
+    value = setup(tmp_path, completed=False)
+    worker = build_project_orchestrator_worker(repository=value.repository,
+        scheduler=None, agent_run_service=value.dispatcher.run_service,
+        capability_repository=value.capabilities, artifact_content=None,
+        snapshot_loader_factory=lambda **_: None)
+    resolved = worker.runner.effect.dispatcher.runtime_resolver.resolve(
+        agent_id=value.agent.agent_id, project_id="project-a")
+    assert resolved.tool_authorization.tools == ()
 
 
 def test_mismatched_runtime_engine_is_rejected(tmp_path):

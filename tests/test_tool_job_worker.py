@@ -4,18 +4,17 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
-from coifesp_harness.security import RiskLevel
+from coifesp_harness.security import Principal, RiskLevel
 from coifesp_harness.tool_jobs import (
     DurableToolWorker,
     DurableToolWorkerRunner,
     PermanentToolError,
     SQLAlchemyToolJobRepository,
-    ToolJobKeyring,
     ToolJobError,
+    ToolJobKeyring,
     ToolJobStatus,
     current_tool_execution_context,
 )
-from coifesp_harness.security import Principal
 from coifesp_harness.tools import ToolDefinition, ToolRegistry
 
 
@@ -140,6 +139,40 @@ async def test_idle_worker_returns_without_claim() -> None:
 
     _, worker = runtime(handler)
     assert await worker.run_once() is False
+
+
+@pytest.mark.asyncio
+async def test_expired_preparation_lease_does_not_stop_worker_or_execute_handler():
+    from datetime import UTC, datetime, timedelta
+
+    from coifesp_harness.tool_jobs.repository import TOOL_JOBS
+
+    calls = []
+
+    async def handler(arguments):
+        calls.append(arguments)
+        return "ok"
+
+    repository, worker = runtime(handler)
+    enqueue(repository)
+
+    class SlowPreparation:
+        def prepare(self, **kwargs):
+            with repository.engine.begin() as connection:
+                connection.execute(TOOL_JOBS.update().values(
+                    lease_expires_at=datetime.now(UTC) - timedelta(seconds=1)))
+
+    worker.workspace_manager = SlowPreparation()
+    assert await worker.run_once()
+    assert calls == []
+    assert repository.get(tenant_id="team-a", job_id="job-1").status is ToolJobStatus.LEASED
+    repository.recover_expired(tenant_id="team-a", actor_id="recovery", retry_delay_seconds=1)
+    with repository.engine.begin() as connection:
+        connection.execute(TOOL_JOBS.update().values(available_at=datetime.now(UTC) - timedelta(seconds=1)))
+    worker.workspace_manager = None
+    assert await worker.run_once()
+    assert calls == [{"message": "hello"}]
+    assert repository.get(tenant_id="team-a", job_id="job-1").status is ToolJobStatus.SUCCEEDED
 
 
 @pytest.mark.asyncio

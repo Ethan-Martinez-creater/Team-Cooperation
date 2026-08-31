@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Literal
+from typing import Any, Literal
 
 from ..security import RiskLevel
-from ..skills import SkillCatalog
 from ..security.models import Principal
+from ..skills import SkillCatalog
 from ..tools.models import ToolDefinition
 from ..tools.registry import ToolRegistry
 
@@ -212,6 +213,7 @@ def build_builtin_manifests(
     sandbox_profile_ids: Iterable[str] = (),
     sandbox_timeout_seconds: float = 90.0,
     office_connector_configured: bool = False,
+    task_artifact_publication_configured: bool = False,
 ) -> tuple[ToolManifest, ...]:
     manifests: list[ToolManifest] = []
     profiles = tuple(sandbox_profile_ids)
@@ -219,6 +221,10 @@ def build_builtin_manifests(
         manifests.append(sandbox_code_manifest(profiles, timeout_seconds=sandbox_timeout_seconds))
     if office_connector_configured:
         manifests.append(office_message_manifest())
+    if task_artifact_publication_configured:
+        from ..artifacts.task_publication import task_artifact_manifest
+
+        manifests.append(task_artifact_manifest())
     manifests.extend(skill_catalog_manifests())
     manifests.extend(project_context_manifests())
     return tuple(manifests)

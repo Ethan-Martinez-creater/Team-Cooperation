@@ -272,6 +272,12 @@ class SQLAlchemyProjectProcessWakeupRepository:
         if existing is not None:
             SQLAlchemyProjectProcessWakeupRepository._assert_same_identity(existing, values)
             return existing
+        # pysqlite's legacy transaction mode does not BEGIN for SELECT. If
+        # SAVEPOINT is the first write, releasing it otherwise commits this
+        # wakeup independently of the caller's surrounding transaction.
+        if (connection.dialect.name == "sqlite"
+                and not connection.connection.driver_connection.in_transaction):
+            connection.exec_driver_sql("BEGIN")
         try:
             with connection.begin_nested():
                 connection.execute(PROJECT_PROCESS_WAKEUPS.insert().values(**values))

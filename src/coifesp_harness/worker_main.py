@@ -189,6 +189,7 @@ async def build_worker_runtime(settings: Settings) -> WorkerRuntime:
             sandbox_profile_ids=sandbox_profile_ids,
             sandbox_timeout_seconds=sandbox_timeout_seconds,
             office_connector_configured=bool(settings.connectors_json),
+            task_artifact_publication_configured=bool(settings.artifact_store_root),
         )
         registry = build_agent_worker_registry(manifests)
         validate_registry_manifests(manifests, registry)

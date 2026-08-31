@@ -6,11 +6,10 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from ..security import Principal
-
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
+from ..security import Principal
 from ..tools import ToolRegistry
 from .repository import SQLAlchemyToolJobRepository, ToolJobError
 
@@ -24,6 +23,8 @@ class ToolExecutionContext:
     run_id: str
     call_id: str
     idempotency_key: str
+    worker_id: str | None = None
+    lease_token: str | None = None
 
 
 _CONTEXT: contextvars.ContextVar[ToolExecutionContext | None] = contextvars.ContextVar(
@@ -109,6 +110,15 @@ class DurableToolWorker:
         )
         if lease is None:
             return False
+        try:
+            return await self._run_leased_job(lease)
+        except ToolJobError:
+            # Preparation/validation may outlive the claim. A stale worker
+            # must not execute or terminate the loop; recovery owns this job.
+            logger.info("tool job lease changed before execution job_id=%s", lease.job.job_id)
+            return True
+
+    async def _run_leased_job(self, lease) -> bool:
         job = lease.job
         if self.workspace_manager is not None:
             try:
@@ -150,6 +160,8 @@ class DurableToolWorker:
                 job.run_id,
                 job.call_id,
                 job.idempotency_key,
+                self.worker_id,
+                lease.lease_token,
             )
         )
         try:
@@ -229,7 +241,7 @@ class DurableToolWorker:
                 )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception:  # noqa: BLE001 - any heartbeat failure revokes execution
             failed.set()
 
     def _fail(self, job_id: str, lease_token: str, error_code: str, *, retryable: bool) -> None:
@@ -250,7 +262,7 @@ class DurableToolWorker:
     async def _discard_cancel(task: asyncio.Task[Any]) -> None:
         try:
             await task
-        except (asyncio.CancelledError, Exception):
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001, S110 - drain already handled task
             pass
 
     @staticmethod

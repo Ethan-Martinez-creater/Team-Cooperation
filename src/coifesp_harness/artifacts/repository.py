@@ -22,9 +22,11 @@ from sqlalchemy import (
     select,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, insert as pg_insert
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError as SQLAlchemyIntegrityError
 
 from ..audit import AuditEvent
 from ..errors import GovernanceConflictError, ResourceNotFound
@@ -108,70 +110,67 @@ class SQLAlchemyArtifactRepository:
             from ..errors import PolicyDenied
 
             raise PolicyDenied("artifact publication identity is not authorized")
+        with self.transaction(principal.tenant_id) as connection:
+            return self._persist_publication(connection, principal=principal,
+                idempotency_key=idempotency_key, manifest=manifest)
+
+    def _persist_publication(self, connection, *, principal, idempotency_key, manifest):
+        """Persist after caller authorization, in the caller's domain transaction.
+
+        This is not a publication endpoint. Human publication is authorized
+        above; machine callers must first prove their current durable source
+        and permission. Keeping persistence here makes registry, resource and
+        source evidence commit together without impersonating a human account.
+        """
+        if _ID.fullmatch(idempotency_key) is None or _ID.fullmatch(manifest.artifact_id) is None:
+            raise ValueError("artifact publication identifier is invalid")
+        if (manifest.label.owner_tenant_id != principal.tenant_id
+                or manifest.provenance.producer_principal_id != principal.principal_id
+                or manifest.provenance.producer_tenant_id != principal.tenant_id):
+            from ..errors import PolicyDenied
+
+            raise PolicyDenied("artifact publication provenance mismatch")
         canonical = self._canonical(manifest)
         request_digest = hashlib.sha256(canonical).hexdigest()
-        with self.transaction(principal.tenant_id) as connection:
-            base = (
-                pg_insert(ARTIFACT_COMMANDS)
-                if connection.dialect.name == "postgresql"
-                else sqlite_insert(ARTIFACT_COMMANDS)
-            )
-            inserted = connection.execute(
-                base.values(
-                    tenant_id=principal.tenant_id,
-                    idempotency_key=idempotency_key,
-                    request_digest=request_digest,
-                    artifact_id=manifest.artifact_id,
-                    created_at=datetime.now(UTC),
-                )
-                .on_conflict_do_nothing(index_elements=["tenant_id", "idempotency_key"])
-                .returning(ARTIFACT_COMMANDS.c.idempotency_key)
-            ).scalar_one_or_none()
-            claim = (
-                connection.execute(
-                    select(ARTIFACT_COMMANDS).where(
-                        and_(
-                            ARTIFACT_COMMANDS.c.tenant_id == principal.tenant_id,
-                            ARTIFACT_COMMANDS.c.idempotency_key == idempotency_key,
-                        )
-                    )
-                )
-                .mappings()
-                .one()
-            )
-            if claim["request_digest"] != request_digest:
-                raise GovernanceConflictError("artifact idempotency key was reused")
-            if inserted is None:
-                return (
-                    self.get(
-                        connection,
-                        principal=principal,
-                        owner_tenant_id=principal.tenant_id,
-                        artifact_id=manifest.artifact_id,
-                    ),
-                    True,
-                )
-            values = self._values(manifest, request_digest)
-            try:
-                connection.execute(insert(ARTIFACT_MANIFESTS).values(**values))
-            except Exception as exc:
-                raise GovernanceConflictError("artifact manifest already exists") from exc
-            self.audit_log.append_in_transaction(
-                connection,
-                AuditEvent(
-                    tenant_id=principal.tenant_id,
-                    event_type="artifact.published",
-                    actor_id=principal.principal_id,
-                    outcome="published",
-                    details={
-                        "artifact_id": manifest.artifact_id,
-                        "sha256": manifest.sha256,
-                        "content_digest": request_digest,
-                    },
-                    correlation_id=manifest.artifact_id,
-                ),
-            )
-            return manifest, False
+        base = (pg_insert(ARTIFACT_COMMANDS) if connection.dialect.name == "postgresql"
+                else sqlite_insert(ARTIFACT_COMMANDS))
+        inserted = connection.execute(
+            base.values(tenant_id=principal.tenant_id, idempotency_key=idempotency_key,
+                        request_digest=request_digest, artifact_id=manifest.artifact_id,
+                        created_at=datetime.now(UTC))
+            .on_conflict_do_nothing(index_elements=["tenant_id", "idempotency_key"])
+            .returning(ARTIFACT_COMMANDS.c.idempotency_key)
+        ).scalar_one_or_none()
+        claim = connection.execute(select(ARTIFACT_COMMANDS).where(and_(
+            ARTIFACT_COMMANDS.c.tenant_id == principal.tenant_id,
+            ARTIFACT_COMMANDS.c.idempotency_key == idempotency_key,
+        ))).mappings().one()
+        if claim["request_digest"] != request_digest:
+            raise GovernanceConflictError("artifact idempotency key was reused")
+        if inserted is None:
+            return self.get(connection, principal=principal,
+                owner_tenant_id=principal.tenant_id, artifact_id=manifest.artifact_id), True
+        values = self._values(manifest, request_digest)
+        try:
+            connection.execute(insert(ARTIFACT_MANIFESTS).values(**values))
+        except SQLAlchemyIntegrityError as exc:
+            raise GovernanceConflictError("artifact manifest already exists") from exc
+        self.audit_log.append_in_transaction(
+            connection,
+            AuditEvent(
+                tenant_id=principal.tenant_id,
+                event_type="artifact.published",
+                actor_id=principal.principal_id,
+                outcome="published",
+                details={
+                    "artifact_id": manifest.artifact_id,
+                    "sha256": manifest.sha256,
+                    "content_digest": request_digest,
+                },
+                correlation_id=manifest.artifact_id,
+            ),
+        )
+        return manifest, False
 
     def read(
         self,
@@ -251,23 +250,23 @@ class SQLAlchemyArtifactRepository:
 
     @staticmethod
     def _values(value, digest):
-        result = dict(
-            owner_tenant_id=value.label.owner_tenant_id,
-            artifact_id=value.artifact_id,
-            kind=value.kind.value,
-            media_type=value.media_type,
-            content_uri=value.content_uri,
-            sha256=value.sha256,
-            size_bytes=value.size_bytes,
-            classification=int(value.label.classification),
-            compartments=sorted(value.label.compartments),
-            producer_principal_id=value.provenance.producer_principal_id,
-            source_tool=value.provenance.source_tool,
-            source_version=value.provenance.source_version,
-            created_at=value.provenance.created_at,
-            visible_to_tenants=sorted(value.visible_to_tenants),
-            metadata_schema=value.metadata_schema,
-        )
+        result = {
+            "owner_tenant_id": value.label.owner_tenant_id,
+            "artifact_id": value.artifact_id,
+            "kind": value.kind.value,
+            "media_type": value.media_type,
+            "content_uri": value.content_uri,
+            "sha256": value.sha256,
+            "size_bytes": value.size_bytes,
+            "classification": int(value.label.classification),
+            "compartments": sorted(value.label.compartments),
+            "producer_principal_id": value.provenance.producer_principal_id,
+            "source_tool": value.provenance.source_tool,
+            "source_version": value.provenance.source_version,
+            "created_at": value.provenance.created_at,
+            "visible_to_tenants": sorted(value.visible_to_tenants),
+            "metadata_schema": value.metadata_schema,
+        }
         if digest is not None:
             result["content_digest"] = digest
         return result

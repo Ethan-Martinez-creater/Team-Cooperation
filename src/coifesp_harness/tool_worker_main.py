@@ -60,7 +60,10 @@ class ToolWorkerRuntime:
 async def build_tool_worker_runtime(
     settings: Settings, *, registry: ToolRegistry | None = None
 ) -> ToolWorkerRuntime:
-    require_sandbox = registry is None
+    # File publication and office tools do not execute code. Validate a full
+    # sandbox configuration only when any sandbox option was explicitly set.
+    require_sandbox = registry is None and any((settings.sandbox_runtime,
+        settings.sandbox_workspace_root, settings.sandbox_profiles_json))
     settings.validate(
         require_auth=True,
         require_memory=True,
@@ -119,26 +122,24 @@ async def build_tool_worker_runtime(
         workspace_manager = None
         reconciler = coordinator
         if effective_registry is None:
-            assert settings.sandbox_runtime is not None
-            assert settings.sandbox_workspace_root is not None
-            assert settings.sandbox_profiles_json is not None
-            from pathlib import Path
-
-            workspace_root = Path(settings.sandbox_workspace_root)
-            profiles = load_code_profiles(settings.sandbox_profiles_json)
-            sandbox = OCISandbox(
-                runtime=settings.sandbox_runtime,
-                workspace_root=workspace_root,
-                allowed_images=frozenset(item.image for item in profiles),
-            )
             effective_registry = ToolRegistry()
-            effective_registry.register(
-                SandboxedCodeTools(
-                    sandbox=sandbox,
-                    profiles=profiles,
-                    workspace_root=workspace_root,
-                ).definition()
-            )
+            profiles = ()
+            sandbox = None
+            workspace_root = None
+            if require_sandbox:
+                assert settings.sandbox_runtime is not None
+                assert settings.sandbox_workspace_root is not None
+                assert settings.sandbox_profiles_json is not None
+                workspace_root = Path(settings.sandbox_workspace_root)
+                profiles = load_code_profiles(settings.sandbox_profiles_json)
+                sandbox = OCISandbox(
+                    runtime=settings.sandbox_runtime, workspace_root=workspace_root,
+                    allowed_images=frozenset(item.image for item in profiles),
+                )
+                effective_registry.register(SandboxedCodeTools(
+                    sandbox=sandbox, profiles=profiles, workspace_root=workspace_root,
+                ).definition())
+                workspace_manager = SandboxWorkspaceManager(root=workspace_root)
             if settings.connectors_json:
                 catalog = ConnectorCatalog()
                 for endpoint in load_connector_endpoints(
@@ -153,23 +154,53 @@ async def build_tool_worker_runtime(
                         classification=Classification[settings.office_data_classification.upper()],
                     ).definition()
                 )
-            manifests = build_builtin_manifests(
-                sandbox_profile_ids=(item.profile_id for item in profiles),
-                sandbox_timeout_seconds=max(item.limits.timeout_seconds for item in profiles) + 10,
-                office_connector_configured=bool(settings.connectors_json),
-            )
-            validate_registry_manifests(manifests, effective_registry, executor="tool_worker")
-            # This is a Harness-internal executable, not a model-visible tool.
-            # Keep the existing Agent catalog contract unchanged. Its handler
-            # independently requires a persisted verification/job binding.
+            content = None
             if settings.artifact_store_root:
                 from .artifacts.content import ArtifactContentService
                 from .artifacts.repository import SQLAlchemyArtifactRepository
                 from .artifacts.storage import LocalImmutableArtifactStore
-                from .product.notifications import NotificationService
+                from .artifacts.task_publication import (
+                    TaskArtifactPublicationService,
+                    TaskArtifactPublicationTool,
+                )
                 from .project_process.repository import (
                     SQLAlchemyProjectProcessRepository,
                 )
+                from .project_process.scheduler import (
+                    ProjectProcessScheduler,
+                    SQLAlchemyProjectProcessWakeupRepository,
+                )
+
+                project_repository = SQLAlchemyProjectProcessRepository(engine)
+                scheduler = ProjectProcessScheduler(SQLAlchemyProjectProcessWakeupRepository(engine))
+
+                def enqueue_project_event(connection, event):
+                    scheduler.enqueue_in_transaction(connection,
+                        process_id=event.process_id, project_id=event.project_id,
+                        source_event_id=event.event_id, source_event_type=event.event_type,
+                        payload={"event_id": event.event_id}, available_at=event.occurred_at)
+
+                project_repository.set_event_listener(enqueue_project_event)
+
+                content = ArtifactContentService(
+                    SQLAlchemyArtifactRepository(engine=engine, audit_log=audit),
+                    LocalImmutableArtifactStore(Path(settings.artifact_store_root),
+                        max_object_bytes=settings.artifact_max_upload_bytes),
+                )
+                effective_registry.register(TaskArtifactPublicationTool(
+                    TaskArtifactPublicationService(repository=project_repository,
+                        runs=runs, jobs=jobs, artifact_content=content),
+                ).definition())
+            manifests = build_builtin_manifests(
+                sandbox_profile_ids=(item.profile_id for item in profiles),
+                sandbox_timeout_seconds=max((item.limits.timeout_seconds for item in profiles), default=80) + 10,
+                office_connector_configured=bool(settings.connectors_json),
+                task_artifact_publication_configured=content is not None,
+            )
+            validate_registry_manifests(manifests, effective_registry, executor="tool_worker")
+            # Internal verification is not part of the model-visible catalog.
+            if content is not None and sandbox is not None:
+                from .product.notifications import NotificationService
                 from .verification.agent_reviews import AgentReviewChecks
                 from .verification.sandbox_tool import SandboxedVerificationTool
                 from .verification.service import TaskVerificationService
@@ -178,30 +209,22 @@ async def build_tool_worker_runtime(
                     VerificationToolReconciler,
                 )
 
-                content = ArtifactContentService(
-                    SQLAlchemyArtifactRepository(engine=engine, audit_log=audit),
-                    LocalImmutableArtifactStore(
-                        Path(settings.artifact_store_root),
-                        max_object_bytes=settings.artifact_max_upload_bytes,
-                    ),
-                )
                 effective_registry.register(SandboxedVerificationTool(
                     engine=engine, sandbox=sandbox, profiles=profiles,
                     workspace_root=workspace_root, artifact_content=content,
                 ).definition())
                 verification = TaskVerificationService(
-                    repository=SQLAlchemyProjectProcessRepository(engine),
+                    repository=project_repository,
                     artifact_content=content, notifier=NotificationService(engine),
                     tool_checks=DurableVerificationChecks(jobs=jobs, profiles=profiles),
                     review_checks=AgentReviewChecks(
-                        repository=SQLAlchemyProjectProcessRepository(engine),
+                        repository=project_repository,
                         runs=runs, artifact_content=content,
                     ),
                 )
                 reconciler = VerificationToolReconciler(
                     coordinator=coordinator, verifier=verification,
                 )
-            workspace_manager = SandboxWorkspaceManager(root=workspace_root)
         return ToolWorkerRuntime(
             runner=DurableToolWorkerRunner(
                 repository=jobs,

@@ -27,7 +27,15 @@ def build_project_orchestrator_worker(*, repository, scheduler, agent_run_servic
     graph = SQLAlchemyWorkGraphRepository(repository.engine)
     capabilities = ProjectCapabilityAdapter(capability_repository)
     facts = PersistentTaskDispatchFactLoader(engine=repository.engine, artifact_content=artifact_content)
-    resolver = runtime_resolver or TeamAgentCapabilityResolver(engine=repository.engine)
+    tools = ()
+    if artifact_content is not None:
+        from ..artifacts.task_publication import task_artifact_manifest
+        from ..runtime import AuthorizedTool
+
+        manifest = task_artifact_manifest()
+        tools = (AuthorizedTool(manifest.tool_id, manifest.version, manifest.schema_digest),)
+    resolver = runtime_resolver or TeamAgentCapabilityResolver(
+        engine=repository.engine, tool_policies={"default": tools})
     dispatcher = TeamAgentDispatcher(repository=repository, work_graph_repository=graph,
         capability_adapter=capabilities, runtime_resolver=resolver,
         run_service=agent_run_service, fact_loader=facts, artifact_content=artifact_content)

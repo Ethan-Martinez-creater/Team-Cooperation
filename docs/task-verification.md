@@ -148,4 +148,32 @@ decision 仅允许 ACCEPT/REJECT；reason 必填且最多 2,000 字符；idempot
 
 独立 Agent Worker 的终态链路现已组合任务预算/容量结算、结构化任务结果投影和验证；各步骤可幂等恢复，前一个投影异常不会跳过其它回调。Worker 每轮按认证团队有界扫描终态但未完成这些步骤的任务 Run，并在同一领域事务中写入编排 wakeup。审核 Run 仍由审核拥有团队的恢复队列处理；不读取其它任务的私有对话。未配置制品存储时仍会结算真实用量，但不会把不可读取的文件误判为合格提交。
 
+## 任务 Agent 生成真实文件
+
+配置现有 `COIFESP_ARTIFACT_STORE_ROOT` 后，控制面、Agent Worker 和 Tool Worker 使用同一份 `project.publish_artifact` 工具声明。项目编排器给默认任务 Agent 配置版本固定的工具授权；未配置存储时不声明或授予该工具。显式注入的 Team Agent runtime policy 仍由调用方决定，不会被默认设置覆盖。普通聊天和人工上传不会因此获得机器任务发布权限。
+
+模型通过持久 Tool Job 提交以下结构，而不是生成虚假的文件链接：
+
+```json
+{
+  "title": "实现说明",
+  "media_type": "text/plain",
+  "content": "这里是真实文件内容。",
+  "encoding": "utf8",
+  "propagation": "project_readonly"
+}
+```
+
+`encoding` 支持 utf8/base64；每次 content 最多 150,000 字符（预留 JSON 转义开销），解码后最多 512 KiB。该入口适合小型文档、源码片段和二进制结果；大文件上传仍使用现有资源上传入口，不宣称已经支持任意大小的 Agent 文件导出。media_type 和数量必须符合双方已接受的任务输出契约。
+
+工具校验当前 task_execution Run、执行尝试、任务契约、团队 Agent 委派、真实待执行调用、固定授权及工具租约。文件按摘要不可变保存；资源记录、制品清单、发布幂等记录和共享发布事实在同一数据库事务中提交。数据库事务失败后可能保留未被引用的不可变字节，但不会出现已发布资源指向未提交清单；重试复用相同对象。发布已提交而 Tool Job 回执丢失时，新 Worker 复用原资源，不重新发布。暂时存储或数据库可用性错误进入有界重试。
+
+迁移 `20260831_59` 为项目资源增加机器来源：`created_by=null`、`produced_by_principal_id=team-agent:<team>`、`source_run_id`、`process_id`。人工上传仍保留真实 `created_by` 外键；机器不得伪造人工账号。Integration 来源字段已预留且与 Run 来源互斥，内部 Integration 发布服务尚待接入。含机器来源的数据库不能无损退回旧格式，因此迁移 downgrade 会在修改表前拒绝。
+
+`team_private` 产出只在本团队可见，不广播项目发布事实。任务使用私有输入、输入共享已撤回或存在非任务上下文时，不允许自动改为 `project_readonly`。需要由所属团队通过现有资源共享操作审阅后披露；此工具不自动创建披露审批，也不会把未共享草稿判为跨团队合格交付。
+
+只有文件发布/办公工具时，Tool Worker 不要求 Docker 沙箱；一旦配置任意沙箱参数，仍须提供完整合法配置。代码执行和沙箱验证的隔离行为不变，也没有新增认证系统或配置凭据。
+
+`tests/test_task_artifact_publication.py` 使用真实持久 Agent Worker、Tool Worker、数据库、对象存储、任务投影和验证器，模型响应由测试 Provider 提供；覆盖新文件产生后验证、回执丢失恢复、事务回滚、私有输入、过期调用、存储重试与二进制/空文件。这不等价于真实 LLM、浏览器或 PostgreSQL 部署验收，也不代表 Integration/Delivery/Completion 已完成。
+
 `ProjectOrchestratorLoop` 将持久 Runner 放入后台线程消费，不阻塞异步请求循环；空闲/故障有轮询间隔，关闭时等待当前数据库操作结束再释放底层资源。它本身不调用模型，也不绕过 Runner 的租约校验。生产 bootstrap 已用应用现有数据库、队列、AgentRunService 和能力目录构造并挂载 `app.state.project_orchestrator_worker`，在数据库就绪和启动恢复之后启动，并在释放数据库之前停止；不会自行创建数据库表或迁移真实库。团队 Agent Run 仍由对应团队的独立 Agent Worker 执行。

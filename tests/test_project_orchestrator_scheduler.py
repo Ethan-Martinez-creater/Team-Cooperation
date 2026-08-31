@@ -83,6 +83,19 @@ def test_enqueue_is_deduplicated_and_conflicts_fail_closed(stack):
         enqueue(scheduler, source_event_type="project.delivery.accepted")
 
 
+def test_first_write_wakeup_is_rolled_back_with_callers_transaction(stack):
+    engine, _, scheduler, _ = stack
+    with pytest.raises(RuntimeError, match="caller rollback"), engine.begin() as connection:
+        # Deliberately no preceding business INSERT: SQLite must not commit
+        # the first SAVEPOINT independently of SQLAlchemy's outer transaction.
+        scheduler.enqueue_in_transaction(connection, process_id="process-a",
+            project_id="project-a", source_event_id="rollback-first-write",
+            source_event_type="artifact.published", payload={"event_id": "rollback-first-write"})
+        raise RuntimeError("caller rollback")
+    with engine.connect() as connection:
+        assert connection.execute(select(PROJECT_PROCESS_WAKEUPS)).all() == []
+
+
 def test_claim_is_exclusive_and_heartbeat_complete_are_fenced(stack):
     _, _, scheduler, clock = stack
     created = enqueue(scheduler)
