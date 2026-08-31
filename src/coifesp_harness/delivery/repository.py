@@ -237,3 +237,79 @@ PROJECT_COMPLETION_EVALUATIONS = Table(
     ),
 )
 
+
+PROJECT_DELIVERY_APPROVALS = Table(
+    "project_delivery_approvals",
+    DELIVERY_METADATA,
+    Column("approval_id", String(128), primary_key=True),
+    Column("project_id", String(128), nullable=False),
+    Column("process_id", String(128), nullable=False),
+    Column("delivery_id", String(128), nullable=False),
+    Column("contract_id", String(128), nullable=False),
+    Column("contract_version", Integer, nullable=False),
+    Column("actor_id", String(128), nullable=False),
+    Column("decision", String(16), nullable=False),
+    Column("decision_key", String(128), nullable=False),
+    Column("decision_digest", String(64), nullable=False),
+    Column("reason", Text, nullable=False),
+    Column("expected_delivery_version", Integer, nullable=False),
+    Column("expected_process_version", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint(
+        "length(approval_id) > 0",
+        name="ck_project_delivery_approvals_approval_id",
+    ),
+    CheckConstraint(
+        "length(project_id) > 0",
+        name="ck_project_delivery_approvals_project_id",
+    ),
+    CheckConstraint(
+        "length(process_id) > 0",
+        name="ck_project_delivery_approvals_process_id",
+    ),
+    CheckConstraint(
+        "length(delivery_id) > 0",
+        name="ck_project_delivery_approvals_delivery_id",
+    ),
+    CheckConstraint(
+        "length(contract_id) > 0",
+        name="ck_project_delivery_approvals_contract_id",
+    ),
+    CheckConstraint(
+        "contract_version >= 1",
+        name="ck_project_delivery_approvals_contract_version",
+    ),
+    CheckConstraint(
+        "length(actor_id) > 0",
+        name="ck_project_delivery_approvals_actor_id",
+    ),
+    CheckConstraint(
+        "decision IN ('ACCEPT','REJECT')",
+        name="ck_project_delivery_approvals_decision",
+    ),
+    CheckConstraint(
+        "length(decision_key) > 0",
+        name="ck_project_delivery_approvals_decision_key",
+    ),
+    CheckConstraint(
+        "length(decision_digest) = 64",
+        name="ck_project_delivery_approvals_decision_digest",
+    ),
+    CheckConstraint(
+        "length(reason) > 0",
+        name="ck_project_delivery_approvals_reason",
+    ),
+    CheckConstraint(
+        "expected_delivery_version >= 1",
+        name="ck_project_delivery_approvals_expected_delivery_version",
+    ),
+    CheckConstraint(
+        "expected_process_version >= 1",
+        name="ck_project_delivery_approvals_expected_process_version",
+    ),
+    UniqueConstraint(
+        "delivery_id",
+        "actor_id",
+        name="uq_project_delivery_approvals_delivery_actor",
+    ),
+)
