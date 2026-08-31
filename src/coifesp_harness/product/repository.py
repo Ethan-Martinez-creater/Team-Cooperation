@@ -268,7 +268,7 @@ TEAM_TASKS = Table(
     Column("project_id", String(128), ForeignKey("product_projects.project_id"), nullable=False),
     Column("source_team_id", String(128), ForeignKey("product_teams.team_id"), nullable=False),
     Column("target_team_id", String(128), ForeignKey("product_teams.team_id"), nullable=False),
-    Column("created_by", String(128), ForeignKey("product_accounts.account_id"), nullable=False),
+    Column("created_by", String(128), ForeignKey("product_accounts.account_id"), nullable=True),
     Column("title", String(256), nullable=False),
     Column("description", Text, nullable=False),
     Column("acceptance_criteria", Text, nullable=False),
@@ -295,6 +295,26 @@ TEAM_TASKS = Table(
     Column("source_decision_id", String(128), nullable=True),
     Column("source_contract_version", Integer, nullable=True),
     Column("autonomy_requirement", String(32), nullable=True),
+    Column("produced_by_principal_id", String(256), nullable=True),
+    Column("source_planner_run_id", String(128), nullable=True),
+    Column(
+        "source_planner_command_id",
+        String(128),
+        CheckConstraint(
+            "(created_by IS NOT NULL AND produced_by_principal_id IS NULL AND "
+            "source_planner_run_id IS NULL AND source_planner_command_id IS NULL) OR "
+            "(created_by IS NULL AND "
+            "produced_by_principal_id = 'service:project-orchestrator' AND "
+            "source_planner_run_id IS NOT NULL AND length(source_planner_run_id) > 0 AND "
+            "source_planner_command_id IS NOT NULL AND "
+            "length(source_planner_command_id) > 0 AND "
+            "process_id IS NOT NULL AND length(process_id) > 0 AND "
+            "source_decision_id IS NOT NULL AND length(source_decision_id) > 0)",
+            name="ck_product_team_tasks_creator",
+        ),
+        nullable=True,
+        unique=True,
+    ),
     # Match migration 53's column-owned CHECK for native SQLite downgrade.
     Column("accepted_contract_version", Integer, CheckConstraint(
         "(source_contract_version IS NULL AND "
