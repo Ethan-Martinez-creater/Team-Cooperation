@@ -60,6 +60,82 @@ The main-chain `integration.passed` transition enters `DELIVERY/READY`, never
 `TERMINAL`. Manifest readiness, human acceptance and completion evaluation
 remain separately enforced boundaries.
 
+### Executable acceptance and completion boundary (2026-08-31)
+
+Integration PASS now creates its READY manifest in the integration transaction.
+It does not accept the delivery. `DeliveryService` exposes human acceptance via
+the existing account and project-team membership model; no additional identity
+provider or external connector is required.
+
+The owning team's owner/admin proposes and approves a versioned completion
+contract, selecting an already approved WorkGraph root goal and 1-32 distinct
+active participating human accounts. Approval binds an unbound process root;
+it cannot replace another bound goal. The proposal event records the goal and
+request cursor, and the content digest covers the goal, criteria and approvers.
+Contracts cannot disable any of the fourteen required completion checks.
+
+Each approver submits an immutable ACCEPT/REJECT with the current delivery and
+process versions plus an idempotency key. Revision 60 stores one decision per
+delivery/account. The first decision pins contract ID/version/digest. Partial
+acceptance keeps the delivery READY and advances its revision. Replacing the
+approved contract after acceptance has started is rejected. A required account
+that has left the project or been disabled does not count toward final approval.
+
+The last ACCEPT runs the evaluator in the same transaction as the approval,
+accepted manifest, evaluation record and `delivery.accepted` Guard transition.
+Failure rolls the entire last decision back; no accepted-but-incomplete row is
+left behind. Earlier partial approvals remain. Failed evaluations currently
+return failed criterion IDs in a conflict response, not a persisted evaluation
+history. Only successful completion evaluations are persisted by this endpoint.
+
+The authoritative loader checks current TaskRun/contract/PASS evidence, graph
+digest, IntegrationRun bindings, all graph artifact coverage, shared metadata
+(including media type), and actual source/output byte hashes. It checks root
+goal confirmation, blocking risks/dependencies, open Gates/InputRequests and all
+required human approvals. It does not ask an LLM whether the project is done.
+
+Requirement satisfaction requires explicit `implements`/`delivers`/`part_of`
+coverage leading to verified tasks. Plan v2 can provide these semantic relations
+through its `dependencies` collection; absent coverage fails closed. The loader
+does not invent task-to-requirement mappings from the goal or task counts.
+Milestone completion is derived from its covered verified tasks under the
+supported `all_tasks_verified` policy (empty/default and v1 compatibility policy
+have the same meaning). `planned`, `active`, `in_progress` and `completed` are
+eligible states; blocked/cancelled states and opaque custom policies do not pass.
+This is an evaluation result, not an automatic rewrite of historical graph rows.
+
+REJECT records the human decision and guarded transition together, reopens only
+still-current verified tasks tied to the manifest, and preserves historical PASS
+records. The next TaskRun receives the explicit project-visible rejection reason
+as delivery-rework context, under the existing accepted task contract. It must
+publish/submit and verify a new attempt before producing a new delivery. A stale
+delivery or an arbitrary `changes_requested` row does not authorize re-dispatch.
+Rework currency is checked against the task node, latest TaskRun/accepted
+contract, rejection timestamp, approval cursors and original Integration refs.
+The current dispatch decision separately pins the current graph: a byte-for-byte
+comparison with the pre-rejection graph would be wrong because rejection itself
+changes task status and therefore the graph digest.
+
+The API prefix is `/v1/projects/{project_id}/processes/{process_id}`:
+
+- `GET /deliveries`: manifests, approval records, contracts and process cursor.
+- `POST /completion-contracts`: `expected_process_version`,
+  `expected_contract_version` (0 initially), `idempotency_key`,
+  `required_human_approvers`, and `root_goal_id` when the process is unbound.
+  Optional `criteria` must retain every required literal-true check.
+- `POST /completion-contracts/{contract_id}:approve`:
+  `expected_process_version`, `idempotency_key`.
+- `POST /deliveries:prepare`: `expected_process_version`; idempotently builds a
+  missing legacy manifest from actual current Integration PASS, never from
+  caller-supplied evidence.
+- `POST /deliveries/{delivery_id}:decide`: `decision` (ACCEPT/REJECT), `reason`,
+  `idempotency_key`, `expected_version` and `expected_process_version`.
+
+These endpoints are wired in production bootstrap. UI acceptance controls are
+still part of the later workspace phase; API tests are not browser acceptance.
+Schema 60 tests cover metadata, SQLite data preservation and PostgreSQL offline
+DDL, not a real PostgreSQL upgrade. No migration is run automatically here.
+
 ## Alternatives rejected
 
 - All TeamTasks verified ignores integration and acceptance.

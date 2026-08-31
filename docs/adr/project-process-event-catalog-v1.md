@@ -72,7 +72,22 @@ project.capacity.reservation_failed
 project.capacity.negotiation_resolved
 project.orchestrator.decision_stale
 project.completion.evaluated
+project.completion_contract.proposed
+project.completion_contract.approved
+project.delivery.approval_decided
 ```
+
+The acceptance producer writes the three additional v1 facts in the same SQL
+transaction as their contract/approval rows. Proposal identity is derived from
+process, human actor and idempotency key; approval identity from contract ID;
+delivery approval identity from delivery and actor. Payloads contain only
+contract/approval/goal IDs, versions, digests, request cursor and decision, never
+private task context. Contract proposal/approval and partial delivery acceptance
+advance event sequence without a state transition. The final acceptance writes
+completion evaluation and `project.delivery.accepted` atomically; rejection uses
+the existing `project.delivery.rejected` transition with impacted task IDs.
+Service and HTTP regressions cover retries, partial acceptance, outbox failure
+rollback and rejection through a new verified TaskRun to final completion.
 
 Adding a domain fact requires schema version, producer transaction boundary,
 idempotency key, payload allowlist and consumer tests. Aliases such as

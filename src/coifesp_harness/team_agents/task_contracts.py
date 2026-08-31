@@ -357,6 +357,10 @@ class PersistentTaskDispatchFactLoader:
 
             if load_integration_rework(connection, process=process, graph=graph, task_id=task_id) is not None:
                 return
+            from .delivery_rework import load_delivery_rework
+
+            if load_delivery_rework(connection, process=process, graph=graph, task_id=task_id) is not None:
+                return
             raise GovernanceConflictError(
                 "changes_requested task lacks current verification FAIL evidence"
             )

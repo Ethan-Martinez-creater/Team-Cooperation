@@ -207,6 +207,11 @@ class IntegrationService:
                 INTEGRATION_RUNS.c.status == "PENDING",
             ).values(**{key: row[key] for key in ("status", "checks_json", "impacted_work_ids_json",
                 "result_artifact_refs_json", "updated_at", "completed_at")}))
+            delivery = None
+            if row["status"] == "PASS":
+                from .manifest import create_delivery_manifest
+
+                delivery = create_delivery_manifest(connection, integration=row, now=now)
             ProjectProcessService(self.repository.using_connection(connection), clock=self.clock).apply_transition(
                 process_id=process_id, event_id=event_id, event_type="project.integration.completed",
                 transition_key="integration.failed" if impacted else "integration.passed",
@@ -214,7 +219,8 @@ class IntegrationService:
                 initiated_by=row["initiated_by"], executed_as=row["executed_as"],
                 correlation_id=row["integration_id"], payload={"integration_id": row["integration_id"],
                     "outcome": row["status"], "subject_digest": row["subject_digest"],
-                    "decision_id": decision_id, "impacted_work_ids": sorted(impacted)},
+                    "decision_id": decision_id, "impacted_work_ids": sorted(impacted),
+                    "delivery_id": delivery["delivery_id"] if delivery else None},
                 mutation_fence=mutation_fence)
             mutation_fence(connection)
             return row

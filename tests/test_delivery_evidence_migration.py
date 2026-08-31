@@ -30,6 +30,7 @@ from coifesp_harness.delivery.repository import (
     PROJECT_COMPLETION_CONTRACTS,
     PROJECT_COMPLETION_EVALUATIONS,
     PROJECT_DELIVERIES,
+    PROJECT_DELIVERY_APPROVALS,
 )
 
 _NOW = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
@@ -312,6 +313,7 @@ def test_repository_metadata_matches_contract():
         "project_deliveries": PROJECT_DELIVERIES,
         "project_completion_contracts": PROJECT_COMPLETION_CONTRACTS,
         "project_completion_evaluations": PROJECT_COMPLETION_EVALUATIONS,
+        "project_delivery_approvals": PROJECT_DELIVERY_APPROVALS,
     }
     assert not any(table.foreign_keys for table in _TABLES)
 

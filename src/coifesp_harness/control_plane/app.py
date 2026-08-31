@@ -44,6 +44,7 @@ from .checkpoint_routes import build_checkpoint_router
 from .code_workspace_routes import build_code_workspace_router
 from .connector_routes import build_connector_router
 from .conversation_routes import build_conversation_router
+from .delivery_routes import build_delivery_router
 from .document_workspace_routes import build_document_workspace_router
 from .exchange_routes import build_exchange_router
 from .execution_routes import build_execution_router
@@ -70,6 +71,7 @@ def create_app(
     approval_service=None,
     agent_run_service=None,
     task_verification_service=None,
+    delivery_service=None,
     capability_service=None,
     memory_lifecycle_service=None,
     semantic_checkpoint_service=None,
@@ -277,6 +279,9 @@ def create_app(
     if document_workspace_service is not None:
         app.include_router(build_document_workspace_router(authenticator=authenticator))
     app.state.task_verification_service = task_verification_service
+    app.state.delivery_service = delivery_service
+    if delivery_service is not None:
+        app.include_router(build_delivery_router(authenticator=authenticator, service=delivery_service))
     if task_verification_service is not None:
         app.include_router(build_task_verification_router(
             authenticator=authenticator, service=task_verification_service,

@@ -271,6 +271,7 @@ class TeamAgentDispatcher:
                 raise GovernanceConflictError("dispatch work graph snapshot is stale")
             verification_evidence = None
             integration_evidence = None
+            delivery_evidence = None
             if rework:
                 verification_evidence = self.verification_evidence_loader(
                     connection, process=process, graph=graph,
@@ -287,6 +288,10 @@ class TeamAgentDispatcher:
                     integration_evidence = load_integration_rework(
                         connection, process=process, graph=graph, task_id=task_id)
                     if integration_evidence is None:
+                        from .delivery_rework import load_delivery_rework
+
+                        delivery_evidence = load_delivery_rework(connection, process=process, graph=graph, task_id=task_id)
+                    if integration_evidence is None and delivery_evidence is None:
                         raise GovernanceConflictError(
                             "changes_requested task lacks current verification FAIL evidence or current integration FAIL evidence"
                         )
@@ -335,6 +340,10 @@ class TeamAgentDispatcher:
                 from .integration_rework import integration_rework_feedback
 
                 feedback = integration_rework_feedback(task=task, evidence=integration_evidence)
+            if delivery_evidence is not None:
+                from .delivery_rework import delivery_rework_feedback
+
+                feedback = delivery_rework_feedback(task=task, evidence=delivery_evidence)
             if rework and feedback is None:
                 raise GovernanceConflictError(
                     "verification FAIL has no safe structured finding for rework"
