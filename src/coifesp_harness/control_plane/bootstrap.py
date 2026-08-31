@@ -524,6 +524,19 @@ def build_application(
         capability_service = CapabilityDirectoryService(
             SQLAlchemyCapabilityRepository(engine=runtime_engine, audit_log=audit)
         )
+        from ..project_process.persistent_snapshot import (
+            PersistentProjectOrchestrationSnapshotLoader,
+        )
+        from ..project_process.runtime import build_project_orchestrator_worker
+
+        project_orchestrator_worker = build_project_orchestrator_worker(
+            repository=project_process_repository,
+            scheduler=project_process_scheduler,
+            agent_run_service=agent_run_service,
+            capability_repository=capability_service.repository,
+            artifact_content=artifact_content_service,
+            snapshot_loader_factory=PersistentProjectOrchestrationSnapshotLoader,
+        )
         collaboration_transport = None
         if settings.envelope_signing_key is not None or settings.envelope_keys:
             collaboration_transport = DurableCollaborationTransport(
@@ -617,6 +630,7 @@ def build_application(
     app.state.project_process_repository = project_process_repository
     app.state.project_process_wakeup_repository = project_process_wakeup_repository
     app.state.project_process_scheduler = project_process_scheduler
+    app.state.project_orchestrator_worker = project_orchestrator_worker
     app.state.project_process_service = project_process_service
     app.state.project_execution_budget_service = project_execution_budget_service
     app.state.human_gate_service = human_gate_service

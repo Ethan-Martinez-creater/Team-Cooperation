@@ -144,8 +144,8 @@ decision 仅允许 ACCEPT/REJECT；reason 必填且最多 2,000 字符；idempot
 
 `VerificationOrchestrationEffect` 与持久 Runner 配合，在执行迁移的事务内再次核对 graph digest、process version/event sequence、decision 和工作租约。当前 PASS 才通过 Guard 进入 INTEGRATION；当前 FAIL 才返回 EXECUTION/READY。它不重写任务、已接受契约或历史证据，不增加 Planner replan/generated-task 计数；实际重跑仍须正常预留执行预算与团队容量。
 
-这些是编排装配组件，尚不表示生产后台消费者已完整接线，也不表示 IntegrationRun、DeliveryManifest 或最终 CompletionEvaluator 已完成。任务重新派发、生产快照及后台运行时正在后续切片集成。项目级 verification.completed 事实明确携带 PASS/FAIL outcome；通过验证不等于项目完成。
+生产后台消费者现已接线：持久快照读取当前契约、团队能力/共享容量、预算、活跃任务与审核 Run、Gate/Input 和验证证据；多个任务共享同一 provider/capability/version 容量池。当前验证 FAIL 可按原已接受契约重派新 execution attempt，仍受预算、容量与租约约束。返工上下文包含已验证的 Agent Review 修改意见或对任务双方公开的 Human Review 拒绝理由，不读取原 Run 的私有总结；已撤回共享的证据引用不会透传。项目级 verification.completed 事实明确携带 PASS/FAIL outcome；通过验证不等于项目完成，IntegrationRun、DeliveryManifest 和最终 CompletionEvaluator 仍在后续实现中。
 
 独立 Agent Worker 的终态链路现已组合任务预算/容量结算、结构化任务结果投影和验证；各步骤可幂等恢复，前一个投影异常不会跳过其它回调。Worker 每轮按认证团队有界扫描终态但未完成这些步骤的任务 Run，并在同一领域事务中写入编排 wakeup。审核 Run 仍由审核拥有团队的恢复队列处理；不读取其它任务的私有对话。未配置制品存储时仍会结算真实用量，但不会把不可读取的文件误判为合格提交。
 
-`ProjectOrchestratorLoop` 将持久 Runner 放入后台线程消费，不阻塞异步请求循环；空闲/故障有轮询间隔，关闭时等待当前数据库操作结束再释放底层资源。它本身不调用模型，也不绕过 Runner 的租约校验。应用生命周期支持注入 `app.state.project_orchestrator_worker`，在数据库就绪和启动恢复之后启动，并在释放数据库之前停止；生产 bootstrap 的持久快照/消费者构造仍在后续集成中。
+`ProjectOrchestratorLoop` 将持久 Runner 放入后台线程消费，不阻塞异步请求循环；空闲/故障有轮询间隔，关闭时等待当前数据库操作结束再释放底层资源。它本身不调用模型，也不绕过 Runner 的租约校验。生产 bootstrap 已用应用现有数据库、队列、AgentRunService 和能力目录构造并挂载 `app.state.project_orchestrator_worker`，在数据库就绪和启动恢复之后启动，并在释放数据库之前停止；不会自行创建数据库表或迁移真实库。团队 Agent Run 仍由对应团队的独立 Agent Worker 执行。

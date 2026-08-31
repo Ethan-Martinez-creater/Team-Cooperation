@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from sqlalchemy import select
 from test_task_verification_service import setup
@@ -49,3 +51,51 @@ def test_mismatched_runtime_engine_is_rejected(tmp_path):
             agent_run_service=value.dispatcher.run_service, capability_repository=value.capabilities,
             artifact_content=value.content, snapshot_loader_factory=lambda **_: None,
             runtime_resolver=WrongResolver())
+
+
+def test_application_lifespan_consumes_persisted_verification_with_production_loader(tmp_path):
+    from coifesp_harness.project_process.persistent_snapshot import (
+        PersistentProjectOrchestrationSnapshotLoader,
+    )
+    from test_control_plane import StubVerifier, settings
+    from test_verification_orchestration_effect import stack
+
+    from coifesp_harness.control_plane import create_app
+    from coifesp_harness.team_agents.accounting import TeamTaskRunAccounting
+
+    value = stack(tmp_path, fail=False)
+    TeamTaskRunAccounting(repository=value.repository, run_repository=value.runs,
+                         capability_repository=value.capabilities).replay_pending()
+    worker = build_project_orchestrator_worker(repository=value.repository,
+        scheduler=value.runner.scheduler, agent_run_service=value.dispatcher.run_service,
+        capability_repository=value.capabilities, artifact_content=value.content,
+        snapshot_loader_factory=PersistentProjectOrchestrationSnapshotLoader,
+        worker_id="production-verification-worker", idle_poll_seconds=.05)
+    results = []
+
+    async def scenario():
+        done = asyncio.Event()
+        event_loop = asyncio.get_running_loop()
+        actual = worker.runner.process_once
+
+        def observed(**kwargs):
+            result = actual(**kwargs)
+            results.append(result)
+            event_loop.call_soon_threadsafe(done.set)
+            return result
+
+        worker.runner.process_once = observed
+        app = create_app(settings=settings(), verifier=StubVerifier({}), readiness_probe=lambda: True)
+        app.state.project_orchestrator_worker = worker
+        async with app.router.lifespan_context(app):
+            await asyncio.wait_for(done.wait(), 10)
+
+    asyncio.run(scenario())
+    assert results[0].status.value == "APPLIED", results[0]
+    assert results[0].action.value == "enter_integration"
+    with value.repository.transaction() as connection:
+        process = value.repository.process(connection, "process-a")
+        assert (process.phase.value, process.status.value) == ("INTEGRATION", "READY")
+        events = value.repository.events(connection, "process-a")
+        assert len([event for event in events
+                    if event.event_type == "project.verification.completed"]) == 1

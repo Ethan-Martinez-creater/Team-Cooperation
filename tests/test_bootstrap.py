@@ -1,6 +1,9 @@
 import base64
 
 import pytest
+from coifesp_harness.project_process.persistent_snapshot import (
+    PersistentProjectOrchestrationSnapshotLoader,
+)
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
@@ -14,6 +17,7 @@ from coifesp_harness.project_process import (
     ProjectExecutionBudgetService,
     ProjectProcessService,
 )
+from coifesp_harness.project_process.worker_loop import ProjectOrchestratorLoop
 from coifesp_harness.team_agents.task_projection import TeamTaskResultProjection
 
 
@@ -75,6 +79,13 @@ def test_bootstrap_wires_durable_memory_audit_and_readiness() -> None:
     assert app.state.team_task_result_projection.runs is app.state.agent_run_service.repository
     assert app.state.task_verification_service.repository.engine is engine
     assert app.state.task_verification_service.notifier is app.state.notification_service
+    worker = app.state.project_orchestrator_worker
+    assert isinstance(worker, ProjectOrchestratorLoop)
+    assert isinstance(worker.runner.snapshot_loader, PersistentProjectOrchestrationSnapshotLoader)
+    assert worker.runner.repository is app.state.project_process_repository
+    assert worker.runner.scheduler is app.state.project_process_scheduler
+    assert worker.runner.effect.dispatcher.run_service is app.state.agent_run_service
+    assert worker.runner.effect.dispatcher.capabilities.repository is app.state.capability_service.repository
     assert app.state.database_readiness() is True
     assert probe_calls == [True]
 
