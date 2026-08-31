@@ -279,8 +279,7 @@ class PlannerGraphMutations:
         other_key = (
             other_table.c.decision_id if candidate is WorkNodeType.RISK else other_table.c.risk_id
         )
-        for table_key in ((candidate_table, candidate_key), (other_table, other_key)):
-            table, key = table_key
+        for key in (candidate_key, other_key):
             if (
                 connection.execute(select(key).where(key == identifier)).scalar_one_or_none()
                 is not None

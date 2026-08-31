@@ -184,6 +184,7 @@
     "project.capacity.reservation_failed",
     "project.capacity.negotiation_resolved",
     "project.orchestrator.decision_stale",
+    "project.orchestrator.commands_consumed",
     "project.completion.evaluated"
   ],
   "main_transition": [

@@ -304,6 +304,7 @@ TEAM_TASKS = Table(
             "(created_by IS NOT NULL AND produced_by_principal_id IS NULL AND "
             "source_planner_run_id IS NULL AND source_planner_command_id IS NULL) OR "
             "(created_by IS NULL AND "
+            "produced_by_principal_id IS NOT NULL AND "
             "produced_by_principal_id = 'service:project-orchestrator' AND "
             "source_planner_run_id IS NOT NULL AND length(source_planner_run_id) > 0 AND "
             "source_planner_command_id IS NOT NULL AND "
@@ -313,7 +314,6 @@ TEAM_TASKS = Table(
             name="ck_product_team_tasks_creator",
         ),
         nullable=True,
-        unique=True,
     ),
     # Match migration 53's column-owned CHECK for native SQLite downgrade.
     Column("accepted_contract_version", Integer, CheckConstraint(
@@ -344,6 +344,7 @@ TEAM_TASKS = Table(
     CheckConstraint("schedule_version >= 1", name="positive_schedule_version"),
 )
 Index("ix_product_tasks_project_status", TEAM_TASKS.c.project_id, TEAM_TASKS.c.status)
+Index("uq_product_team_tasks_source_planner_command_id", TEAM_TASKS.c.source_planner_command_id, unique=True)
 Index(
     "ix_product_tasks_team_status_due",
     TEAM_TASKS.c.target_team_id,

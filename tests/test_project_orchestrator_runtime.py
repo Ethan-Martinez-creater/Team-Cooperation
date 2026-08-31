@@ -37,6 +37,8 @@ def test_factory_reuses_existing_database_services_without_launching_runs(tmp_pa
     resolved = dispatcher.runtime_resolver.resolve(agent_id=value.agent.agent_id, project_id="project-a")
     assert [tool.tool_id for tool in resolved.tool_authorization.tools] == ["project.publish_artifact"]
     assert isinstance(worker.runner.snapshot_loader, Loader)
+    assert worker.runner.command_consumer.repository is value.repository
+    assert worker.runner.command_consumer.graph is captures[0]["work_graph_repository"]
     with value.engine.connect() as connection:
         assert len(connection.execute(select(AGENT_RUNS)).all()) == 1
         assert value.repository.usage(connection, "process-a").agent_runs_started == 1

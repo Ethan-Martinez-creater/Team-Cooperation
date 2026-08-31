@@ -44,6 +44,7 @@ DOMAIN_FACTS = frozenset(
         "project.capacity.reservation_failed",
         "project.capacity.negotiation_resolved",
         "project.orchestrator.decision_stale",
+        "project.orchestrator.commands_consumed",
         "project.completion.evaluated",
         # v2 additions for durable terminal Human objects.
         "project.input.closed",

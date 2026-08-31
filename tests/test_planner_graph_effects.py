@@ -18,7 +18,10 @@ from coifesp_harness.project_process.commands import (
     ProjectProcessCommandType,
 )
 from coifesp_harness.project_process.planner_graph_effects import PlannerGraphMutations
-from coifesp_harness.work_graph import ProjectWorkGraphService, SQLAlchemyWorkGraphRepository
+from coifesp_harness.work_graph import (
+    ProjectWorkGraphService,
+    SQLAlchemyWorkGraphRepository,
+)
 from coifesp_harness.work_graph.repository import (
     PROJECT_DECISIONS,
     PROJECT_RISKS,
@@ -111,7 +114,7 @@ def _goal_nodes(repository):
 
 
 def test_risk_is_materialized_with_open_status_and_graph_node():
-    engine, repository, adapter, process = _stack()
+    engine, _repository, adapter, process = _stack()
     command = _command(
         ProjectProcessCommandType.PROPOSE_RISK,
         {
@@ -145,7 +148,7 @@ def test_risk_is_materialized_with_open_status_and_graph_node():
 
 
 def test_decision_uses_canonical_options_and_proposed_identity():
-    engine, repository, adapter, process = _stack()
+    engine, _repository, adapter, process = _stack()
     command = _command(
         ProjectProcessCommandType.PROPOSE_DECISION,
         {
@@ -206,7 +209,7 @@ def test_decision_uses_canonical_options_and_proposed_identity():
     ],
 )
 def test_risk_and_decision_identifier_collision_does_not_overwrite(kind, payload):
-    engine, repository, adapter, process = _stack()
+    engine, _repository, adapter, process = _stack()
     first = _command(
         ProjectProcessCommandType.PROPOSE_RISK,
         {
@@ -220,7 +223,7 @@ def test_risk_and_decision_identifier_collision_does_not_overwrite(kind, payload
     )
     _apply(adapter, engine, process, first)
 
-    with engine.begin() as connection:
+    with engine.begin() as connection:  # noqa: SIM117 - show rejection inside caller transaction
         with pytest.raises(GovernanceConflictError, match="identifier"):
             adapter.apply(
                 connection,
@@ -239,7 +242,7 @@ def test_risk_and_decision_identifier_collision_does_not_overwrite(kind, payload
 
 
 def test_existing_decision_identifier_is_also_a_hard_collision():
-    engine, repository, adapter, process = _stack()
+    engine, _repository, adapter, process = _stack()
     original = _command(
         ProjectProcessCommandType.PROPOSE_DECISION,
         {
@@ -260,7 +263,7 @@ def test_existing_decision_identifier_is_also_a_hard_collision():
         },
         command_id="command-2",
     )
-    with engine.begin() as connection:
+    with engine.begin() as connection:  # noqa: SIM117 - show rejection inside caller transaction
         with pytest.raises(GovernanceConflictError, match="identifier"):
             adapter.apply(
                 connection,
@@ -367,7 +370,7 @@ def test_dependency_rejects_self_cross_project_alias_and_cycle():
 
 
 def test_outer_transaction_rolls_back_prior_graph_effects():
-    engine, repository, adapter, process = _stack()
+    engine, _repository, adapter, process = _stack()
     risk = _command(
         ProjectProcessCommandType.PROPOSE_RISK,
         {
@@ -389,7 +392,7 @@ def test_outer_transaction_rolls_back_prior_graph_effects():
         },
         command_id="command-invalid",
     )
-    with pytest.raises(ValueError, match="options"):
+    with pytest.raises(ValueError, match="options"):  # noqa: SIM117 - exception must leave transaction
         with engine.begin() as connection:
             adapter.apply(
                 connection, command=risk, process=process, source_run_id="run-planner-1", now=NOW

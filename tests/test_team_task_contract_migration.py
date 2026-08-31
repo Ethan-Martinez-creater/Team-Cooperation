@@ -388,8 +388,13 @@ def test_sqlite_native_migration_preserves_inbound_graph_indexes_and_triggers():
 
 
 def test_fresh_metadata_contract_check_allows_native_downgrade():
+    from test_planner_task_provenance_migration import _migrate as migrate_provenance
+
     engine = create_engine("sqlite+pysqlite://", poolclass=StaticPool)
     PRODUCT_METADATA.create_all(engine)
+    # Revision 61 now references revision 53 fields. Follow the actual reverse
+    # dependency order instead of dropping 53 out of the current schema.
+    migrate_provenance(engine, "downgrade")
     _migrate(engine, "downgrade")
     assert not set(_CONTRACT_COLUMNS) & {
         column["name"] for column in inspect(engine).get_columns(TEAM_TASKS.name)
@@ -398,6 +403,7 @@ def test_fresh_metadata_contract_check_allows_native_downgrade():
     assert set(_CONTRACT_COLUMNS) <= {
         column["name"] for column in inspect(engine).get_columns(TEAM_TASKS.name)
     }
+    migrate_provenance(engine, "upgrade")
     engine.dispose()
 
 

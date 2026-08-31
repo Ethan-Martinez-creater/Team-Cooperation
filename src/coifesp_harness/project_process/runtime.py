@@ -8,6 +8,7 @@ from ..team_agents.task_contracts import PersistentTaskDispatchFactLoader
 from ..work_graph.repository import SQLAlchemyWorkGraphRepository
 from .capability_adapter import ProjectCapabilityAdapter
 from .command_service import ProjectProcessCommandService
+from .planner_consumer import PlannerCommandConsumer
 from .runner import ProjectOrchestratorRunner
 from .service import ProjectProcessService
 from .verification_effect import VerificationOrchestrationEffect
@@ -52,6 +53,7 @@ def build_project_orchestrator_worker(*, repository, scheduler, agent_run_servic
         process_service=ProjectProcessService(repository),
         command_service=ProjectProcessCommandService(repository), scheduler=scheduler,
         snapshot_loader=snapshot_loader,
+        command_consumer=PlannerCommandConsumer(repository=repository, work_graph_repository=graph),
         effect=VerificationOrchestrationEffect(repository=repository,
             work_graph_repository=graph, dispatcher=dispatcher, integration_service=integration_service))
     return ProjectOrchestratorLoop(runner,

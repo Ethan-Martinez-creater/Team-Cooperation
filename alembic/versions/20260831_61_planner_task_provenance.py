@@ -29,6 +29,7 @@ _CREATOR_CHECK = (
     "(created_by IS NOT NULL AND produced_by_principal_id IS NULL AND "
     "source_planner_run_id IS NULL AND source_planner_command_id IS NULL) OR "
     "(created_by IS NULL AND "
+    "produced_by_principal_id IS NOT NULL AND "
     "produced_by_principal_id = 'service:project-orchestrator' AND "
     "source_planner_run_id IS NOT NULL AND length(source_planner_run_id) > 0 AND "
     "source_planner_command_id IS NOT NULL AND "

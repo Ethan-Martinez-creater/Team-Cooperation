@@ -310,7 +310,7 @@ class TeamTask:
     project_id: str
     source_team_id: str
     target_team_id: str
-    created_by: str
+    created_by: str | None
     title: str
     description: str
     acceptance_criteria: str
@@ -326,6 +326,9 @@ class TeamTask:
     due_changed_at: datetime | None = None
     due_changed_by: str | None = None
     completed_at: datetime | None = None
+    produced_by_principal_id: str | None = None
+    source_planner_run_id: str | None = None
+    source_planner_command_id: str | None = None
 
 
 def task_is_overdue(status: TeamTaskStatus, due_at: datetime | None, now: datetime) -> bool:

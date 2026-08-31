@@ -143,8 +143,9 @@ class ProjectOrchestrationCommandValidator:
 
     @classmethod
     def _propose_task(cls, raw, *, teams, references):
+        contract = raw.get("contract")
         cls._keys(
-            raw,
+            {key: value for key, value in raw.items() if key != "contract"},
             required={"type", "task_id", "team_id", "title", "description", "dependencies"},
         )
         task_id = cls._identifier(raw["task_id"], "task_id")
@@ -154,13 +155,21 @@ class ProjectOrchestrationCommandValidator:
         dependencies = cls._reference_array(raw["dependencies"], references, "dependencies")
         if task_id in dependencies or f"node:task:{task_id}" in dependencies:
             raise GovernanceConflictError("planner task cannot depend on itself")
-        return {
+        result = {
             "task_id": task_id,
             "team_id": team_id,
             "title": cls._text(raw["title"], "title", 256),
             "description": cls._text(raw["description"], "description", 8000),
             "dependencies": dependencies,
         }
+        if "contract" in raw:
+            from ..team_agents.task_contract_models import validate_task_contract
+
+            if type(contract) is not dict or set(contract) != {"requested_capability", "input_manifest",
+                    "output_contract", "verification_policy", "autonomy_requirement"}:
+                raise ValueError("planner task contract must contain all structured execution fields")
+            result["contract"] = validate_task_contract(**contract)
+        return result
 
     @classmethod
     def _propose_dependency(cls, raw, *, references):

@@ -250,7 +250,10 @@ class TeamTaskView(StrictModel):
     project_id: str
     source_team_id: str
     target_team_id: str
-    created_by: str
+    created_by: str | None
+    produced_by_principal_id: str | None = None
+    source_planner_run_id: str | None = None
+    source_planner_command_id: str | None = None
     title: str
     description: str
     acceptance_criteria: str

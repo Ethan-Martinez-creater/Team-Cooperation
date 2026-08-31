@@ -71,6 +71,7 @@ project.capacity.reserved
 project.capacity.reservation_failed
 project.capacity.negotiation_resolved
 project.orchestrator.decision_stale
+project.orchestrator.commands_consumed
 project.completion.evaluated
 project.completion_contract.proposed
 project.completion_contract.approved

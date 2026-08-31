@@ -3591,6 +3591,9 @@ class TeamCollaborationService:
             ProductAccountService._aware(row["completed_at"])
             if row["completed_at"] is not None
             else None,
+            produced_by_principal_id=row.get("produced_by_principal_id"),
+            source_planner_run_id=row.get("source_planner_run_id"),
+            source_planner_command_id=row.get("source_planner_command_id"),
         )
 
     @staticmethod

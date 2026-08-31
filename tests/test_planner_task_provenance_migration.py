@@ -30,7 +30,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
-from sqlalchemy.schema import CreateTable
+from sqlalchemy.schema import CreateIndex, CreateTable
 
 from coifesp_harness.product.repository import PRODUCT_METADATA, TEAM_TASKS
 
@@ -309,7 +309,9 @@ def test_repository_metadata_has_nullable_fk_and_provenance_contract():
         foreign_key.column.table.metadata
         for foreign_key in TEAM_TASKS.c.created_by.foreign_keys
     } == {PRODUCT_METADATA}
-    assert TEAM_TASKS.c.source_planner_command_id.unique is True
+    source_index = next(index for index in TEAM_TASKS.indexes if index.name == _SOURCE_COMMAND_INDEX)
+    assert source_index.unique is True
+    assert list(source_index.columns) == [TEAM_TASKS.c.source_planner_command_id]
     for name, length in (
         ("produced_by_principal_id", 256),
         ("source_planner_run_id", 128),
@@ -424,6 +426,7 @@ def test_machine_and_human_task_provenance_are_storable_with_unaccepted_contract
     [
         {"created_by": "account-human"},
         {"produced_by_principal_id": "agent:planner"},
+        {"produced_by_principal_id": None},
         {"source_planner_run_id": ""},
         {"source_planner_run_id": None},
         {"source_planner_command_id": ""},
@@ -534,7 +537,10 @@ def test_postgresql_team_task_ddl_has_creator_check_and_retains_account_fk():
     assert "FOREIGN KEY(created_by) REFERENCES product_accounts (account_id)" in ddl
     assert "CONSTRAINT ck_product_team_tasks_creator CHECK" in ddl
     assert "produced_by_principal_id = 'service:project-orchestrator'" in ddl
-    assert "UNIQUE (source_planner_command_id)" in ddl
+    source_index = next(index for index in TEAM_TASKS.indexes if index.name == _SOURCE_COMMAND_INDEX)
+    index_ddl = str(CreateIndex(source_index).compile(dialect=postgresql.dialect()))
+    assert f"CREATE UNIQUE INDEX {_SOURCE_COMMAND_INDEX}" in index_ddl
+    assert "(source_planner_command_id)" in index_ddl
 
 
 def test_postgresql_upgrade_compiles_offline_and_revision_has_expected_head():

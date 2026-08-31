@@ -111,6 +111,7 @@ class ProjectOrchestratorRunner:
         retry_after_seconds: float = 0,
         after_effect: Callable[[], None] | None = None,
         after_decision_finished: Callable[[], None] | None = None,
+        command_consumer=None,
     ) -> None:
         if retry_after_seconds < 0:
             raise ValueError("retry_after_seconds cannot be negative")
@@ -124,6 +125,7 @@ class ProjectOrchestratorRunner:
         self.retry_after_seconds = retry_after_seconds
         self.after_effect = after_effect
         self.after_decision_finished = after_decision_finished
+        self.command_consumer = command_consumer
 
     def process_once(
         self,
@@ -132,6 +134,11 @@ class ProjectOrchestratorRunner:
         process_id: str | None = None,
         lease_seconds: int = 30,
     ) -> ProjectOrchestratorWorkerOutcome:
+        if self.command_consumer is not None:
+            consumed = self.command_consumer.process_once(
+                worker_id=worker_id, process_id=process_id, lease_seconds=lease_seconds)
+            if consumed is not None:
+                return consumed
         wakeup = self.scheduler.claim(
             owner=worker_id,
             process_id=process_id,
