@@ -1,9 +1,6 @@
 import base64
 
 import pytest
-from coifesp_harness.project_process.persistent_snapshot import (
-    PersistentProjectOrchestrationSnapshotLoader,
-)
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
@@ -16,6 +13,9 @@ from coifesp_harness.project_process import (
     HumanGateService,
     ProjectExecutionBudgetService,
     ProjectProcessService,
+)
+from coifesp_harness.project_process.persistent_snapshot import (
+    PersistentProjectOrchestrationSnapshotLoader,
 )
 from coifesp_harness.project_process.worker_loop import ProjectOrchestratorLoop
 from coifesp_harness.team_agents.task_projection import TeamTaskResultProjection

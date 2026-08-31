@@ -54,13 +54,13 @@ def test_mismatched_runtime_engine_is_rejected(tmp_path):
 
 
 def test_application_lifespan_consumes_persisted_verification_with_production_loader(tmp_path):
-    from coifesp_harness.project_process.persistent_snapshot import (
-        PersistentProjectOrchestrationSnapshotLoader,
-    )
     from test_control_plane import StubVerifier, settings
     from test_verification_orchestration_effect import stack
 
     from coifesp_harness.control_plane import create_app
+    from coifesp_harness.project_process.persistent_snapshot import (
+        PersistentProjectOrchestrationSnapshotLoader,
+    )
     from coifesp_harness.team_agents.accounting import TeamTaskRunAccounting
 
     value = stack(tmp_path, fail=False)
