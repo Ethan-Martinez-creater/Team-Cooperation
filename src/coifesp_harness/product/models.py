@@ -260,7 +260,7 @@ class ProjectResource:
     resource_id: str
     project_id: str
     owner_team_id: str
-    created_by: str
+    created_by: str | None
     title: str
     artifact_owner_team_id: str
     artifact_id: str
@@ -268,6 +268,10 @@ class ProjectResource:
     media_type: str
     propagation: DataPropagation
     created_at: datetime
+    produced_by_principal_id: str | None = None
+    source_run_id: str | None = None
+    source_integration_id: str | None = None
+    process_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

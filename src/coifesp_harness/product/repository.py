@@ -179,7 +179,7 @@ PROJECT_RESOURCES = Table(
     Column("resource_id", String(128), primary_key=True),
     Column("project_id", String(128), nullable=False),
     Column("owner_team_id", String(128), ForeignKey("product_teams.team_id"), nullable=False),
-    Column("created_by", String(128), ForeignKey("product_accounts.account_id"), nullable=False),
+    Column("created_by", String(128), ForeignKey("product_accounts.account_id"), nullable=True),
     Column("title", String(256), nullable=False),
     Column("artifact_owner_team_id", String(128), nullable=False),
     Column("artifact_id", String(128), nullable=False),
@@ -187,10 +187,25 @@ PROJECT_RESOURCES = Table(
     Column("media_type", String(256), nullable=False),
     Column("propagation", String(32), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("produced_by_principal_id", String(256), nullable=True),
+    Column("source_run_id", String(128), nullable=True),
+    Column("source_integration_id", String(128), nullable=True),
+    Column("process_id", String(128), nullable=True),
     CheckConstraint(
         "propagation IN ('team_private','project_readonly','portable')", name="propagation"
     ),
     CheckConstraint("length(artifact_sha256) = 64", name="artifact_sha256"),
+    CheckConstraint(
+        "(created_by IS NOT NULL AND produced_by_principal_id IS NULL AND "
+        "source_run_id IS NULL AND source_integration_id IS NULL AND process_id IS NULL) OR "
+        "(created_by IS NULL AND produced_by_principal_id IS NOT NULL AND "
+        "length(produced_by_principal_id) > 0 AND process_id IS NOT NULL AND "
+        "length(process_id) > 0 AND ((source_run_id IS NOT NULL AND "
+        "length(source_run_id) > 0 AND source_integration_id IS NULL) OR "
+        "(source_run_id IS NULL AND source_integration_id IS NOT NULL AND "
+        "length(source_integration_id) > 0)))",
+        name="ck_product_project_resources_provenance",
+    ),
     UniqueConstraint("artifact_owner_team_id", "artifact_id", name="uq_product_resource_artifact"),
 )
 Index(

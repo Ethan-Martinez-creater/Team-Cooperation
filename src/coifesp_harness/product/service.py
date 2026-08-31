@@ -1549,6 +1549,10 @@ class ProjectResourceService:
             row["media_type"],
             DataPropagation(row["propagation"]),
             ProductAccountService._aware(row["created_at"]),
+            row["produced_by_principal_id"],
+            row["source_run_id"],
+            row["source_integration_id"],
+            row["process_id"],
         )
 
 
