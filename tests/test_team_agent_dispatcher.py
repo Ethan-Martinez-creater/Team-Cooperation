@@ -23,6 +23,7 @@ from coifesp_harness.agent_runs import (
 )
 from coifesp_harness.agent_runs.repository import AGENT_RUNS
 from coifesp_harness.capabilities.repository import CAPACITY_RESERVATIONS
+from coifesp_harness.delivery.repository import DELIVERY_METADATA
 from coifesp_harness.errors import GovernanceConflictError
 from coifesp_harness.product import ProjectWorkspaceService, TeamCollaborationService
 from coifesp_harness.product.repository import PROJECT_AGENT_RUNS, TEAM_TASKS
@@ -83,6 +84,7 @@ def stack(*, accepted=True, slots=2, token_budget=200000):
     )
     repository = SQLAlchemyProjectProcessRepository(engine)
     repository.create_schema()
+    DELIVERY_METADATA.create_all(engine)
     processes = ProjectProcessService(repository)
     processes.create_policy(
         policy_id="policy-a", project_id="project-a", max_agent_runs=10,

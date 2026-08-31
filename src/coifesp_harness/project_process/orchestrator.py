@@ -23,6 +23,7 @@ class DeterministicAction(StrEnum):
     WAIT_FOR_WORK = "wait_for_work"
     WAIT_FOR_VERIFICATION = "wait_for_verification"
     ENTER_INTEGRATION = "enter_integration"
+    ASSEMBLE_INTEGRATION = "assemble_integration"
     WAIT_FOR_INTEGRATION = "wait_for_integration"
     ENTER_DELIVERY = "enter_delivery"
     WAIT_FOR_DELIVERY = "wait_for_delivery"
@@ -87,6 +88,7 @@ class DeterministicProjectOrchestrator:
         has_active_operation: bool = False,
         verification_outcome: VerificationOutcome | str | None = None,
         integration_outcome: IntegrationOutcome | str | None = None,
+        integration_available: bool = False,
         delivery_outcome: DeliveryOutcome | str | None = None,
     ) -> DeterministicDecision:
         if process.status in {
@@ -135,7 +137,8 @@ class DeterministicProjectOrchestrator:
         if process.phase is ProjectProcessPhase.INTEGRATION:
             if integration_outcome is None:
                 return DeterministicDecision(
-                    DeterministicAction.WAIT_FOR_INTEGRATION,
+                    (DeterministicAction.ASSEMBLE_INTEGRATION if integration_available
+                     else DeterministicAction.WAIT_FOR_INTEGRATION),
                     DeterministicReason.INTEGRATION_PENDING,
                 )
             if IntegrationOutcome(integration_outcome) is IntegrationOutcome.PASSED:

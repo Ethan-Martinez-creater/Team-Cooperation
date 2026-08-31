@@ -36,6 +36,30 @@ machine-verifiable completion condition.
 9. Evidence is immutable and replay-safe. Later scope change creates a new
    version rather than rewriting accepted evidence.
 
+### Artifact-composition execution boundary
+
+The first executable integration policy is `artifact_composition` with bounded
+artifact count and total input bytes. `assemble_integration` is a durable
+Orchestrator decision; the fenced adapter pins the current graph, process/event
+versions, task verification receipts and exact resource manifests. It reads
+the immutable bytes again and publishes a deterministic ZIP with an embedded
+version/digest manifest. It does not claim code-build or semantic acceptance.
+
+IntegrationRun, result resource/registry metadata, completion fact and Guard
+transition commit in one transaction. Object bytes may survive a rolled-back
+transaction; deterministic object/publication identities make retry safe.
+Storage/lease/database failures roll back instead of becoming business FAIL.
+
+The non-main-chain `integration.failed` selector maps
+`INTEGRATION/READY/NONE -> EXECUTION/READY/NONE`, driven only by the recorded
+`project.integration.completed` FAIL evidence. Affected tasks become
+`changes_requested` in that transaction; their accepted contract and historical
+PASS verification remain immutable. Re-dispatch must validate this integration
+failure against the latest task attempt, not invent a failed task verification.
+The main-chain `integration.passed` transition enters `DELIVERY/READY`, never
+`TERMINAL`. Manifest readiness, human acceptance and completion evaluation
+remain separately enforced boundaries.
+
 ## Alternatives rejected
 
 - All TeamTasks verified ignores integration and acceptance.

@@ -134,8 +134,16 @@ MAIN_TRANSITIONS = (
 )
 
 
+INTEGRATION_FAILURE_TRANSITIONS = (
+    ProjectTransition(Phase.INTEGRATION, Status.READY, WaitReason.NONE,
+                      "integration.failed", Phase.EXECUTION, Status.READY, WaitReason.NONE),
+)
+
+
 class ProjectTransitionGuard:
-    def __init__(self, transitions=MAIN_TRANSITIONS, *, clock=None) -> None:
+    def __init__(self, transitions=None, *, clock=None) -> None:
+        if transitions is None:
+            transitions = MAIN_TRANSITIONS + INTEGRATION_FAILURE_TRANSITIONS
         self._clock = clock or (lambda: datetime.now(UTC))
         self._matrix = {}
         for item in transitions:

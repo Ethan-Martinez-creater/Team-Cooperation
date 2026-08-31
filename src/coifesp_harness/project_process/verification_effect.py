@@ -11,14 +11,18 @@ from .repository import PROJECT_PROCESSES
 
 
 class VerificationOrchestrationEffect:
-    def __init__(self, *, repository, work_graph_repository, dispatcher):
+    def __init__(self, *, repository, work_graph_repository, dispatcher, integration_service=None):
         if repository.engine is not work_graph_repository.engine:
             raise ValueError("verification effect requires one shared database")
         self.repository = repository
         self.work_graph = work_graph_repository
         self.dispatcher = dispatcher
+        self.integration_service = integration_service
 
     def apply_with_event(self, *, decision_id, process, decision, mutation_fence, publish_dispatch):
+        if decision.action is DeterministicAction.ASSEMBLE_INTEGRATION:
+            return self._assemble(decision_id=decision_id, process=process,
+                decision=decision, mutation_fence=mutation_fence)
         if decision.action is DeterministicAction.DISPATCH_WORK:
             return self.dispatcher.apply_with_event(
                 decision_id=decision_id, process=process, decision=decision,
@@ -84,3 +88,25 @@ class VerificationOrchestrationEffect:
                     or updated.version != current.version + 1):
                 raise GovernanceConflictError("verification reopening publisher omitted transition")
             mutation_fence(connection)
+
+    def _assemble(self, *, decision_id, process, decision, mutation_fence):
+        if (self.integration_service is None or not callable(mutation_fence)
+                or decision.reason is not DeterministicReason.INTEGRATION_PENDING
+                or decision.transition_key is not None or decision.work_id is not None):
+            raise GovernanceConflictError("integration requires a bound assembly decision")
+        with self.repository.transaction() as connection:
+            mutation_fence(connection)
+            connection.execute(select(PROJECT_PROCESSES.c.process_id).where(
+                PROJECT_PROCESSES.c.process_id == process.process_id).with_for_update()).scalar_one()
+            stored = self.repository.decision(connection, decision_id)
+            expected = {"action": decision.action.value, "reason": decision.reason.value,
+                        "transition_key": None, "work_id": None}
+            if (stored is None or stored.process_id != process.process_id
+                    or stored.project_id != process.project_id or stored.decision_json != expected
+                    or stored.status is not ProjectOrchestrationDecisionStatus.PENDING):
+                raise GovernanceConflictError("integration decision binding mismatch")
+            return self.integration_service.execute(bound_connection=connection,
+                process_id=process.process_id, expected_version=stored.based_on_process_version,
+                expected_event_sequence=stored.based_on_event_sequence,
+                expected_graph_digest=stored.graph_snapshot_digest,
+                event_id=f"event:{decision_id}", decision_id=decision_id, mutation_fence=mutation_fence)

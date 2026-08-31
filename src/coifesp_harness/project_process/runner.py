@@ -47,6 +47,7 @@ class ProjectOrchestrationSnapshot:
     has_active_operation: bool = False
     verification_outcome: VerificationOutcome | str | None = None
     integration_outcome: IntegrationOutcome | str | None = None
+    integration_available: bool = False
     delivery_outcome: DeliveryOutcome | str | None = None
 
     def __post_init__(self) -> None:
@@ -229,6 +230,7 @@ class ProjectOrchestratorRunner:
                 has_active_operation=snapshot.has_active_operation,
                 verification_outcome=snapshot.verification_outcome,
                 integration_outcome=snapshot.integration_outcome,
+                integration_available=snapshot.integration_available,
                 delivery_outcome=snapshot.delivery_outcome,
             )
             persisted = self.command_service.record_decision(
@@ -298,6 +300,7 @@ class ProjectOrchestratorRunner:
             DeterministicAction.DISPATCH_WORK,
             DeterministicAction.REOPEN_WORK,
             DeterministicAction.ENTER_INTEGRATION,
+            DeterministicAction.ASSEMBLE_INTEGRATION,
         }
         if needs_external_effect:
             if self.effect is None:
@@ -318,6 +321,8 @@ class ProjectOrchestratorRunner:
                 if self._event(event_id) is None:
                     raise GovernanceConflictError("atomic orchestration effect omitted its domain event")
                 return
+            if decision.action is DeterministicAction.ASSEMBLE_INTEGRATION:
+                raise GovernanceConflictError("integration requires an atomic evidence adapter")
             self.effect(
                 decision_id=decision_id,
                 process=process,

@@ -42,12 +42,18 @@ def build_project_orchestrator_worker(*, repository, scheduler, agent_run_servic
     snapshot_loader = snapshot_loader_factory(repository=repository,
         work_graph_repository=graph, capability_adapter=capabilities,
         fact_loader=facts, artifact_content=artifact_content)
+    integration_service = None
+    if artifact_content is not None:
+        from ..delivery.integration import IntegrationService
+
+        integration_service = IntegrationService(repository=repository,
+            work_graph_repository=graph, artifact_content=artifact_content)
     runner = ProjectOrchestratorRunner(repository=repository,
         process_service=ProjectProcessService(repository),
         command_service=ProjectProcessCommandService(repository), scheduler=scheduler,
         snapshot_loader=snapshot_loader,
         effect=VerificationOrchestrationEffect(repository=repository,
-            work_graph_repository=graph, dispatcher=dispatcher))
+            work_graph_repository=graph, dispatcher=dispatcher, integration_service=integration_service))
     return ProjectOrchestratorLoop(runner,
         worker_id=worker_id or "project-orchestrator:" + uuid4().hex,
         idle_poll_seconds=idle_poll_seconds)

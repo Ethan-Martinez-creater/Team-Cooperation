@@ -28,8 +28,10 @@ triple-preserving facts committed with their evidence records.
 |---|---|---|
 | `project.input.requested` | `human_input.opened` | same phase, `WAITING/HUMAN_INPUT` |
 | `project.gate.opened` | `human_approval.opened` | same phase, `WAITING/HUMAN_APPROVAL` |
+| `project.integration.completed` | `integration.failed` | `INTEGRATION/READY/NONE -> EXECUTION/READY/NONE`, backed by IntegrationRun FAIL and impacted-work evidence (ADR-0011) |
 
-These selectors are legal only when the triple changes. Opening an additional
+These selectors are legal only when the triple changes. The two Human selectors
+have the following additional restrictions. Opening an additional
 human object while an equal or higher-priority human wait is already active is
 a triple-preserving fact with no selector and no process-version increment.
 They may not overwrite `BLOCKED` or a non-human durable wait.

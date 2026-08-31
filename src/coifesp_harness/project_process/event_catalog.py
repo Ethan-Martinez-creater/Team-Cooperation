@@ -56,7 +56,7 @@ TRANSITION_SELECTORS = {
     "project.work.dispatched": frozenset({"work.dispatched"}),
     "project.work.required_submitted": frozenset({"all_required_work_submitted"}),
     "project.verification.completed": frozenset({"verification.failed", "verification.passed"}),
-    "project.integration.completed": frozenset({"integration.passed"}),
+    "project.integration.completed": frozenset({"integration.passed", "integration.failed"}),
     "project.delivery.accepted": frozenset({"delivery.accepted"}),
     "project.delivery.rejected": frozenset({"delivery.rejected"}),
     "project.scope.changed": frozenset({"scope.changed"}),

@@ -113,6 +113,7 @@ class PersistentProjectOrchestrationSnapshotLoader:
         self.work_graph_repository = work_graph_repository
         self.capability_adapter = capability_adapter
         self.fact_loader = fact_loader
+        self.integration_available = artifact_content is not None
         self.readiness_adapter = readiness_adapter or ProjectReadinessAdapter()
         self.clock = clock or (lambda: datetime.now(UTC))
 
@@ -186,8 +187,9 @@ class PersistentProjectOrchestrationSnapshotLoader:
                 has_open_gate=has_open_gate,
                 has_active_operation=bool(active_operations),
                 verification_outcome=evidence.outcome,
-                # Integration and delivery evidence loaders are not implemented
-                # yet. None means pending; it must never be fabricated.
+                # Assembly rechecks evidence in its fenced transaction. Neither
+                # the snapshot nor the model may manufacture integration PASS.
+                integration_available=self.integration_available and evidence.outcome == "PASSED",
                 integration_outcome=None,
                 delivery_outcome=None,
             )
