@@ -76,7 +76,7 @@ from ..work_graph import ProjectWorkGraphService, SQLAlchemyWorkGraphRepository
 from .app import create_app
 from .session_lifecycle import SessionLifecycleService
 
-SCHEMA_REVISION = "20260831_61"
+SCHEMA_REVISION = "20260901_62"
 REQUIRED_RLS_TABLES = (
     "audit_events",
     "audit_heads",
@@ -442,6 +442,8 @@ def build_application(
         task_execution_service = TaskExecutionService(
             repository=task_repository,
             governance=governance_service,
+            project_repository=project_process_repository,
+            work_graph_repository=project_work_graph_service.repository,
         )
         approval_service = ApprovalService(
             SQLAlchemyApprovalRepository(

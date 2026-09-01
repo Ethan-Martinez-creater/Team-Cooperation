@@ -29,11 +29,23 @@ class ExecutionEnqueueBody(StrictModel):
     max_attempts: int = Field(default=3, ge=1, le=100)
 
 
+class ProjectWorkExecutionEnqueueBody(StrictModel):
+    process_id: Identifier
+    team_task_id: Identifier
+    work_node_id: Identifier
+    contract_version: int = Field(ge=1)
+
+
 class ExecutionTaskResponse(StrictModel):
     task_id: str
     tenant_id: str
     program_id: str | None
     assignment_id: str | None
+    project_id: str | None
+    process_id: str | None
+    team_task_id: str | None
+    work_node_id: str | None
+    contract_version: int | None
     queue: str
     status: TaskStatus
     priority: int

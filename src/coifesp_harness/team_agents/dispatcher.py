@@ -21,6 +21,7 @@ from ..agent_runs.models import TERMINAL_RUN_STATES
 from ..agent_runs.repository import AGENT_RUNS
 from ..context import ContextItem
 from ..errors import GovernanceConflictError, ResourceNotFound
+from ..execution.service import validate_project_work_admission
 from ..product import TeamProjectAgentStatus, TeamTaskStatus
 from ..product.repository import (
     PROJECT_AGENT_RUNS,
@@ -248,6 +249,28 @@ class TeamAgentDispatcher:
             }:
                 raise GovernanceConflictError(
                     "only an accepted or evidence-bound rework task may be automatically dispatched"
+                )
+            project_binding = (
+                task_row["process_id"],
+                task_row["work_node_id"],
+                task_row["accepted_contract_version"],
+            )
+            if any(value is not None for value in project_binding):
+                if any(value is None for value in project_binding):
+                    raise GovernanceConflictError(
+                        "project work contract binding is incomplete"
+                    )
+                validate_project_work_admission(
+                    connection,
+                    project_repository=self.repository,
+                    principal_team_id=task.target_team_id,
+                    process_id=process_id,
+                    team_task_id=task_id,
+                    work_node_id=task_row["work_node_id"],
+                    contract_version=task_row["accepted_contract_version"],
+                    allowed_task_statuses=frozenset(
+                        {"accepted", "changes_requested"}
+                    ),
                 )
             if rework and str(process.phase) != "EXECUTION":
                 raise GovernanceConflictError(

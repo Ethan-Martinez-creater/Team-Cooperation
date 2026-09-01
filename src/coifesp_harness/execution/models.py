@@ -35,6 +35,11 @@ class ExecutionTask:
     created_by: str
     program_id: str | None = None
     assignment_id: str | None = None
+    project_id: str | None = None
+    process_id: str | None = None
+    team_task_id: str | None = None
+    work_node_id: str | None = None
+    contract_version: int | None = None
     cancel_requested: bool = False
     result: dict[str, Any] | None = None
     error_code: str | None = None

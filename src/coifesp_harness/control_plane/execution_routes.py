@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.concurrency import run_in_threadpool
 
+from ..errors import PolicyDenied
 from ..execution import ExecutionTask, TaskExecutionService
 from ..execution.repository import TaskExecutionError
 from .auth import Authenticated, BearerAuthenticator
@@ -16,6 +17,7 @@ from .execution_models import (
     ExecutionTaskResponse,
     HeartbeatBody,
     LeaseTokenBody,
+    ProjectWorkExecutionEnqueueBody,
 )
 
 
@@ -26,6 +28,7 @@ def build_execution_router(*, authenticator: BearerAuthenticator) -> APIRouter:
         "/v1/executions",
         response_model=ExecutionTaskResponse,
         status_code=201,
+        deprecated=True,
     )
     async def enqueue(
         body: ExecutionEnqueueBody,
@@ -51,6 +54,41 @@ def build_execution_router(*, authenticator: BearerAuthenticator) -> APIRouter:
             dependencies=tuple(body.dependencies),
             priority=body.priority,
             max_attempts=body.max_attempts,
+        )
+        return _task_response(task)
+
+    @router.post(
+        "/v1/project-executions",
+        response_model=ExecutionTaskResponse,
+        status_code=201,
+    )
+    async def enqueue_project_work(
+        body: ProjectWorkExecutionEnqueueBody,
+        request: Request,
+        idempotency_key: str = Header(
+            ...,
+            alias="Idempotency-Key",
+            min_length=1,
+            max_length=128,
+            pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+        ),
+        authenticated: Authenticated = Depends(authenticator),
+    ) -> ExecutionTaskResponse:
+        if (
+            not authenticated.principal.is_service
+            or "project_orchestrator" not in authenticated.principal.roles
+        ):
+            raise PolicyDenied(
+                "project execution admission requires the project orchestrator"
+            )
+        task = await run_in_threadpool(
+            _service(request).enqueue_project_work,
+            principal=authenticated.principal,
+            idempotency_key=idempotency_key,
+            process_id=body.process_id,
+            team_task_id=body.team_task_id,
+            work_node_id=body.work_node_id,
+            contract_version=body.contract_version,
         )
         return _task_response(task)
 
@@ -225,6 +263,11 @@ def _task_response(task: ExecutionTask) -> ExecutionTaskResponse:
         tenant_id=task.tenant_id,
         program_id=task.program_id,
         assignment_id=task.assignment_id,
+        project_id=task.project_id,
+        process_id=task.process_id,
+        team_task_id=task.team_task_id,
+        work_node_id=task.work_node_id,
+        contract_version=task.contract_version,
         queue=task.queue,
         status=task.status,
         priority=task.priority,

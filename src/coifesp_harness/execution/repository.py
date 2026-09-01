@@ -5,9 +5,10 @@ import json
 import re
 import secrets
 import uuid
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Any, Iterator
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -29,7 +30,6 @@ from sqlalchemy import (
     func,
     insert,
     literal,
-    or_,
     select,
     text,
     update,
@@ -67,6 +67,11 @@ EXECUTION_TASKS = Table(
     Column("task_id", String(128), primary_key=True),
     Column("program_id", String(128), nullable=True),
     Column("assignment_id", String(128), nullable=True),
+    Column("project_id", String(128), nullable=True),
+    Column("process_id", String(128), nullable=True),
+    Column("team_task_id", String(128), nullable=True),
+    Column("work_node_id", String(128), nullable=True),
+    Column("contract_version", Integer, nullable=True),
     Column("queue", String(128), nullable=False),
     Column("payload", _JSON, nullable=False),
     Column("request_digest", String(64), nullable=False),
@@ -109,6 +114,14 @@ EXECUTION_TASKS = Table(
         "(status IN ('succeeded','failed','cancelled')) = (completed_at IS NOT NULL)",
         name="terminal_completion",
     ),
+    CheckConstraint(
+        "(project_id IS NULL AND process_id IS NULL AND team_task_id IS NULL "
+        "AND work_node_id IS NULL AND contract_version IS NULL) OR "
+        "(project_id IS NOT NULL AND process_id IS NOT NULL "
+        "AND team_task_id IS NOT NULL AND work_node_id IS NOT NULL "
+        "AND contract_version >= 1 AND program_id IS NULL AND assignment_id IS NULL)",
+        name="project_work_binding",
+    ),
 )
 Index(
     "ix_execution_tasks_claim",
@@ -117,6 +130,21 @@ Index(
     EXECUTION_TASKS.c.status,
     EXECUTION_TASKS.c.available_at,
     EXECUTION_TASKS.c.priority,
+)
+Index(
+    "uq_execution_tasks_project_contract",
+    EXECUTION_TASKS.c.process_id,
+    EXECUTION_TASKS.c.team_task_id,
+    EXECUTION_TASKS.c.contract_version,
+    unique=True,
+    sqlite_where=EXECUTION_TASKS.c.process_id.is_not(None),
+    postgresql_where=EXECUTION_TASKS.c.process_id.is_not(None),
+)
+Index(
+    "ix_execution_tasks_project_work",
+    EXECUTION_TASKS.c.project_id,
+    EXECUTION_TASKS.c.process_id,
+    EXECUTION_TASKS.c.team_task_id,
 )
 
 EXECUTION_DEPENDENCIES = Table(
@@ -185,7 +213,7 @@ class SQLAlchemyTaskRepository:
     def create_schema(self) -> None:
         EXECUTION_METADATA.create_all(self.engine)
 
-    def using_connection(self, connection: Connection) -> "SQLAlchemyTaskRepository":
+    def using_connection(self, connection: Connection) -> SQLAlchemyTaskRepository:
         """Bind commands to a caller-owned transaction for atomic composition."""
         if connection.engine is not self.engine:
             raise TaskExecutionError("bound connection belongs to a different engine")
@@ -210,6 +238,11 @@ class SQLAlchemyTaskRepository:
         available_at: datetime | None = None,
         program_id: str | None = None,
         assignment_id: str | None = None,
+        project_id: str | None = None,
+        process_id: str | None = None,
+        team_task_id: str | None = None,
+        work_node_id: str | None = None,
+        contract_version: int | None = None,
     ) -> ExecutionTask:
         self._validate_identifier("tenant_id", tenant_id)
         self._validate_identifier("actor_id", actor_id)
@@ -222,6 +255,33 @@ class SQLAlchemyTaskRepository:
             self._validate_identifier("dependency_id", dependency)
         if not -1000 <= priority <= 1000 or not 1 <= max_attempts <= 100:
             raise TaskExecutionError("task priority or attempt limit is invalid")
+        project_binding = (
+            project_id,
+            process_id,
+            team_task_id,
+            work_node_id,
+            contract_version,
+        )
+        if any(value is not None for value in project_binding):
+            if self._bound_connection is None:
+                raise TaskExecutionError(
+                    "project work must be admitted through the transactional service"
+                )
+            if any(value is None for value in project_binding):
+                raise TaskExecutionError("project work binding must be complete")
+            if program_id is not None or assignment_id is not None:
+                raise TaskExecutionError(
+                    "project work cannot depend on a governance assignment"
+                )
+            for name, value in (
+                ("project_id", project_id),
+                ("process_id", process_id),
+                ("team_task_id", team_task_id),
+                ("work_node_id", work_node_id),
+            ):
+                self._validate_identifier(name, value)
+            if type(contract_version) is not int or contract_version < 1:
+                raise TaskExecutionError("project work contract version is invalid")
         now = datetime.now(UTC)
         ready_at = self._aware(available_at or now)
         self._bounded_json(payload, _MAX_PAYLOAD_BYTES, "task payload")
@@ -236,6 +296,11 @@ class SQLAlchemyTaskRepository:
                 "available_at": self._aware(available_at).isoformat() if available_at else None,
                 "program_id": program_id,
                 "assignment_id": assignment_id,
+                "project_id": project_id,
+                "process_id": process_id,
+                "team_task_id": team_task_id,
+                "work_node_id": work_node_id,
+                "contract_version": contract_version,
             },
             _MAX_PAYLOAD_BYTES,
             "task request",
@@ -273,43 +338,48 @@ class SQLAlchemyTaskRepository:
             missing = set(dependencies).difference(found_dependencies)
             if missing:
                 raise TaskExecutionError("task dependency is absent or hidden")
-            values = dict(
-                tenant_id=tenant_id,
-                task_id=task_id,
-                program_id=program_id,
-                assignment_id=assignment_id,
-                queue=queue,
-                payload=payload,
-                request_digest=digest,
-                idempotency_key=idempotency_key,
-                status=TaskStatus.QUEUED.value,
-                priority=priority,
-                max_attempts=max_attempts,
-                attempt_count=0,
-                available_at=ready_at,
-                lease_owner=None,
-                lease_token=None,
-                lease_expires_at=None,
-                cancel_requested=False,
-                result=None,
-                error_code=None,
-                created_by=actor_id,
-                created_at=now,
-                updated_at=now,
-                completed_at=None,
-            )
+            values = {
+                "tenant_id": tenant_id,
+                "task_id": task_id,
+                "program_id": program_id,
+                "assignment_id": assignment_id,
+                "project_id": project_id,
+                "process_id": process_id,
+                "team_task_id": team_task_id,
+                "work_node_id": work_node_id,
+                "contract_version": contract_version,
+                "queue": queue,
+                "payload": payload,
+                "request_digest": digest,
+                "idempotency_key": idempotency_key,
+                "status": TaskStatus.QUEUED.value,
+                "priority": priority,
+                "max_attempts": max_attempts,
+                "attempt_count": 0,
+                "available_at": ready_at,
+                "lease_owner": None,
+                "lease_token": None,
+                "lease_expires_at": None,
+                "cancel_requested": False,
+                "result": None,
+                "error_code": None,
+                "created_by": actor_id,
+                "created_at": now,
+                "updated_at": now,
+                "completed_at": None,
+            }
             if connection.dialect.name == "postgresql":
                 task_insert = (
                     postgresql_insert(EXECUTION_TASKS)
                     .values(**values)
-                    .on_conflict_do_nothing(index_elements=["tenant_id", "idempotency_key"])
+                    .on_conflict_do_nothing()
                     .returning(EXECUTION_TASKS.c.task_id)
                 )
             else:
                 task_insert = (
                     sqlite_insert(EXECUTION_TASKS)
                     .values(**values)
-                    .on_conflict_do_nothing(index_elements=["tenant_id", "idempotency_key"])
+                    .on_conflict_do_nothing()
                     .returning(EXECUTION_TASKS.c.task_id)
                 )
             inserted = connection.execute(task_insert).scalar_one_or_none()
@@ -324,8 +394,27 @@ class SQLAlchemyTaskRepository:
                         )
                     )
                     .mappings()
-                    .one()
+                    .one_or_none()
                 )
+                if raced is None and process_id is not None:
+                    raced = (
+                        connection.execute(
+                            select(EXECUTION_TASKS).where(
+                                and_(
+                                    EXECUTION_TASKS.c.process_id == process_id,
+                                    EXECUTION_TASKS.c.team_task_id == team_task_id,
+                                    EXECUTION_TASKS.c.contract_version
+                                    == contract_version,
+                                )
+                            )
+                        )
+                        .mappings()
+                        .one_or_none()
+                    )
+                if raced is None:
+                    raise IdempotencyConflict(
+                        "task identity already exists with another request"
+                    )
                 if raced["request_digest"] != digest or raced["task_id"] != task_id:
                     raise IdempotencyConflict(
                         "task idempotency key was reused with different content"
@@ -705,6 +794,24 @@ class SQLAlchemyTaskRepository:
         with self._transaction(tenant_id) as connection:
             return self._load_in_transaction(connection, tenant_id, task_id)
 
+    def find_by_idempotency(
+        self, *, tenant_id: str, idempotency_key: str
+    ) -> ExecutionTask | None:
+        self._validate_identifier("tenant_id", tenant_id)
+        self._validate_identifier("idempotency_key", idempotency_key)
+        with self._transaction(tenant_id) as connection:
+            task_id = connection.execute(
+                select(EXECUTION_TASKS.c.task_id).where(
+                    and_(
+                        EXECUTION_TASKS.c.tenant_id == tenant_id,
+                        EXECUTION_TASKS.c.idempotency_key == idempotency_key,
+                    )
+                )
+            ).scalar_one_or_none()
+            if task_id is None:
+                return None
+            return self._load_in_transaction(connection, tenant_id, task_id)
+
     def _lease_transition(
         self,
         *,
@@ -921,6 +1028,11 @@ class SQLAlchemyTaskRepository:
             created_by=row["created_by"],
             program_id=row["program_id"],
             assignment_id=row["assignment_id"],
+            project_id=row["project_id"],
+            process_id=row["process_id"],
+            team_task_id=row["team_task_id"],
+            work_node_id=row["work_node_id"],
+            contract_version=row["contract_version"],
             cancel_requested=bool(row["cancel_requested"]),
             result=dict(row["result"]) if row["result"] is not None else None,
             error_code=row["error_code"],

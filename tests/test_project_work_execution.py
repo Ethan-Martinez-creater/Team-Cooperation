@@ -28,7 +28,7 @@ from coifesp_harness.execution import (
     SQLAlchemyTaskRepository,
     TaskExecutionService,
 )
-from coifesp_harness.execution.repository import EXECUTION_TASKS
+from coifesp_harness.execution.repository import EXECUTION_TASKS, TaskExecutionError
 from coifesp_harness.product import (
     ProductAccountService,
     ProjectDirectoryService,
@@ -610,6 +610,28 @@ def test_project_work_path_does_not_delegate_to_legacy_assignment_enqueue(monkey
     monkeypatch.setattr(value.execution, "enqueue_assignment", fail_legacy)
     task = _enqueue(value, idempotency_key="project-work:no-legacy")
     _assert_project_execution_task(task)
+
+
+def test_generic_repository_cannot_bypass_project_work_admission():
+    value = _project_stack()
+
+    with pytest.raises(
+        TaskExecutionError,
+        match="transactional service",
+    ):
+        value.execution_repository.enqueue(
+            tenant_id="team-b",
+            actor_id="lead-b",
+            idempotency_key="project-work:bypass",
+            task_id="project-work:bypass",
+            queue="team-b",
+            payload={"schema": "coifesp.project-work-execution.v1"},
+            project_id="project-a",
+            process_id="process-a",
+            team_task_id="task-a",
+            work_node_id="node:task:task-a",
+            contract_version=1,
+        )
 
 
 def test_legacy_enqueue_assignment_remains_compatible():

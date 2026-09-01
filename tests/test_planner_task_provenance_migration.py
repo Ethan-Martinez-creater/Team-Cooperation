@@ -543,7 +543,7 @@ def test_postgresql_team_task_ddl_has_creator_check_and_retains_account_fk():
     assert "(source_planner_command_id)" in index_ddl
 
 
-def test_postgresql_upgrade_compiles_offline_and_revision_has_expected_head():
+def test_postgresql_upgrade_compiles_offline_and_revision_remains_in_lineage():
     output = StringIO()
     migration = _migration()
     migration.op = Operations(
@@ -563,6 +563,5 @@ def test_postgresql_upgrade_compiles_offline_and_revision_has_expected_head():
     assert "DROP TABLE" not in sql
     assert migration.revision == "20260831_61"
     assert migration.down_revision == "20260831_60"
-    assert "20260831_61" in ScriptDirectory(
-        str(Path(__file__).parents[1] / "alembic")
-    ).get_heads()
+    scripts = ScriptDirectory(str(Path(__file__).parents[1] / "alembic"))
+    assert scripts.get_revision("20260831_61") is not None

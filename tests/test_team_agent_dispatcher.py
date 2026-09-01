@@ -25,6 +25,8 @@ from coifesp_harness.agent_runs.repository import AGENT_RUNS
 from coifesp_harness.capabilities.repository import CAPACITY_RESERVATIONS
 from coifesp_harness.delivery.repository import DELIVERY_METADATA
 from coifesp_harness.errors import GovernanceConflictError
+from coifesp_harness.execution import SQLAlchemyTaskRepository
+from coifesp_harness.execution.repository import EXECUTION_TASKS
 from coifesp_harness.product import ProjectWorkspaceService, TeamCollaborationService
 from coifesp_harness.product.repository import PROJECT_AGENT_RUNS, TEAM_TASKS
 from coifesp_harness.project_process import (
@@ -185,6 +187,60 @@ def test_dispatch_commits_one_machine_run_and_retry_reuses_original_binding():
     assert checkpoint["tool_authorization"] is not None
     assert checkpoint["tool_authorization"].tools == ()
     assert len(checkpoint["context_items"]) == 2
+
+
+def test_modern_project_contract_uses_agent_run_without_legacy_execution_queue():
+    value = stack()
+    SQLAlchemyTaskRepository(engine=value.engine).create_schema()
+    with value.engine.begin() as connection:
+        connection.execute(
+            TEAM_TASKS.update()
+            .where(TEAM_TASKS.c.task_id == "task-a")
+            .values(
+                process_id="process-a",
+                work_node_id="node:task:task-a",
+                source_contract_version=1,
+                accepted_contract_version=1,
+                requested_capability={
+                    "tags": ["review"],
+                    "protocol": "a2a-1.0",
+                    "input_contract_ref": value.facts.contract.input_contract_ref,
+                    "output_contract_ref": value.facts.contract.output_contract_ref,
+                    "verification_policy_ref": value.facts.contract.verification_policy_ref,
+                },
+                input_manifest_json={"resources": [], "work_nodes": []},
+                output_contract_json={
+                    "artifact_types": ["text/plain"],
+                    "required": True,
+                    "max_count": 1,
+                },
+                verification_policy_json={
+                    "criteria": [
+                        {
+                            "criterion_id": "review",
+                            "type": "agent_review",
+                            "required": True,
+                        }
+                    ]
+                },
+                autonomy_requirement="supervised",
+            )
+        )
+
+    record(value, decision_id="decision-modern")
+    result = dispatch(value, decision_id="decision-modern")
+
+    with value.engine.connect() as connection:
+        assert connection.execute(
+            select(func.count()).select_from(PROJECT_AGENT_RUNS)
+        ).scalar_one() == 1
+        assert connection.execute(
+            select(func.count()).select_from(AGENT_RUNS)
+        ).scalar_one() == 1
+        assert connection.execute(
+            select(func.count()).select_from(EXECUTION_TASKS)
+        ).scalar_one() == 0
+    assert result.duplicate is False
 
 
 def test_proposed_tasks_never_dispatch():
