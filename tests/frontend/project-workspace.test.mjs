@@ -24,6 +24,10 @@ assert.match(script, /function renderProcessSummary\(process\)/);
 assert.match(script, /function workGraphPane\(graph\)/);
 assert.match(script, /function activityPane\(activityValue\)/);
 assert.match(script, /function deliveryPane\(harnessView = \{\}\)/);
+assert.match(script, /semantic_status/);
+assert.match(script, /occurred_at/);
+assert.match(script, /verification\.passed/);
+assert.match(script, /执行契约待确认/);
 assert.match(script, /generation/);
 assert.match(script, /ownActive\(project, generation\)/);
 

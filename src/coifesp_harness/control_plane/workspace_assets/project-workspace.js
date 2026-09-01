@@ -296,18 +296,27 @@
     const blockerEl = $("#ws-process-blocker");
     const nextEl = $("#ws-process-next");
     if (!stateEl || !blockerEl || !nextEl) return;
-    const phase = firstValue(process, ["phase", "current_phase", "stage"]);
+    if (!process) {
+      stateEl.textContent = "Harness 尚未启动";
+      stateEl.dataset.state = "ready";
+      blockerEl.textContent = "";
+      nextEl.textContent = "下一步：在对话中说明项目目标并确认计划";
+      blockerEl.classList.add("hidden");
+      nextEl.classList.remove("hidden");
+      return;
+    }
+    const phase = firstValue(process, ["phase_label", "phase", "current_phase", "stage"]);
     const status = firstValue(process, ["status", "state", "current_status"]);
-    const statusText = semanticState(displayValue(status || phase));
-    stateEl.textContent = phase && status && String(phase).toLowerCase() !== String(status).toLowerCase()
-      ? `${semanticState(displayValue(phase))} · ${statusText}`
-      : statusText;
+    const semantic = firstValue(process, ["semantic_status"]);
+    const statusText = semantic || semanticState(displayValue(status || phase));
+    stateEl.textContent = phase ? `${displayValue(phase)} · ${statusText}` : statusText;
     stateEl.dataset.state = displayValue(status || phase || "unknown").toLowerCase();
     const blocker = firstValue(process, ["blocker", "blocking_reason", "wait_reason", "waiting_for"]);
-    blockerEl.textContent = blocker ? `阻塞：${displayValue(blocker)}` : "";
+    const hasBlocker = blocker && String(blocker).toUpperCase() !== "NONE";
+    blockerEl.textContent = hasBlocker ? `等待原因：${displayValue(blocker)}` : "";
     const next = firstValue(process, ["next_step", "next_action", "recommended_action"]);
     nextEl.textContent = next ? `下一步：${displayValue(next)}` : "";
-    blockerEl.classList.toggle("hidden", !blocker);
+    blockerEl.classList.toggle("hidden", !hasBlocker);
     nextEl.classList.toggle("hidden", !next);
   }
 
@@ -604,7 +613,7 @@
       : `<p class="muted small">当前没有已记录的阻塞。</p>`;
     return `
       <div class="overview-actions"><button class="primary" data-ws-upload>上传资料</button></div>
-      <section class="overview-section"><h4>项目进度</h4><div class="overview-process-card"><span class="process-state">${esc(semanticState(firstValue(process, ["status", "phase"], "")))}</span>${firstValue(process, ["next_step", "next_action"]) ? `<span class="muted small">下一步：${esc(firstValue(process, ["next_step", "next_action"]))}</span>` : ""}</div>${blockerSummary}</section>
+      <section class="overview-section"><h4>项目进度</h4><div class="overview-process-card"><span class="process-state">${esc(firstValue(process, ["semantic_status"], semanticState(firstValue(process, ["status", "phase"], ""))))}</span>${firstValue(process, ["next_step", "next_action"]) ? `<span class="muted small">下一步：${esc(firstValue(process, ["next_step", "next_action"]))}</span>` : ""}</div>${blockerSummary}</section>
       <section class="overview-section"><h4>目标与计划</h4>${planCard}</section>
       <section class="overview-section"><h4>项目概况</h4><div class="meta overview-stats"><span>任务 ${Number(snapshot?.task_count || 0)}</span><span>资料 ${Number(snapshot?.resource_count || 0)}</span><span>待处理 ${Number(snapshot?.pending_draft_count || 0)}</span></div></section>
       <section class="overview-section"><h4>参与团队</h4>${(snapshot?.teams || []).map((team) => `<div class="meta"><span>${esc(team.name)}</span><span class="pill">${esc(team.kind)}</span></div>`).join("") || `<p class="muted small">尚无参与团队</p>`}</section>
@@ -635,7 +644,7 @@
   function workGraphPane(graph) {
     const nodes = graphNodes(graph);
     if (!nodes.length) return `<p class="muted small">Work Graph 尚未形成。确认项目计划后，目标、阶段、任务和风险会在这里按层级展示。</p>`;
-    const relations = normalizeItems(graph?.relations).filter((relation) => {
+    const relations = normalizeItems(graph?.relations || graph?.edges).filter((relation) => {
       const kind = firstValue(relation, ["kind", "relation_type", "type"], "");
       return String(kind).toLowerCase() === "depends_on" || String(kind).toLowerCase() === "dependency";
     });
@@ -671,7 +680,8 @@
       const team = firstValue(task, ["target_team_name", "team_name", "team"], "参与团队");
       const status = firstValue(task, ["status", "state"], "pending");
       const dependencies = Array.isArray(task.depends_on) ? task.depends_on : (Array.isArray(task.dependencies) ? task.dependencies : []);
-      return `<article class="card task-summary-card"><div class="card-head"><div><strong>${esc(firstValue(task, ["title", "name", "label"], "未命名任务"))}</strong><div class="meta"><span class="pill ${status === "verified" || status === "completed" ? "green" : "orange"}">${esc(stateName(status))}</span><span>${esc(team)}</span>${dependencies.length ? `<span class="dependency-badge">依赖 ${dependencies.length}</span>` : ""}</div></div></div>${firstValue(task, ["acceptance_criteria", "description", "summary"]) ? `<p class="muted">${esc(firstValue(task, ["acceptance_criteria", "description", "summary"]))}</p>` : ""}</article>`;
+      const contract = task.contract_ready ? `契约 v${Number(task.contract_version || 1)} 已确认` : "执行契约待确认";
+      return `<article class="card task-summary-card"><div class="card-head"><div><strong>${esc(firstValue(task, ["title", "name", "label"], "未命名任务"))}</strong><div class="meta"><span class="pill ${status === "verified" || status === "completed" ? "green" : "orange"}">${esc(stateName(status))}</span><span>${esc(team)}</span><span class="pill ${task.contract_ready ? "green" : "orange"}">${contract}</span>${dependencies.length ? `<span class="dependency-badge">依赖 ${dependencies.length}</span>` : ""}</div></div></div>${firstValue(task, ["acceptance_criteria", "description", "summary"]) ? `<p class="muted">${esc(firstValue(task, ["acceptance_criteria", "description", "summary"]))}</p>` : ""}</article>`;
     }).join("");
   }
 
@@ -681,8 +691,8 @@
     const rows = activities.map((item) => {
       const label = firstValue(item, ["label"], "Agent 活动");
       const status = semanticActivityStatus(firstValue(item, ["status"], "pending"));
-      const time = firstValue(item, ["time"], "");
-      const team = firstValue(item, ["team"], "项目 Agent");
+      const time = firstValue(item, ["occurred_at", "time"], "");
+      const team = firstValue(item, ["team_name", "team"], "项目 Harness");
       return `<li class="activity-row"><span class="activity-dot" aria-hidden="true"></span><div class="activity-body"><strong>${esc(label)}</strong><div class="meta"><span>${esc(status)}</span><span>${esc(team)}</span>${time ? `<time datetime="${esc(time)}">${esc(time)}</time>` : ""}</div></div></li>`;
     }).join("");
     return `<p class="muted small">这里仅显示可共享的语义进展，不展示内部执行细节。</p><ol class="activity-list">${rows}</ol>`;
@@ -691,15 +701,16 @@
   function deliveryPane(harnessView = {}) {
     const verification = harnessView.verification || {};
     const completion = harnessView.completion || {};
-    const verificationItems = normalizeItems(verification);
-    const completionItems = normalizeItems(completion);
-    const checks = verificationItems.length
-      ? verificationItems.map((item) => `<li class="delivery-check"><span class="pill ${String(firstValue(item, ["status", "state"], "pending")).toLowerCase() === "passed" ? "green" : "orange"}">${esc(stateName(firstValue(item, ["status", "state"], "pending")))}</span><span>${esc(firstValue(item, ["label", "name", "summary"], "验收项"))}</span></li>`).join("")
-      : `<li class="muted small">暂无验收记录。</li>`;
-    const completionStatus = firstValue(completion, ["status", "state"], "pending");
-    const progress = firstValue(completion, ["progress", "completion_percent"], null);
-    const progressText = progress === null ? "" : ` · ${esc(progress)}%`;
-    return `<section class="delivery-section"><h4>验收</h4><div class="delivery-status"><span class="pill ${String(firstValue(verification, ["status", "state"], "pending")).toLowerCase() === "passed" ? "green" : "orange"}">${esc(stateName(firstValue(verification, ["status", "state"], "待开始")))}</span><span class="muted small">${esc(firstValue(verification, ["summary", "message"], "Harness 会在交付前汇总验收结果。"))}</span></div><ul class="delivery-checks">${checks}</ul></section><section class="delivery-section"><h4>完成进度</h4><div class="delivery-status"><span class="pill ${String(completionStatus).toLowerCase() === "completed" ? "green" : "orange"}">${esc(stateName(completionStatus))}${progressText}</span><span class="muted small">${esc(firstValue(completion, ["summary", "message"], "完成条件满足后，Harness 才会结束项目。"))}</span></div>${completionItems.length ? `<ul class="delivery-checks">${completionItems.map((item) => `<li class="delivery-check"><span>${esc(firstValue(item, ["label", "name", "summary"], "完成条件"))}</span><span class="muted">${esc(stateName(firstValue(item, ["status", "state"], "pending")))}</span></li>`).join("")}</ul>` : ""}</section>`;
+    const verificationTotal = Number(verification.total || 0);
+    const verificationPassed = Number(verification.passed || 0);
+    const verificationFailed = Number(verification.failed || 0);
+    const verificationPending = Number(verification.pending || 0);
+    const tasksDone = Number(completion.tasks_done || 0);
+    const tasksTotal = Number(completion.tasks_total || 0);
+    const verificationState = verificationFailed ? "需要处理" : verificationPending ? "验证中" : verificationTotal ? "已通过" : "待开始";
+    const completionState = completion.delivery_status || completion.contract_status || "待准备";
+    const evaluation = completion.evaluation_passed === true ? "完成条件已满足" : completion.evaluation_passed === false ? "完成条件尚未满足" : "尚未执行完成评估";
+    return `<section class="delivery-section"><h4>验收</h4><div class="delivery-status"><span class="pill ${verificationFailed ? "orange" : verificationTotal && verificationPassed === verificationTotal ? "green" : ""}">${verificationState}</span><span class="muted small">通过 ${verificationPassed} · 处理中 ${verificationPending} · 未通过 ${verificationFailed}</span></div></section><section class="delivery-section"><h4>完成进度</h4><div class="delivery-status"><span class="pill ${String(completion.delivery_status || "").toUpperCase() === "ACCEPTED" ? "green" : "orange"}">${esc(stateName(completionState))}</span><span class="muted small">任务 ${tasksDone}/${tasksTotal} · ${evaluation}</span></div></section>`;
   }
 
   async function collabPane(projectId) {

@@ -24,10 +24,12 @@ from .conversation_models import (
     ProjectAgentTurnView,
     ProjectConversationMessageView,
     ProjectConversationView,
+    ProjectHarnessView,
     ResourcePropagationBody,
     WorkspaceProjectView,
     WorkspaceView,
 )
+from .harness_view import ProjectHarnessViewService
 from .product_models import ProjectTeamView, ProjectView
 
 
@@ -41,7 +43,9 @@ def build_conversation_router(*, authenticator: BearerAuthenticator) -> APIRoute
     ) -> list[WorkspaceProjectView]:
         workspace = _service(request)
         actor_id = authenticated.principal.principal_id
-        projects = await run_in_threadpool(workspace.list_workspace_projects, actor_id=actor_id)
+        projects = await run_in_threadpool(
+            workspace.list_workspace_projects, actor_id=actor_id
+        )
         result = []
         for project in projects:
             conversation = await run_in_threadpool(
@@ -56,7 +60,8 @@ def build_conversation_router(*, authenticator: BearerAuthenticator) -> APIRoute
                 WorkspaceProjectView(
                     project=_project_view(project),
                     conversation_id=conversation.conversation_id,
-                    pending_count=snapshot.pending_draft_count + snapshot.unread_activity_count,
+                    pending_count=snapshot.pending_draft_count
+                    + snapshot.unread_activity_count,
                 )
             )
         return result
@@ -85,6 +90,24 @@ def build_conversation_router(*, authenticator: BearerAuthenticator) -> APIRoute
             pending_draft_count=snapshot.pending_draft_count,
             unread_activity_count=snapshot.unread_activity_count,
         )
+
+    @router.get(
+        "/v1/projects/{project_id}/harness-view",
+        response_model=ProjectHarnessView,
+    )
+    async def project_harness_view(
+        project_id: str,
+        request: Request,
+        authenticated: Authenticated = Depends(authenticator),
+    ) -> ProjectHarnessView:
+        workspace = _service(request)
+        projection = ProjectHarnessViewService(workspace.engine, workspace)
+        view = await run_in_threadpool(
+            projection.view,
+            project_id=project_id,
+            actor_id=authenticated.principal.principal_id,
+        )
+        return ProjectHarnessView.model_validate(view)
 
     @router.put(
         "/v1/projects/{project_id}/conversation",
@@ -127,7 +150,10 @@ def build_conversation_router(*, authenticator: BearerAuthenticator) -> APIRoute
             limit=min(max(limit, 1), 500),
         )
         return MessagePageView(
-            items=[ProjectConversationMessageView.from_message(message) for message in messages],
+            items=[
+                ProjectConversationMessageView.from_message(message)
+                for message in messages
+            ],
             conversation=ProjectConversationView.from_conversation(conversation),
         )
 
@@ -346,10 +372,16 @@ async def launch_conversation_turn_run(
                 project_id=project_id,
                 actor_id=authenticated.principal.principal_id,
             )
-            items.append(_brief_item(project_id, brief, authenticated.principal.tenant_id))
+            items.append(
+                _brief_item(project_id, brief, authenticated.principal.tenant_id)
+            )
         if attachment_resource_ids:
-            resource_service = getattr(request.app.state, "project_resource_service", None)
-            content_service = getattr(request.app.state, "artifact_content_service", None)
+            resource_service = getattr(
+                request.app.state, "project_resource_service", None
+            )
+            content_service = getattr(
+                request.app.state, "artifact_content_service", None
+            )
             if resource_service is not None and content_service is not None:
                 resource_items = await run_in_threadpool(
                     resource_service.agent_context_items,
@@ -363,7 +395,8 @@ async def launch_conversation_turn_run(
             Message(
                 role="system",
                 content=_conversation_system_prompt(
-                    authenticated.principal.tenant_id, planning=(trigger_kind == "planning")
+                    authenticated.principal.tenant_id,
+                    planning=(trigger_kind == "planning"),
                 ),
                 name="coifesp-harness",
             )
@@ -397,7 +430,9 @@ async def launch_conversation_turn_run(
             ):
                 continue
             if message.role in {"user", "assistant"}:
-                messages.append(Message(role=message.role, content=message.content, name=None))
+                messages.append(
+                    Message(role=message.role, content=message.content, name=None)
+                )
         display_message = (user_message or "").strip()
         if not display_message and attachment_resource_ids:
             display_message = (
@@ -504,7 +539,10 @@ def _brief_item(project_id: str, brief: str, tenant_id: str):
         source=ContextSource.MEMORY,
         source_id=f"project:{project_id}",
         label=ResourceLabel(
-            tenant_id, Classification.INTERNAL, frozenset(), f"project-brief:{project_id}"
+            tenant_id,
+            Classification.INTERNAL,
+            frozenset(),
+            f"project-brief:{project_id}",
         ),
         content_trust=ContentTrust.VERIFIED,
         instruction_trust=InstructionTrust.DATA_ONLY,
@@ -563,7 +601,9 @@ async def start_exchange_reply_turn(
     )
     for message in history:
         if message.role in {"user", "assistant"}:
-            messages.append(Message(role=message.role, content=message.content, name=None))
+            messages.append(
+                Message(role=message.role, content=message.content, name=None)
+            )
     body = (
         f"跨团队 Agent 共享请求来自 {context['source_team_id']}：\n"
         f"目的：{context['purpose']}\n"
@@ -677,7 +717,9 @@ async def start_exchange_draft_run(
     )
     for message in history:
         if message.role in {"user", "assistant"}:
-            messages.append(Message(role=message.role, content=message.content, name=None))
+            messages.append(
+                Message(role=message.role, content=message.content, name=None)
+            )
     messages.append(
         Message(
             role="user",
@@ -800,7 +842,9 @@ def _recipient_principal(*, actor_id: str, team_id: str):
     return Principal(
         actor_id,
         team_id,
-        frozenset({"agent_run_controller", "collaboration_creator", "artifact_publisher"}),
+        frozenset(
+            {"agent_run_controller", "collaboration_creator", "artifact_publisher"}
+        ),
         Classification.RESTRICTED,
         frozenset(),
     )
@@ -818,7 +862,10 @@ def _exchange_context_item(project_id: str, team_id: str, context: dict):
         source=ContextSource.MEMORY,
         source_id=f"exchange:{context['exchange_id']}",
         label=ResourceLabel(
-            team_id, Classification.INTERNAL, frozenset(), f"exchange:{context['exchange_id']}"
+            team_id,
+            Classification.INTERNAL,
+            frozenset(),
+            f"exchange:{context['exchange_id']}",
         ),
         content_trust=ContentTrust.VERIFIED,
         instruction_trust=InstructionTrust.DATA_ONLY,

@@ -5,8 +5,8 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from ..product.models import (
-    ConversationStatus,
     ConversationMessageKind,
+    ConversationStatus,
     ProjectAgentTurn,
     ProjectConversation,
     ProjectConversationMessage,
@@ -112,6 +112,89 @@ class WorkspaceView(BaseModel):
     resource_count: int
     pending_draft_count: int
     unread_activity_count: int
+
+
+class HarnessProcessView(BaseModel):
+    phase: str
+    phase_label: str
+    status: str
+    wait_reason: str
+    semantic_status: str
+    next_step: str
+    version: int
+    updated_at: str | None
+
+
+class HarnessWorkNodeView(BaseModel):
+    node_id: str
+    type: str
+    label: str
+    status: str | None = None
+    team_name: str | None = None
+    depends_on: list[str] = Field(default_factory=list)
+
+
+class HarnessWorkEdgeView(BaseModel):
+    source: str
+    target: str
+    type: str
+
+
+class HarnessWorkGraphView(BaseModel):
+    nodes: list[HarnessWorkNodeView]
+    edges: list[HarnessWorkEdgeView]
+
+
+class HarnessTaskView(BaseModel):
+    task_id: str
+    title: str
+    status: str
+    team_id: str
+    team_name: str | None = None
+    priority: str
+    due_at: str | None = None
+    contract_ready: bool
+    contract_version: int | None = None
+
+
+class HarnessActivityView(BaseModel):
+    category: str
+    label: str
+    status: str
+    occurred_at: str | None
+
+
+class HarnessBlockerView(BaseModel):
+    kind: str
+    label: str
+    created_at: str | None
+
+
+class HarnessVerificationView(BaseModel):
+    total: int
+    pending: int
+    passed: int
+    failed: int
+    stale: int
+
+
+class HarnessCompletionView(BaseModel):
+    tasks_done: int
+    tasks_total: int
+    contract_status: str | None = None
+    delivery_status: str | None = None
+    evaluation_passed: bool | None = None
+    updated_at: str | None = None
+
+
+class ProjectHarnessView(BaseModel):
+    process: HarnessProcessView | None
+    work_graph: HarnessWorkGraphView
+    tasks: list[HarnessTaskView]
+    activity: list[HarnessActivityView]
+    blockers: list[HarnessBlockerView]
+    verification: HarnessVerificationView
+    completion: HarnessCompletionView
 
 
 class MessageSendBody(BaseModel):
