@@ -6,9 +6,13 @@ from ..team_agents.dispatcher import TeamAgentDispatcher
 from ..team_agents.profiles import TeamAgentCapabilityResolver
 from ..team_agents.task_contracts import PersistentTaskDispatchFactLoader
 from ..work_graph.repository import SQLAlchemyWorkGraphRepository
+from .budget_service import ProjectExecutionBudgetService
 from .capability_adapter import ProjectCapabilityAdapter
 from .command_service import ProjectProcessCommandService
+from .human_service import HumanGateService
+from .planner import ProjectPlannerIntentService
 from .planner_consumer import PlannerCommandConsumer
+from .planner_runtime import ProjectPlannerRunLauncher
 from .runner import ProjectOrchestratorRunner
 from .service import ProjectProcessService
 from .verification_effect import VerificationOrchestrationEffect
@@ -54,6 +58,13 @@ def build_project_orchestrator_worker(*, repository, scheduler, agent_run_servic
         command_service=ProjectProcessCommandService(repository), scheduler=scheduler,
         snapshot_loader=snapshot_loader,
         command_consumer=PlannerCommandConsumer(repository=repository, work_graph_repository=graph),
+        intent_launcher=ProjectPlannerRunLauncher(
+            intent_service=ProjectPlannerIntentService(repository),
+            work_graph_repository=graph,
+            run_service=agent_run_service,
+            budget_service=ProjectExecutionBudgetService(repository),
+            human_gate_service=HumanGateService(repository),
+        ),
         effect=VerificationOrchestrationEffect(repository=repository,
             work_graph_repository=graph, dispatcher=dispatcher, integration_service=integration_service))
     return ProjectOrchestratorLoop(runner,

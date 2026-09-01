@@ -9,12 +9,14 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, func, select, update
+from test_project_planner_intents import NOW, _create, _run_service, _stack
 
 from coifesp_harness.agent_runs import (
     AGENT_RUNS,
     AgentRunService,
     DurableRunStatus,
 )
+from coifesp_harness.errors import GovernanceConflictError
 from coifesp_harness.product import (
     ProductAccountService,
     ProjectDirectoryService,
@@ -22,8 +24,8 @@ from coifesp_harness.product import (
     TeamAccountRole,
 )
 from coifesp_harness.project_process import (
-    HumanGateService,
     ORCHESTRATOR_PRINCIPAL_ID,
+    HumanGateService,
     ProjectExecutionBudgetService,
     ProjectPlannerIntentService,
     ProjectPlannerIntentStatus,
@@ -38,8 +40,6 @@ from coifesp_harness.project_process.repository import (
 )
 from coifesp_harness.security import Principal
 from coifesp_harness.work_graph import ProjectGraphSnapshot
-from test_project_planner_intents import NOW, _create, _run_service, _stack
-
 
 try:
     from coifesp_harness.project_process import (
@@ -213,6 +213,12 @@ def _finish_actual_run(runs, run, *, target=DurableRunStatus.COMPLETED, tokens=3
     assert lease.run.run_id == run.run_id
     runs.start(worker=WORKER, run_id=run.run_id, lease_token=lease.lease_token)
     checkpoint = runs.repository.load_checkpoint(tenant_id="team-a", run_id=run.run_id)
+    checkpoint["usage"] = {
+        "turns": 1,
+        "tool_calls": 0,
+        "total_tokens": tokens,
+        "model_cost_microusd": cost,
+    }
     return runs.checkpoint(
         worker=WORKER,
         run_id=run.run_id,
@@ -433,7 +439,7 @@ def test_planner_budget_limit_opens_gate_without_creating_run_or_reservation():
             .where(PROJECT_EXECUTION_POLICIES.c.policy_id == "policy-a")
             .values(max_agent_runs=0)
         )
-    intent = _create(intents, process, graph)
+    _create(intents, process, graph)
     launcher = _launcher(repository, intents, runs, human, graph)
 
     outcome = launcher.process_once(worker_id="planner-test")
@@ -470,3 +476,46 @@ def test_waiting_or_blocked_process_does_not_admit_planner_run(status, wait_reas
     assert persisted.status is ProjectPlannerIntentStatus.PENDING
     assert _count(repository, AGENT_RUNS) == 0
     assert _count(repository, PROJECT_EXECUTION_RESERVATIONS) == 0
+
+
+def test_direct_launch_rejects_changed_process_cursor_inside_transaction():
+    repository, process, graph, intents, runs, _human = _planner_stack()
+    intent = _create(intents, process, graph)
+    with repository.transaction() as connection:
+        connection.execute(
+            PROJECT_PROCESSES.update()
+            .where(PROJECT_PROCESSES.c.process_id == process.process_id)
+            .values(version=process.version + 1)
+        )
+
+    with pytest.raises(GovernanceConflictError, match="process snapshot changed"):
+        intents.launch(
+            intent=intent,
+            graph=graph,
+            run_service=runs,
+            budget_service=ProjectExecutionBudgetService(repository, clock=lambda: NOW),
+        )
+    assert _count(repository, AGENT_RUNS) == 0
+    assert _count(repository, PROJECT_EXECUTION_RESERVATIONS) == 0
+
+
+def test_accounting_rejects_reservation_not_derived_from_intent():
+    repository, process, graph, intents, runs, human = _planner_stack()
+    intent = _create(intents, process, graph)
+    launcher = _launcher(repository, intents, runs, human, graph)
+    _, _, run = _launch_one(launcher, intents, runs, intent)
+    terminal = runs.repository.cancel_queued(
+        tenant_id="team-a",
+        run_id=run.run_id,
+        owner_principal_id=ORCHESTRATOR_PRINCIPAL_ID,
+    )
+    with repository.transaction() as connection:
+        connection.execute(
+            PROJECT_EXECUTION_RESERVATIONS.update()
+            .where(PROJECT_EXECUTION_RESERVATIONS.c.agent_run_id == run.run_id)
+            .values(reservation_id="planner-budget:unexpected")
+        )
+
+    with pytest.raises(GovernanceConflictError, match="unexpected budget reservation"):
+        _accounting(repository, runs).on_run_terminal(terminal)
+    assert _usage(repository).active_agent_runs == 1

@@ -23,6 +23,7 @@ from coifesp_harness.product import (
 from coifesp_harness.project_process import (
     ORCHESTRATOR_PRINCIPAL_ID,
     PLANNER_DECISION_SCHEMA,
+    ProjectExecutionBudgetService,
     ProjectPlannerIntentService,
     ProjectPlannerIntentStatus,
     ProjectPlannerProjection,
@@ -67,8 +68,8 @@ def _stack():
         policy_id="policy-a",
         project_id="project-a",
         max_agent_runs=10,
-        max_total_tokens=10000,
-        max_model_cost_microusd=100000,
+        max_total_tokens=200000,
+        max_model_cost_microusd=20000000,
         max_replans=3,
         max_generated_tasks=20,
         max_active_agent_runs=4,
@@ -161,6 +162,14 @@ def test_launch_uses_an_ordinary_toolless_durable_agent_run():
 
 def test_request_loads_current_snapshot_and_reuses_deterministic_run():
     repository, process, graph = _stack()
+    from coifesp_harness.project_process.repository import PROJECT_PROCESSES
+
+    with repository.transaction() as connection:
+        connection.execute(
+            PROJECT_PROCESSES.update()
+            .where(PROJECT_PROCESSES.c.process_id == process.process_id)
+            .values(status="RUNNING", wait_reason="NONE")
+        )
     service = ProjectPlannerIntentService(repository, clock=lambda: NOW)
     runs = _run_service(repository.engine)
 
@@ -171,6 +180,7 @@ def test_request_loads_current_snapshot_and_reuses_deterministic_run():
         reason="ANALYSIS",
         work_graph=work_graph,
         run_service=runs,
+        budget_service=ProjectExecutionBudgetService(repository, clock=lambda: NOW),
     )
     second_intent, second_run = service.request(
         process_id=process.process_id,
@@ -178,6 +188,7 @@ def test_request_loads_current_snapshot_and_reuses_deterministic_run():
         reason="ANALYSIS",
         work_graph=work_graph,
         run_service=runs,
+        budget_service=ProjectExecutionBudgetService(repository, clock=lambda: NOW),
     )
 
     assert first_intent == second_intent

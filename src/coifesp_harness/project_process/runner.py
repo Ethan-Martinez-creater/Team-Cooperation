@@ -112,6 +112,7 @@ class ProjectOrchestratorRunner:
         after_effect: Callable[[], None] | None = None,
         after_decision_finished: Callable[[], None] | None = None,
         command_consumer=None,
+        intent_launcher=None,
     ) -> None:
         if retry_after_seconds < 0:
             raise ValueError("retry_after_seconds cannot be negative")
@@ -126,6 +127,7 @@ class ProjectOrchestratorRunner:
         self.after_effect = after_effect
         self.after_decision_finished = after_decision_finished
         self.command_consumer = command_consumer
+        self.intent_launcher = intent_launcher
 
     def process_once(
         self,
@@ -139,6 +141,12 @@ class ProjectOrchestratorRunner:
                 worker_id=worker_id, process_id=process_id, lease_seconds=lease_seconds)
             if consumed is not None:
                 return consumed
+        if self.intent_launcher is not None:
+            launched = self.intent_launcher.process_once(
+                worker_id=worker_id, process_id=process_id
+            )
+            if launched is not None:
+                return launched
         wakeup = self.scheduler.claim(
             owner=worker_id,
             process_id=process_id,

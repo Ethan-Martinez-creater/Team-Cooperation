@@ -62,6 +62,7 @@ from ..project_process import (
     ProjectExecutionBudgetService,
     ProjectPlannerIntentService,
     ProjectPlannerProjection,
+    ProjectPlannerRunAccounting,
     ProjectProcessCommandService,
     ProjectProcessOutboxService,
     ProjectProcessScheduler,
@@ -488,6 +489,10 @@ def build_application(
                 engine=runtime_engine, audit_log=audit
             ),
         )
+        _planner_accounting = ProjectPlannerRunAccounting(
+            repository=project_process_repository,
+            run_repository=agent_run_service.repository,
+        )
 
         _task_result_projection = TeamTaskResultProjection(
             repository=project_process_repository,
@@ -513,7 +518,8 @@ def build_application(
 
         def project_terminal_callback(run):
             first_error = None
-            for projector in (_projection, _planner_projection, _task_accounting,
+            for projector in (_projection, _planner_projection, _planner_accounting,
+                              _task_accounting,
                               _task_result_projection, task_verification_service):
                 try:
                     projector.on_run_terminal(run)
@@ -610,6 +616,7 @@ def build_application(
     app.state.audit_log = audit
     app.state.turn_projection = _projection
     app.state.project_planner_projection = _planner_projection
+    app.state.project_planner_run_accounting = _planner_accounting
     app.state.team_task_run_accounting = _task_accounting
     app.state.team_task_result_projection = _task_result_projection
     app.state.project_planner_intent_service = project_planner_intent_service

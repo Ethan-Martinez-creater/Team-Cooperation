@@ -18,10 +18,20 @@ from ..runtime import AgentRunRequest, Message, RunBudget
 from ..security import Classification, Principal, ResourceLabel
 from ..work_graph import ProjectGraphSnapshot
 from .commands import ProjectPlannerIntent, ProjectPlannerIntentStatus
-from .repository import PROJECT_PLANNER_INTENTS, SQLAlchemyProjectProcessRepository
+from .repository import (
+    PROJECT_PLANNER_INTENTS,
+    PROJECT_PROCESSES,
+    SQLAlchemyProjectProcessRepository,
+)
 from .runner import ORCHESTRATOR_PRINCIPAL_ID
 
 PLANNER_DECISION_SCHEMA = "coifesp.orchestration-decision.v1"
+PLANNER_RUN_BUDGET = RunBudget(
+    max_turns=4,
+    max_tool_calls=1,
+    max_total_tokens=100_000,
+    max_model_cost_microusd=10_000_000,
+)
 PLANNER_INTENT_REASONS = frozenset(
     {
         "ANALYSIS",
@@ -136,6 +146,7 @@ class ProjectPlannerIntentService:
         reason: str,
         work_graph,
         run_service,
+        budget_service,
     ):
         """Create-or-resume the one Planner Run for the current process snapshot."""
 
@@ -151,10 +162,22 @@ class ProjectPlannerIntentService:
             based_on_event_sequence=process.last_event_sequence,
             graph=graph,
         )
-        run = self.launch(intent=intent, graph=graph, run_service=run_service)
+        run = self.launch(
+            intent=intent,
+            graph=graph,
+            run_service=run_service,
+            budget_service=budget_service,
+        )
         return self.get(intent.planner_intent_id), run
 
-    def launch(self, *, intent: ProjectPlannerIntent, graph: ProjectGraphSnapshot, run_service):
+    def launch(
+        self,
+        *,
+        intent: ProjectPlannerIntent,
+        graph: ProjectGraphSnapshot,
+        run_service,
+        budget_service=None,
+    ):
         if intent.status not in {
             ProjectPlannerIntentStatus.PENDING,
             ProjectPlannerIntentStatus.RUNNING,
@@ -226,7 +249,7 @@ class ProjectPlannerIntentService:
                     None,
                 ),
             ),
-            budget=RunBudget(max_turns=4, max_tool_calls=1),
+            budget=PLANNER_RUN_BUDGET,
             context_items=(context,),
             context_purpose=f"project-orchestration:{intent.project_id}",
             tool_authorization=None,
@@ -237,28 +260,69 @@ class ProjectPlannerIntentService:
         # otherwise valid Planner before its delegation is visible.
         if run_service.repository.engine is not self.repository.engine:
             raise ValueError("Planner launch requires a shared database engine")
+        if (
+            budget_service is not None
+            and budget_service.repository.engine is not self.repository.engine
+        ):
+            raise ValueError("Planner budget admission requires a shared database engine")
         with self.repository.transaction() as connection:
+            bound_repository = self.repository.using_connection(connection)
             bound_intents = ProjectPlannerIntentService(
-                self.repository.using_connection(connection), clock=self.clock
+                bound_repository, clock=self.clock
             )
             current_row = connection.execute(select(PROJECT_PLANNER_INTENTS).where(
                 PROJECT_PLANNER_INTENTS.c.planner_intent_id == intent.planner_intent_id
             ).with_for_update()).mappings().one()
-            if current_row["run_id"] is not None:
-                existing_run = run_service.repository.using_connection(connection).get(
-                    tenant_id=intent.owner_team_id, run_id=current_row["run_id"]
+            process_row = connection.execute(
+                select(PROJECT_PROCESSES)
+                .where(PROJECT_PROCESSES.c.process_id == intent.process_id)
+                .with_for_update()
+            ).mappings().one()
+            if (
+                process_row["project_id"] != intent.project_id
+                or process_row["version"] != intent.based_on_process_version
+                or process_row["last_event_sequence"] != intent.based_on_event_sequence
+            ):
+                raise GovernanceConflictError(
+                    "planner process snapshot changed before launch"
                 )
-                if (existing_run.run_id != run_id
-                        or existing_run.owner_principal_id != principal.principal_id
-                        or existing_run.correlation_id != request.correlation_id):
-                    raise GovernanceConflictError("Planner Run does not match its intent binding")
-                return existing_run
+            reservation_id = None
+            if budget_service is not None:
+                from .budget_service import ProjectExecutionBudgetService
+
+                reservation = self.budget_reservation(intent)
+                usage = bound_repository.usage(connection, intent.process_id)
+                admitted, _ = ProjectExecutionBudgetService(
+                    bound_repository, clock=self.clock
+                ).reserve(**reservation, expected_usage_version=usage.version)
+                reservation_id = admitted.reservation_id
+            if current_row["run_id"] is not None:
+                try:
+                    existing_run = run_service.repository.using_connection(connection).get(
+                        tenant_id=intent.owner_team_id, run_id=current_row["run_id"]
+                    )
+                except ResourceNotFound:
+                    existing_run = None
+                if existing_run is not None:
+                    if (existing_run.run_id != run_id
+                            or existing_run.owner_principal_id != principal.principal_id
+                            or existing_run.correlation_id != request.correlation_id):
+                        raise GovernanceConflictError(
+                            "Planner Run does not match its intent binding"
+                        )
+                    if reservation_id is not None:
+                        ProjectExecutionBudgetService(
+                            bound_repository, clock=self.clock
+                        ).bind_agent_run(
+                            reservation_id=reservation_id, agent_run_id=run_id
+                        )
+                    return existing_run
             bound_intents.bind_run(intent.planner_intent_id, run_id)
             bound_runs = AgentRunService(
                 run_service.repository.using_connection(connection),
                 checkpoint_codec=run_service.checkpoint_codec,
             )
-            return bound_runs.create(
+            run = bound_runs.create(
                 principal=principal,
                 run_id=run_id,
                 correlation_id=request.correlation_id,
@@ -266,6 +330,25 @@ class ProjectPlannerIntentService:
                 checkpoint=checkpoint,
                 max_failures=3,
             )
+            if reservation_id is not None:
+                ProjectExecutionBudgetService(
+                    bound_repository, clock=self.clock
+                ).bind_agent_run(reservation_id=reservation_id, agent_run_id=run_id)
+            return run
+
+    @staticmethod
+    def budget_reservation(intent: ProjectPlannerIntent) -> dict:
+        digest = hashlib.sha256(intent.planner_intent_id.encode()).hexdigest()
+        return {
+            "reservation_id": f"planner-budget:{digest[:40]}",
+            "reservation_key": f"planner:{digest}",
+            "process_id": intent.process_id,
+            "work_node_id": f"planner:{digest[:40]}",
+            "team_id": intent.owner_team_id,
+            "execution_attempt": 1,
+            "reserved_tokens": PLANNER_RUN_BUDGET.max_total_tokens,
+            "reserved_model_cost_microusd": PLANNER_RUN_BUDGET.max_model_cost_microusd,
+        }
 
     def bind_run(self, planner_intent_id: str, run_id: str) -> ProjectPlannerIntent:
         planner_intent_id = self._identifier(planner_intent_id, "planner_intent_id")
