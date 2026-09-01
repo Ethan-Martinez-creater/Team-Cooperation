@@ -216,6 +216,17 @@ def _project_stack(tmp_path: Path | None = None) -> SimpleNamespace:
         accept=True,
         expected_contract_version=1,
     )
+    # Contract acceptance alone is not executable.  The project-work boundary
+    # consumes the authoritative in-progress TeamTask state.
+    collaboration.assign_internal(
+        project_id="project-a",
+        task_id="task-a",
+        actor_id="lead-b",
+        account_id="lead-b",
+    )
+    collaboration.start_task(
+        project_id="project-a", task_id="task-a", actor_id="lead-b"
+    )
 
     execution_repository = SQLAlchemyTaskRepository(engine=engine)
     execution_repository.create_schema()
@@ -309,22 +320,16 @@ def _execution_row_count(value: SimpleNamespace) -> int:
 @pytest.mark.parametrize("task_state", ["accepted", "in_progress"])
 def test_project_work_accepts_only_the_authoritative_runnable_task_states(task_state: str):
     value = _project_stack()
+    _set_task_status(value, task_state)
     if task_state == "in_progress":
-        value.collaboration.assign_internal(
-            project_id="project-a",
-            task_id="task-a",
-            actor_id="lead-b",
-            account_id="lead-b",
-        )
-        value.collaboration.start_task(
-            project_id="project-a", task_id="task-a", actor_id="lead-b"
-        )
-
         task = _enqueue(value, idempotency_key=f"project-work:{task_state}")
         _assert_project_execution_task(task)
         return
 
-    with pytest.raises(PROJECT_ERRORS, match="status|in progress|execution"):
+    with pytest.raises(
+        PROJECT_ERRORS,
+        match="project work status must be in_progress",
+    ):
         _enqueue(value, idempotency_key=f"project-work:{task_state}")
     assert _execution_row_count(value) == 0
 
@@ -338,7 +343,10 @@ def test_non_runnable_task_states_are_rejected(task_state: str):
     value = _project_stack()
     _set_task_status(value, task_state)
 
-    with pytest.raises(PROJECT_ERRORS, match="status|accepted|contract"):
+    with pytest.raises(
+        PROJECT_ERRORS,
+        match="project work status must be in_progress",
+    ):
         _enqueue(value, idempotency_key=f"project-work:invalid:{task_state}")
 
     assert _execution_row_count(value) == 0
@@ -372,7 +380,7 @@ def test_project_work_requires_every_work_graph_dependency_to_be_verified():
         created_by_id="lead-a",
     )
 
-    with pytest.raises(PROJECT_ERRORS, match="depend|verif|readiness"):
+    with pytest.raises(PROJECT_ERRORS, match="project work dependencies are not verified"):
         _enqueue(value, idempotency_key="project-work:dependency-blocked")
 
     with value.engine.begin() as connection:
@@ -389,10 +397,13 @@ def test_project_work_requires_every_work_graph_dependency_to_be_verified():
 def test_project_work_checks_exact_task_node_and_accepted_contract_version():
     value = _project_stack()
 
-    with pytest.raises(PROJECT_ERRORS, match="node|task|work"):
+    with pytest.raises(PROJECT_ERRORS, match="project work process or node binding changed"):
         _enqueue(value, work_node_id="node:task:other")
 
-    with pytest.raises(PROJECT_ERRORS, match="contract|version"):
+    with pytest.raises(
+        PROJECT_ERRORS,
+        match="version-pinned accepted project work contract",
+    ):
         _enqueue(value, contract_version=2)
 
 
@@ -400,7 +411,10 @@ def test_project_work_checks_exact_task_node_and_accepted_contract_version():
 def test_project_work_requires_target_team_to_match_principal_tenant():
     value = _project_stack()
 
-    with pytest.raises((PolicyDenied, GovernanceConflictError), match="team|tenant|target"):
+    with pytest.raises(
+        (PolicyDenied, GovernanceConflictError),
+        match="only the target team may enqueue project work",
+    ):
         _enqueue(value, principal=SOURCE_PRINCIPAL)
 
 
@@ -440,7 +454,7 @@ def test_project_work_rejects_a_process_from_another_project():
     )
     _activate_process(value.process_repository, "process-b")
 
-    with pytest.raises(PROJECT_ERRORS, match="project|process|task"):
+    with pytest.raises(PROJECT_ERRORS, match="project work is absent or hidden"):
         _enqueue(value, process_id="process-b")
 
 
@@ -471,8 +485,39 @@ def test_project_work_requires_an_active_non_waiting_process(
             )
         )
 
-    with pytest.raises(PROJECT_ERRORS, match="process|wait|terminal|active"):
+    with pytest.raises(
+        PROJECT_ERRORS,
+        match="project process cannot admit execution work",
+    ):
         _enqueue(value, idempotency_key=f"project-work:process:{status.lower()}")
+
+
+@project_api_required
+@pytest.mark.parametrize(
+    ("status", "phase"),
+    [
+        ("READY", "PLANNING"),
+        ("READY", "INTEGRATION"),
+        ("RUNNING", "PLANNING"),
+        ("RUNNING", "INTEGRATION"),
+    ],
+)
+def test_project_work_requires_execution_phase_even_when_process_status_is_active(
+    status: str, phase: str
+):
+    value = _project_stack()
+    with value.engine.begin() as connection:
+        connection.execute(
+            PROJECT_PROCESSES.update()
+            .where(PROJECT_PROCESSES.c.process_id == "process-a")
+            .values(status=status, phase=phase, wait_reason="NONE")
+        )
+
+    with pytest.raises(
+        PROJECT_ERRORS,
+        match="project work execution requires the EXECUTION process phase",
+    ):
+        _enqueue(value, idempotency_key=f"project-work:phase:{status.lower()}:{phase.lower()}")
 
 
 @project_api_required
@@ -511,6 +556,44 @@ def test_project_work_concurrent_retries_create_one_task(tmp_path: Path):
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         first, second = tuple(pool.map(enqueue_from_replica, (1, 2)))
+
+    assert first == second
+    _assert_project_execution_task(first)
+    assert _execution_row_count(value) == 1
+
+
+@project_api_required
+def test_project_work_concurrent_submissions_with_different_idempotency_keys_converge(
+    tmp_path: Path,
+):
+    value = _project_stack(tmp_path)
+    barrier = Barrier(2)
+
+    def enqueue_from_replica(idempotency_key: str) -> ExecutionTask:
+        replica_repository = SQLAlchemyTaskRepository(engine=value.engine)
+        replica = TaskExecutionService(
+            repository=replica_repository,
+            governance=_UnusedGovernance(),  # type: ignore[arg-type]
+            project_repository=value.process_repository,
+            work_graph_repository=value.graph_repository,
+        )
+        barrier.wait()
+        return replica.enqueue_project_work(
+            principal=TARGET_PRINCIPAL,
+            idempotency_key=idempotency_key,
+            process_id="process-a",
+            team_task_id="task-a",
+            work_node_id="node:task:task-a",
+            contract_version=1,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = tuple(
+            pool.map(
+                enqueue_from_replica,
+                ("project-work:contract-a", "project-work:contract-b"),
+            )
+        )
 
     assert first == second
     _assert_project_execution_task(first)
