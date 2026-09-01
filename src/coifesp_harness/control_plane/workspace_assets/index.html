@@ -91,9 +91,13 @@
           <main class="workspace-chat">
             <header class="chat-head">
               <div>
-                <p class="eyebrow" id="ws-project-id">—</p>
                 <h2 id="ws-project-name">—</h2>
                 <p class="muted" id="ws-project-desc"></p>
+                <div id="ws-process-status" class="process-status" aria-live="polite">
+                  <span id="ws-process-state" class="process-state">状态加载中</span>
+                  <span id="ws-process-blocker" class="process-detail"></span>
+                  <span id="ws-process-next" class="process-detail"></span>
+                </div>
               </div>
               <div id="ws-project-teams" class="ws-teams"></div>
             </header>
@@ -110,16 +114,18 @@
           <aside class="workspace-drawer" id="ws-drawer">
             <nav class="drawer-tabs" role="tablist" aria-label="项目上下文">
               <button type="button" class="active" data-ws-tab="overview">概览</button>
-              <button type="button" data-ws-tab="data">数据</button>
+              <button type="button" data-ws-tab="work-graph">Work Graph</button>
+              <button type="button" data-ws-tab="tasks">任务</button>
+              <button type="button" data-ws-tab="activity">Agent Activity</button>
               <button type="button" data-ws-tab="collab">协作</button>
-              <button type="button" data-ws-tab="plan">计划</button>
-              <button type="button" data-ws-tab="inbox">任务</button>
+              <button type="button" data-ws-tab="delivery">交付</button>
             </nav>
             <div class="drawer-pane active" data-ws-pane="overview" id="ws-pane-overview"></div>
-            <div class="drawer-pane" data-ws-pane="data" id="ws-pane-data"></div>
+            <div class="drawer-pane" data-ws-pane="work-graph" id="ws-pane-work-graph"></div>
+            <div class="drawer-pane" data-ws-pane="tasks" id="ws-pane-tasks"></div>
+            <div class="drawer-pane" data-ws-pane="activity" id="ws-pane-activity"></div>
             <div class="drawer-pane" data-ws-pane="collab" id="ws-pane-collab"></div>
-            <div class="drawer-pane" data-ws-pane="plan" id="ws-pane-plan"></div>
-            <div class="drawer-pane" data-ws-pane="inbox" id="ws-pane-inbox"></div>
+            <div class="drawer-pane" data-ws-pane="delivery" id="ws-pane-delivery"></div>
           </aside>
         </div>
       </section>

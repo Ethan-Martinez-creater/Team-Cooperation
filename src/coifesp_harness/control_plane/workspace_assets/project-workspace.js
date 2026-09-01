@@ -7,10 +7,35 @@
   "use strict";
 
   let W = null;
-  let active = null; // { projectId, conversationId, eventController, lastSequence }
+  let active = null; // { projectId, generation, conversationId, eventController, lastSequence }
   let pendingAttachments = [];
   let openGeneration = 0;
   let bound = false;
+
+  const DRAWER_TABS = new Set(["overview", "work-graph", "tasks", "activity", "collab", "delivery"]);
+  const PROCESS_LABELS = {
+    intake: "准备中",
+    planning: "规划中",
+    executing: "执行中",
+    verifying: "验收中",
+    waiting: "等待中",
+    paused: "已暂停",
+    completed: "已完成",
+    terminal: "已完成",
+    failed: "需要处理",
+    cancelled: "已取消",
+  };
+  const ACTIVITY_STATUS = {
+    completed: "已完成",
+    complete: "已完成",
+    succeeded: "已完成",
+    success: "已完成",
+    running: "进行中",
+    active: "进行中",
+    pending: "待处理",
+    waiting: "等待中",
+    failed: "失败",
+  };
 
   const esc = (v) =>
     String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -23,6 +48,40 @@
     project_readonly: "项目共享",
     portable: "可带走共享",
   };
+
+  function currentTeamId() {
+    if (typeof state === "undefined" || !state) return W?.teamId || null;
+    return state.account?.team_id || state.identity?.tenant_id || W?.teamId || null;
+  }
+
+  function ownActive(projectId, generation) {
+    return Boolean(active && active.projectId === projectId && active.generation === generation);
+  }
+
+  function firstValue(item, keys, fallback = "") {
+    for (const key of keys) {
+      const value = item?.[key];
+      if (value !== undefined && value !== null && String(value).trim()) return value;
+    }
+    return fallback;
+  }
+
+  function displayValue(value, fallback = "") {
+    if (value === undefined || value === null) return fallback;
+    if (Array.isArray(value)) return value.map((item) => displayValue(item)).filter(Boolean).join("、") || fallback;
+    if (typeof value === "object") return firstValue(value, ["label", "summary", "reason", "title", "name"], fallback);
+    return String(value);
+  }
+
+  function semanticState(value) {
+    const normalized = String(value || "").toLowerCase();
+    return PROCESS_LABELS[normalized] || stateName(normalized) || "状态未知";
+  }
+
+  function semanticActivityStatus(value) {
+    const normalized = String(value || "").toLowerCase();
+    return ACTIVITY_STATUS[normalized] || (value ? String(value) : "进行中");
+  }
 
   function toast(message, error) {
     const el = $("#toast");
@@ -169,28 +228,35 @@
       renderAttachmentChips();
       const conversationBox = $("#ws-conversation");
       if (conversationBox) conversationBox.innerHTML = "";
-      const snapshot = await W.api(`/v1/projects/${encodeURIComponent(projectId)}/workspace`);
-      const conversation = await W.api(`/v1/projects/${encodeURIComponent(projectId)}/conversation`, { method: "PUT" });
+      const encodedProjectId = encodeURIComponent(projectId);
+      const [snapshot, conversation, harnessView] = await Promise.all([
+        W.api(`/v1/projects/${encodedProjectId}/workspace`),
+        W.api(`/v1/projects/${encodedProjectId}/conversation`, { method: "PUT" }),
+        loadHarnessView(projectId),
+      ]);
       if (generation !== openGeneration) return;
       active = {
         projectId,
+        generation,
         conversationId: conversation.conversation_id,
         eventController: null,
         snapshot,
+        harnessView,
       };
-      renderProjectHead(snapshot);
+      renderProjectHead(snapshot, harnessView);
       const page = await W.api(
-        `/v1/projects/${encodeURIComponent(projectId)}/conversation/messages?after_sequence=0`
+        `/v1/projects/${encodedProjectId}/conversation/messages?after_sequence=0`
       );
       if (generation !== openGeneration) return;
       active.lastSequence = conversation.last_message_sequence;
       renderConversation(page.items);
-      startEventStream(projectId);
+      startEventStream(projectId, generation);
       await refreshDrawer("overview");
-      await refreshDrawer("data");
+      await refreshDrawer("work-graph");
+      await refreshDrawer("tasks");
+      await refreshDrawer("activity");
       await refreshDrawer("collab");
-      await refreshDrawer("plan");
-      await refreshDrawer("inbox");
+      await refreshDrawer("delivery");
       if (typeof show === "function") show("project-workspace");
       if (typeof state !== "undefined" && state.sessionCoordinator) {
         state.sessionCoordinator.saveRoute({ view: "project-workspace", project_id: projectId });
@@ -201,10 +267,21 @@
     }
   }
 
-  function renderProjectHead(snapshot) {
-    $("#ws-project-id").textContent = snapshot.project.project_id;
-    $("#ws-project-name").textContent = snapshot.project.name;
-    $("#ws-project-desc").textContent = snapshot.project.description || "";
+  async function loadHarnessView(projectId) {
+    try {
+      const view = await W.api(`/v1/projects/${encodeURIComponent(projectId)}/harness-view`);
+      return view && typeof view === "object" ? view : {};
+    } catch (error) {
+      // Older deployments do not expose the aggregate yet. The workspace
+      // remains useful with the legacy project, plan and task endpoints.
+      return {};
+    }
+  }
+
+  function renderProjectHead(snapshot, harnessView = {}) {
+    $("#ws-project-name").textContent = snapshot?.project?.name || "项目工作台";
+    $("#ws-project-desc").textContent = snapshot?.project?.description || "";
+    renderProcessSummary(harnessView?.process);
     const canAddTeam = W.teamId && snapshot.project.owner_team_id === W.teamId;
     $("#ws-project-teams").innerHTML = [
       ...(snapshot.teams || []).map((t) => `<span class="pill">${esc(t.name)}</span>`),
@@ -212,6 +289,26 @@
     ].join("");
     const addTeam = $("#ws-project-teams .ws-add-team");
     if (addTeam) addTeam.addEventListener("click", () => addProjectTeam(snapshot));
+  }
+
+  function renderProcessSummary(process) {
+    const stateEl = $("#ws-process-state");
+    const blockerEl = $("#ws-process-blocker");
+    const nextEl = $("#ws-process-next");
+    if (!stateEl || !blockerEl || !nextEl) return;
+    const phase = firstValue(process, ["phase", "current_phase", "stage"]);
+    const status = firstValue(process, ["status", "state", "current_status"]);
+    const statusText = semanticState(displayValue(status || phase));
+    stateEl.textContent = phase && status && String(phase).toLowerCase() !== String(status).toLowerCase()
+      ? `${semanticState(displayValue(phase))} · ${statusText}`
+      : statusText;
+    stateEl.dataset.state = displayValue(status || phase || "unknown").toLowerCase();
+    const blocker = firstValue(process, ["blocker", "blocking_reason", "wait_reason", "waiting_for"]);
+    blockerEl.textContent = blocker ? `阻塞：${displayValue(blocker)}` : "";
+    const next = firstValue(process, ["next_step", "next_action", "recommended_action"]);
+    nextEl.textContent = next ? `下一步：${displayValue(next)}` : "";
+    blockerEl.classList.toggle("hidden", !blocker);
+    nextEl.classList.toggle("hidden", !next);
   }
 
   async function addProjectTeam(snapshot) {
@@ -294,6 +391,7 @@
     const content = input.value.trim();
     if (!active || (!content && pendingAttachments.length === 0)) return;
     const projectId = active.projectId;
+    const generation = active.generation;
     const conversationId = active.conversationId;
     const attachments = [...pendingAttachments];
     pendingAttachments = [];
@@ -305,14 +403,14 @@
       attachment_resource_ids: attachments,
     };
     // The optimistic lock uses the last sequence we actually observed.
-    if (active.lastSequence != null) body.expected_last_sequence = active.lastSequence;
+    if (ownActive(projectId, generation) && active.lastSequence != null) body.expected_last_sequence = active.lastSequence;
     try {
       const result = await W.api(
         `/v1/projects/${encodeURIComponent(projectId)}/conversation/messages`,
         { method: "POST", body: JSON.stringify(body) }
       );
       // Ignore the response if the user switched projects while awaiting.
-      if (!active || active.projectId !== projectId) return;
+      if (!ownActive(projectId, generation)) return;
       renderConversation([result.message]);
       active.lastSequence = result.message.sequence;
       active.pendingTurn = result.turn?.turn_id;
@@ -322,7 +420,7 @@
         renderTurnPending();
       }
     } catch (e) {
-      if (!active || active.projectId !== projectId) return;
+      if (!ownActive(projectId, generation)) return;
       pendingAttachments = pendingAttachments.concat(attachments);
       renderAttachmentChips();
       renderTurnFailed(e.message);
@@ -362,15 +460,16 @@
     box.scrollTop = box.scrollHeight;
   }
 
-  function startEventStream(projectId) {
+  function startEventStream(projectId, generation = active?.generation) {
     if (active?.eventController) active.eventController.abort();
     const controller = new AbortController();
+    if (!ownActive(projectId, generation)) return;
     active.eventController = controller;
     const path = `/v1/projects/${encodeURIComponent(projectId)}/conversation/events`;
     let attempt = 0;
 
     const openStream = () => {
-      const cursor = active && active.lastSequence ? active.lastSequence : 0;
+      const cursor = ownActive(projectId, generation) && active.lastSequence ? active.lastSequence : 0;
       return fetch(path, {
         headers: {
           Authorization: `Bearer ${W.token}`,
@@ -386,7 +485,7 @@
         const response = await openStream();
         // A stale response from a previously aborted stream must not render
         // into a different project the user just opened.
-        if (!response.ok || !active || active.projectId !== projectId) return;
+        if (!response.ok || !ownActive(projectId, generation)) return;
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         const newline = String.fromCharCode(10);
@@ -408,10 +507,10 @@
             if (data) {
               try {
                 const message = JSON.parse(data);
-                if (active && active.projectId === projectId) appendStreamedMessage(message);
+                if (ownActive(projectId, generation)) appendStreamedMessage(message);
               } catch (e) {}
             }
-            if (eventId != null && active && active.projectId === projectId && eventId > (active.lastSequence || 0)) {
+            if (eventId != null && ownActive(projectId, generation) && eventId > (active.lastSequence || 0)) {
               active.lastSequence = Math.max(active.lastSequence || 0, eventId);
             }
           }
@@ -419,16 +518,16 @@
         }
         scheduleReconnect();
       } catch (e) {
-        if (!controller.signal.aborted && active && active.projectId === projectId) scheduleReconnect();
+        if (!controller.signal.aborted && ownActive(projectId, generation)) scheduleReconnect();
       }
     };
 
     const scheduleReconnect = () => {
-      if (controller.signal.aborted || !active) return;
+      if (controller.signal.aborted || !ownActive(projectId, generation)) return;
       const delay = Math.min(30000, 1000 * Math.pow(2, attempt));
       attempt += 1;
       setTimeout(() => {
-        if (controller.signal.aborted || !active) return;
+        if (controller.signal.aborted || !ownActive(projectId, generation)) return;
         readLoop();
       }, delay);
     };
@@ -442,67 +541,165 @@
     box.querySelectorAll(".turn-pending").forEach((n) => n.remove());
     renderConversation([message]);
     refreshDrawer("overview").catch(() => {});
-    refreshDrawer("plan").catch(() => {});
+    refreshDrawer("activity").catch(() => {});
+    refreshDrawer("tasks").catch(() => {});
   }
 
   function switchDrawerTab(tab) {
+    if (!DRAWER_TABS.has(tab)) return;
     document.querySelectorAll("[data-ws-tab]").forEach((b) => b.classList.toggle("active", b.dataset.wsTab === tab));
     document.querySelectorAll("[data-ws-pane]").forEach((p) => p.classList.toggle("active", p.dataset.wsPane === tab));
     refreshDrawer(tab);
   }
 
   async function refreshDrawer(tab) {
-    if (!active) return;
+    if (!active || !DRAWER_TABS.has(tab)) return;
     const pane = document.querySelector(`[data-ws-pane="${tab}"]`);
     if (!pane || !pane.classList.contains("active")) return;
     const project = active.projectId;
+    const generation = active.generation;
     let html;
     try {
-      if (tab === "overview") html = await overviewPane(project);
-      else if (tab === "data") html = await dataPane(project);
+      const harnessView = await loadHarnessView(project);
+      if (!ownActive(project, generation)) return;
+      active.harnessView = harnessView;
+      renderProcessSummary(harnessView?.process);
+      if (tab === "overview") html = await overviewPane(project, harnessView);
+      else if (tab === "work-graph") html = workGraphPane(harnessView?.work_graph);
+      else if (tab === "tasks") html = await tasksPane(project, harnessView?.tasks);
+      else if (tab === "activity") html = activityPane(harnessView?.activity);
       else if (tab === "collab") html = await collabPane(project);
-      else if (tab === "plan") html = await planPane(project);
-      else if (tab === "inbox") html = await inboxPane(project);
+      else if (tab === "delivery") html = deliveryPane(harnessView);
       // A slow response from a previously opened project must never overwrite
       // the drawer of the project the user is looking at now.
-      if (!active || active.projectId !== project) return;
+      if (!ownActive(project, generation)) return;
       pane.innerHTML = html;
       bindPaneActions(pane, tab);
     } catch (e) {
-      if (!active || active.projectId !== project) return;
+      if (!ownActive(project, generation)) return;
       pane.innerHTML = `<p class="muted small">加载失败：${esc(e.message)}</p>`;
     }
   }
 
-  async function overviewPane(projectId) {
-    const snapshot = await W.api(`/v1/projects/${encodeURIComponent(projectId)}/workspace`);
-    const planDrafts = await W.api(`/v1/projects/${encodeURIComponent(projectId)}/plan-drafts`);
-    const plan = planDrafts.find((d) => d.status === "approved") || planDrafts[0];
+  async function overviewPane(projectId, harnessView = active?.harnessView || {}) {
+    const encodedProjectId = encodeURIComponent(projectId);
+    const [snapshot, planDrafts, resources] = await Promise.all([
+      W.api(`/v1/projects/${encodedProjectId}/workspace`),
+      W.api(`/v1/projects/${encodedProjectId}/plan-drafts`).catch(() => []),
+      W.api(`/v1/projects/${encodedProjectId}/resources`).catch(() => []),
+    ]);
+    const plan = (planDrafts || []).find((d) => d.status === "approved") || (planDrafts || [])[0];
+    const ownTeam = currentTeamId();
+    const process = harnessView?.process || {};
+    const blockers = normalizeItems(harnessView?.blockers);
+    const planCard = plan
+      ? `<article class="card overview-plan-card"><div class="card-head"><div><strong>${esc(firstValue(plan, ["goals", "title"], "项目计划建议"))}</strong><div class="meta"><span class="pill ${plan.status === "approved" ? "green" : "orange"}">${stateName(plan.status)}</span></div></div></div><p class="muted">${esc(firstValue(plan, ["scope", "description"], "Agent 已生成项目计划建议。"))}</p><p class="muted small">阶段 ${(plan.phases || []).length} · 风险 ${(plan.risks || []).length} · 验收 ${(plan.acceptance_criteria || []).length}</p>${plan.status === "drafting" ? `<div class="task-actions"><button class="secondary" data-ws-reject-plan="${esc(plan.draft_id)}">拒绝</button><button class="primary" data-ws-approve-plan="${esc(plan.draft_id)}">确认计划</button></div>` : ""}</article>`
+      : `<p class="muted small">Agent 尚未生成计划草案；在对话中描述项目目标即可。</p>`;
+    const resourceCards = (resources || []).map((resource) => {
+      const canShare = resource.owner_team_id === ownTeam && resource.propagation === "team_private";
+      return `<article class="card resource-summary-card"><div class="card-head"><div><strong>${esc(resource.title || "未命名资料")}</strong><div class="meta"><span class="pill ${resource.propagation === "team_private" ? "orange" : "green"}">${propagationLabel[resource.propagation] || "项目可见"}</span></div></div></div>${canShare ? `<button class="secondary" data-ws-share-resource="${esc(resource.resource_id)}">共享到项目</button>` : ""}</article>`;
+    }).join("");
+    const blockerSummary = blockers.length
+      ? `<div class="overview-blockers"><strong>当前阻塞</strong>${blockers.map((item) => `<p class="muted small">${esc(firstValue(item, ["label", "summary", "reason"], item))}</p>`).join("")}</div>`
+      : `<p class="muted small">当前没有已记录的阻塞。</p>`;
     return `
-      <h4>目标与计划</h4>
-      ${plan ? `<div class="card"><strong>${esc(plan.goals)}</strong>
-        <p class="muted">${esc(plan.scope)}</p>
-        <div class="meta"><span class="pill green">${stateName(plan.status)}</span></div></div>` : `<p class="muted small">Agent 尚未生成计划草案；在对话中描述项目目标即可。</p>`}
-      <h4>统计</h4>
-      <div class="meta">任务 ${snapshot.task_count} · 资料 ${snapshot.resource_count} · 待确认草案 ${snapshot.pending_draft_count}</div>
-      <h4>参与团队</h4>
-      ${(snapshot.teams || []).map((t) => `<div class="meta"><span>${esc(t.name)}</span><span class="pill">${esc(t.kind)}</span></div>`).join("") || `<p class="muted small">尚无参与团队</p>`}`;
+      <div class="overview-actions"><button class="primary" data-ws-upload>上传资料</button></div>
+      <section class="overview-section"><h4>项目进度</h4><div class="overview-process-card"><span class="process-state">${esc(semanticState(firstValue(process, ["status", "phase"], "")))}</span>${firstValue(process, ["next_step", "next_action"]) ? `<span class="muted small">下一步：${esc(firstValue(process, ["next_step", "next_action"]))}</span>` : ""}</div>${blockerSummary}</section>
+      <section class="overview-section"><h4>目标与计划</h4>${planCard}</section>
+      <section class="overview-section"><h4>项目概况</h4><div class="meta overview-stats"><span>任务 ${Number(snapshot?.task_count || 0)}</span><span>资料 ${Number(snapshot?.resource_count || 0)}</span><span>待处理 ${Number(snapshot?.pending_draft_count || 0)}</span></div></section>
+      <section class="overview-section"><h4>参与团队</h4>${(snapshot?.teams || []).map((team) => `<div class="meta"><span>${esc(team.name)}</span><span class="pill">${esc(team.kind)}</span></div>`).join("") || `<p class="muted small">尚无参与团队</p>`}</section>
+      <section class="overview-section"><h4>项目资料</h4>${resourceCards || `<p class="muted small">还没有项目资料。上传的文件默认仅本团队可见，可稍后共享到项目。</p>`}</section>`;
   }
 
-  async function dataPane(projectId) {
-    const resources = await W.api(`/v1/projects/${encodeURIComponent(projectId)}/resources`);
-    const ownTeam = state?.account?.team_id || state?.identity?.tenant_id;
-    if (!resources || !resources.length) {
-      return `<div class="actions"><button class="primary" data-ws-upload>上传资料</button></div><p class="muted small">还没有项目资料。上传的文件默认仅本团队可见，可稍后切换为项目共享。</p>`;
+  function normalizeItems(value) {
+    if (Array.isArray(value)) return value;
+    if (!value || typeof value !== "object") return [];
+    const items = value.items || value.nodes || value.results || value.entries || [];
+    return Array.isArray(items) ? items : [];
+  }
+
+  function graphNodes(graph) {
+    const nodes = normalizeItems(graph);
+    if (nodes.length) return nodes;
+    if (!graph || typeof graph !== "object") return [];
+    return [
+      ...(graph.goals || []).map((item) => ({ ...item, type: "goal" })),
+      ...(graph.milestones || []).map((item) => ({ ...item, type: "milestone" })),
+      ...(graph.phases || []).map((item) => ({ ...item, type: "phase" })),
+      ...(graph.tasks || []).map((item) => ({ ...item, type: "task" })),
+      ...(graph.risks || []).map((item) => ({ ...item, type: "risk" })),
+      ...(graph.artifacts || []).map((item) => ({ ...item, type: "artifact" })),
+    ];
+  }
+
+  function workGraphPane(graph) {
+    const nodes = graphNodes(graph);
+    if (!nodes.length) return `<p class="muted small">Work Graph 尚未形成。确认项目计划后，目标、阶段、任务和风险会在这里按层级展示。</p>`;
+    const relations = normalizeItems(graph?.relations).filter((relation) => {
+      const kind = firstValue(relation, ["kind", "relation_type", "type"], "");
+      return String(kind).toLowerCase() === "depends_on" || String(kind).toLowerCase() === "dependency";
+    });
+    const dependencyCount = new Map();
+    relations.forEach((relation) => {
+      const dependent = firstValue(relation, ["source_id", "source", "from"], "") || firstValue(relation, ["target_id", "target", "to"], "");
+      dependencyCount.set(dependent, (dependencyCount.get(dependent) || 0) + 1);
+    });
+    const typeOrder = { goal: 0, requirement: 1, milestone: 1, phase: 2, task: 3, risk: 2, artifact: 4, verification: 5 };
+    const typeLabel = { goal: "目标", requirement: "需求", milestone: "里程碑", phase: "阶段", task: "任务", risk: "风险", artifact: "资料", verification: "验收" };
+    const rows = nodes.slice().sort((left, right) => {
+      const a = String(firstValue(left, ["type", "node_type", "kind"], "")).toLowerCase();
+      const b = String(firstValue(right, ["type", "node_type", "kind"], "")).toLowerCase();
+      return (typeOrder[a] ?? 9) - (typeOrder[b] ?? 9);
+    }).map((node) => {
+      const nodeType = String(firstValue(node, ["type", "node_type", "kind"], "work")).toLowerCase();
+      const nodeId = firstValue(node, ["node_id", "id", "work_node_id"], "");
+      const dependencies = Array.isArray(node.depends_on) ? node.depends_on : (Array.isArray(node.dependencies) ? node.dependencies : []);
+      const count = dependencies.length || dependencyCount.get(nodeId) || 0;
+      const level = nodeType === "goal" || nodeType === "milestone" ? 0 : nodeType === "phase" || nodeType === "risk" ? 1 : 2;
+      return `<li class="work-node level-${level}"><div class="work-node-line"><span class="work-node-type">${esc(typeLabel[nodeType] || "工作项")}</span><strong>${esc(firstValue(node, ["title", "name", "label"], "未命名工作项"))}</strong><span class="pill work-node-status">${esc(stateName(firstValue(node, ["status", "state"], "待处理")))}</span>${count ? `<span class="dependency-badge">依赖 ${count}</span>` : ""}</div>${firstValue(node, ["description", "summary"]) ? `<p class="muted small">${esc(firstValue(node, ["description", "summary"]))}</p>` : ""}</li>`;
+    }).join("");
+    return `<p class="muted small">项目事实以 Work Graph 为准；依赖关系会决定任务何时可以开始。</p><ul class="work-graph-tree">${rows}</ul>`;
+  }
+
+  async function tasksPane(projectId, tasksValue) {
+    let tasks = normalizeItems(tasksValue);
+    if (!tasks.length) {
+      try { tasks = await W.api(`/v1/projects/${encodeURIComponent(projectId)}/tasks`); } catch (e) { tasks = []; }
     }
-    return `<div class="actions"><button class="primary" data-ws-upload>上传资料</button></div>` +
-      resources.map((r) => `
-        <article class="card">
-          <div class="card-head"><div><strong>${esc(r.title)}</strong><div class="meta"><span class="pill ${r.propagation === "team_private" ? "orange" : "green"}">${propagationLabel[r.propagation] || esc(r.propagation)}</span><span>${esc(r.owner_team_id)}</span></div></div></div>
-          ${r.owner_team_id === ownTeam && r.propagation === "team_private"
-            ? `<button class="secondary" data-ws-share-resource="${esc(r.resource_id)}">共享到项目</button>`
-            : ""}
-        </article>`).join("");
+    if (!tasks.length) return `<p class="muted small">没有团队任务。由 Agent 起草或人工布置的任务会出现在这里。</p>`;
+    return `<p class="muted small">任务状态来自项目 Work Graph；Agent 执行记录会在 Agent Activity 中以安全摘要显示。</p>` + tasks.map((task) => {
+      const team = firstValue(task, ["target_team_name", "team_name", "team"], "参与团队");
+      const status = firstValue(task, ["status", "state"], "pending");
+      const dependencies = Array.isArray(task.depends_on) ? task.depends_on : (Array.isArray(task.dependencies) ? task.dependencies : []);
+      return `<article class="card task-summary-card"><div class="card-head"><div><strong>${esc(firstValue(task, ["title", "name", "label"], "未命名任务"))}</strong><div class="meta"><span class="pill ${status === "verified" || status === "completed" ? "green" : "orange"}">${esc(stateName(status))}</span><span>${esc(team)}</span>${dependencies.length ? `<span class="dependency-badge">依赖 ${dependencies.length}</span>` : ""}</div></div></div>${firstValue(task, ["acceptance_criteria", "description", "summary"]) ? `<p class="muted">${esc(firstValue(task, ["acceptance_criteria", "description", "summary"]))}</p>` : ""}</article>`;
+    }).join("");
+  }
+
+  function activityPane(activityValue) {
+    const activities = normalizeItems(activityValue);
+    if (!activities.length) return `<p class="muted small">暂无 Agent Activity。项目 Agent 开始分析、执行或等待时，安全摘要会显示在这里。</p>`;
+    const rows = activities.map((item) => {
+      const label = firstValue(item, ["label"], "Agent 活动");
+      const status = semanticActivityStatus(firstValue(item, ["status"], "pending"));
+      const time = firstValue(item, ["time"], "");
+      const team = firstValue(item, ["team"], "项目 Agent");
+      return `<li class="activity-row"><span class="activity-dot" aria-hidden="true"></span><div class="activity-body"><strong>${esc(label)}</strong><div class="meta"><span>${esc(status)}</span><span>${esc(team)}</span>${time ? `<time datetime="${esc(time)}">${esc(time)}</time>` : ""}</div></div></li>`;
+    }).join("");
+    return `<p class="muted small">这里仅显示可共享的语义进展，不展示内部执行细节。</p><ol class="activity-list">${rows}</ol>`;
+  }
+
+  function deliveryPane(harnessView = {}) {
+    const verification = harnessView.verification || {};
+    const completion = harnessView.completion || {};
+    const verificationItems = normalizeItems(verification);
+    const completionItems = normalizeItems(completion);
+    const checks = verificationItems.length
+      ? verificationItems.map((item) => `<li class="delivery-check"><span class="pill ${String(firstValue(item, ["status", "state"], "pending")).toLowerCase() === "passed" ? "green" : "orange"}">${esc(stateName(firstValue(item, ["status", "state"], "pending")))}</span><span>${esc(firstValue(item, ["label", "name", "summary"], "验收项"))}</span></li>`).join("")
+      : `<li class="muted small">暂无验收记录。</li>`;
+    const completionStatus = firstValue(completion, ["status", "state"], "pending");
+    const progress = firstValue(completion, ["progress", "completion_percent"], null);
+    const progressText = progress === null ? "" : ` · ${esc(progress)}%`;
+    return `<section class="delivery-section"><h4>验收</h4><div class="delivery-status"><span class="pill ${String(firstValue(verification, ["status", "state"], "pending")).toLowerCase() === "passed" ? "green" : "orange"}">${esc(stateName(firstValue(verification, ["status", "state"], "待开始")))}</span><span class="muted small">${esc(firstValue(verification, ["summary", "message"], "Harness 会在交付前汇总验收结果。"))}</span></div><ul class="delivery-checks">${checks}</ul></section><section class="delivery-section"><h4>完成进度</h4><div class="delivery-status"><span class="pill ${String(completionStatus).toLowerCase() === "completed" ? "green" : "orange"}">${esc(stateName(completionStatus))}${progressText}</span><span class="muted small">${esc(firstValue(completion, ["summary", "message"], "完成条件满足后，Harness 才会结束项目。"))}</span></div>${completionItems.length ? `<ul class="delivery-checks">${completionItems.map((item) => `<li class="delivery-check"><span>${esc(firstValue(item, ["label", "name", "summary"], "完成条件"))}</span><span class="muted">${esc(stateName(firstValue(item, ["status", "state"], "pending")))}</span></li>`).join("")}</ul>` : ""}</section>`;
   }
 
   async function collabPane(projectId) {
@@ -510,7 +707,7 @@
     let exchanges = [];
     try { drafts = await W.api(`/v1/projects/${encodeURIComponent(projectId)}/agent-exchange-drafts`); } catch (e) {}
     try { exchanges = await W.api(`/v1/projects/${encodeURIComponent(projectId)}/agent-exchanges`); } catch (e) {}
-    const ownTeam = state?.account?.team_id || state?.identity?.tenant_id;
+    const ownTeam = currentTeamId();
     const draftCards = (drafts || []).map((d) => `
       <article class="card">
         <div class="card-head"><div><strong>${esc(d.purpose)}</strong><div class="meta"><span class="pill ${d.status === "approved" ? "green" : "orange"}">${stateName(d.status)}</span><span>v${d.version}</span></div></div></div>
@@ -555,26 +752,6 @@
     return button + draftSection +
       (exchangeRows.join("") || `<p class="muted small">还没有已发送的跨团队 Agent 共享。草稿经你确认后才会发送给对方团队 Agent。</p>`);
   }
-  async function planPane(projectId) {
-    let drafts = [];
-    try { drafts = await W.api(`/v1/projects/${encodeURIComponent(projectId)}/plan-drafts`); } catch (e) {}
-    const cards = (drafts || []).map((d) => `
-      <article class="card">
-        <div class="card-head"><div><strong>计划草案</strong><div class="meta"><span class="pill ${d.status === "approved" ? "green" : "orange"}">${stateName(d.status)}</span><span>v${d.version}</span></div></div></div>
-        <p>${esc(d.goals)}</p>
-        <p class="muted">阶段 ${(d.phases || []).length} · 风险 ${(d.risks || []).length} · 验收 ${(d.acceptance_criteria || []).length}</p>
-        ${d.status === "drafting" ? `<div class="task-actions"><button class="secondary" data-ws-reject-plan="${esc(d.draft_id)}">拒绝</button><button class="primary" data-ws-approve-plan="${esc(d.draft_id)}">确认计划</button></div>` : ""}
-      </article>`).join("");
-    return `<p class="muted small">Agent 会在项目创建或你描述目标后给出计划、团队类别与人数建议；确认后才生成正式业务对象。</p>` + (cards || `<p class="muted small">暂无计划草案。</p>`);
-  }
-
-  async function inboxPane(projectId) {
-    let tasks = [];
-    try { tasks = await W.api(`/v1/projects/${encodeURIComponent(projectId)}/tasks`); } catch (e) {}
-    if (!tasks.length) return `<p class="muted small">没有团队任务。由 Agent 起草或人工布置的任务会出现在这里。</p>`;
-    return tasks.map((t) => `<article class="card"><div class="card-head"><div><strong>${esc(t.title)}</strong><div class="meta"><span class="pill ${t.status === "verified" ? "green" : "orange"}">${stateName(t.status)}</span><span>${esc(t.source_team_id)} → ${esc(t.target_team_id)}</span></div></div></div><p class="muted">${esc(t.acceptance_criteria || "")}</p></article>`).join("");
-  }
-
   function bindPaneActions(pane, tab) {
     pane.querySelectorAll("[data-ws-upload]").forEach((b) => b.addEventListener("click", uploadAttachment));
     pane.querySelectorAll("[data-ws-share-resource]").forEach((b) =>
@@ -650,7 +827,7 @@
         } else {
           toast("资料已上传");
         }
-        refreshDrawer("data");
+        refreshDrawer("overview");
       } catch (err) {
         toast(err.message, true);
       }
@@ -681,7 +858,7 @@
         });
         dialog.close();
         toast("已共享到项目");
-        refreshDrawer("data");
+        refreshDrawer("overview");
       } catch (err) {
         toast(err.message, true);
       }
@@ -699,7 +876,7 @@
     try { project = await W.api(`/v1/projects/${encodeURIComponent(active.projectId)}/workspace`); } catch (e) {}
     active.teams = project.teams || [];
     const dialog = $("#modal");
-    const ownTeam = state?.account?.team_id || state?.identity?.tenant_id;
+    const ownTeam = currentTeamId();
     const teamOptions = (project.teams || [])
       .filter((t) => t.team_id !== ownTeam)
       .map((t) => `<label class="field"><input type="checkbox" name="recipient" value="${esc(t.team_id)}"> ${esc(t.name)}（${esc(t.team_id)}）</label>`)
@@ -781,7 +958,7 @@
     let receive = null;
     try {
       const recipients = await W.api(`/v1/projects/${encodeURIComponent(active.projectId)}/agent-exchanges/${encodeURIComponent(exchangeId)}/recipients`);
-      const ownTeam = state?.account?.team_id || state?.identity?.tenant_id;
+      const ownTeam = currentTeamId();
       receive = recipients.find((r) => r.recipient_team_id === ownTeam) || null;
     } catch (e) {}
     const dialog = $("#modal");
@@ -951,7 +1128,6 @@
         });
         dialog.close();
         toast(action === "approve" ? "计划已确认并投影" : "计划草案已拒绝");
-        refreshDrawer("plan");
         refreshDrawer("overview");
       } catch (err) {
         toast(err.message, true);
