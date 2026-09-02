@@ -15,7 +15,10 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    text,
 )
+
+from ..tool_jobs.repository import TOOL_JOBS
 
 PRODUCT_METADATA = MetaData()
 
@@ -576,7 +579,8 @@ PROJECT_AGENT_RUNS = Table(
         name="ck_product_project_agent_runs_kind",
     ),
     CheckConstraint(
-        "run_kind = 'task_execution' OR (created_by IS NOT NULL AND mode IS NOT NULL)",
+        "run_kind IN ('task_execution','specialist') OR "
+        "(created_by IS NOT NULL AND mode IS NOT NULL)",
         name="ck_product_project_agent_runs_legacy_identity",
     ),
     CheckConstraint(
@@ -597,12 +601,129 @@ PROJECT_AGENT_RUNS = Table(
         name="ck_product_project_agent_runs_task_execution",
     ),
     UniqueConstraint("run_id", name="uq_product_project_agent_run"),
-    UniqueConstraint(
-        "process_id",
-        "team_task_id",
-        "execution_attempt",
-        name="uq_product_project_agent_run_task_attempt",
+    CheckConstraint(
+        "run_kind <> 'specialist' OR ("
+        "project_id IS NOT NULL AND process_id IS NOT NULL AND "
+        "team_agent_id IS NOT NULL AND work_node_id IS NOT NULL AND "
+        "team_task_id IS NOT NULL AND parent_run_id IS NOT NULL AND "
+        "initiated_by_principal_id IS NOT NULL AND "
+        "executed_as_principal_id IS NOT NULL AND "
+        "delegation_scope_digest IS NOT NULL AND "
+        "project_budget_reservation_id IS NOT NULL AND "
+        "created_by IS NULL AND mode IS NULL AND "
+        "length(delegation_scope_digest) = 64 AND "
+        "initiated_by_principal_id = 'team-agent:' || team_id AND "
+        "length(executed_as_principal_id) > "
+        "length('specialist-agent:' || team_id || ':') AND "
+        "executed_as_principal_id LIKE 'specialist-agent:' || team_id || ':%')",
+        name="ck_product_project_agent_runs_specialist",
     ),
+)
+Index(
+    "uq_product_project_agent_run_task_attempt",
+    PROJECT_AGENT_RUNS.c.process_id,
+    PROJECT_AGENT_RUNS.c.team_task_id,
+    PROJECT_AGENT_RUNS.c.execution_attempt,
+    unique=True,
+    postgresql_where=text("run_kind = 'task_execution'"),
+    sqlite_where=text("run_kind = 'task_execution'"),
+)
+
+SPECIALIST_DELEGATIONS = Table(
+    "product_specialist_delegations",
+    PRODUCT_METADATA,
+    Column("delegation_id", String(128), primary_key=True),
+    Column("idempotency_key", String(256), nullable=False),
+    Column(
+        "project_id",
+        String(128),
+        ForeignKey("product_projects.project_id", name="fk_specialist_delegation_project"),
+        nullable=False,
+    ),
+    Column("process_id", String(128), nullable=False),
+    Column("work_node_id", String(128), nullable=False),
+    Column(
+        "team_id",
+        String(128),
+        ForeignKey("product_teams.team_id", name="fk_specialist_delegation_team"),
+        nullable=False,
+    ),
+    Column(
+        "team_agent_id",
+        String(128),
+        ForeignKey(
+            "product_team_project_agents.agent_id",
+            name="fk_specialist_delegation_team_agent",
+        ),
+        nullable=False,
+    ),
+    Column(
+        "team_task_id",
+        String(128),
+        ForeignKey("product_team_tasks.task_id", name="fk_specialist_delegation_team_task"),
+        nullable=False,
+    ),
+    Column("parent_run_id", String(128), nullable=False),
+    Column("child_run_id", String(128), nullable=False),
+    Column("tool_job_tenant_id", String(128), nullable=False),
+    Column("tool_job_id", String(128), nullable=False),
+    Column("specialist_kind", String(128), nullable=False),
+    Column("depth", Integer, nullable=False),
+    Column("purpose", Text, nullable=False),
+    Column("request_json", JSON(none_as_null=True), nullable=False),
+    Column("context_scope_digest", String(64), nullable=False),
+    Column("profile_digest", String(64), nullable=False),
+    Column("output_schema_digest", String(64), nullable=False),
+    Column("project_budget_reservation_id", String(128), nullable=False),
+    Column("status", String(16), nullable=False, server_default="PENDING"),
+    Column("result_json", JSON(none_as_null=True), nullable=True),
+    Column("error_code", String(128), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    Column("completed_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint("length(idempotency_key) > 0", name="positive_idempotency_key"),
+    CheckConstraint("length(specialist_kind) > 0", name="positive_specialist_kind"),
+    CheckConstraint("depth >= 1", name="positive_depth"),
+    CheckConstraint("length(context_scope_digest) = 64", name="context_scope_digest"),
+    CheckConstraint("length(profile_digest) = 64", name="profile_digest"),
+    CheckConstraint("length(output_schema_digest) = 64", name="output_schema_digest"),
+    CheckConstraint(
+        "tool_job_tenant_id = team_id",
+        name="tool_job_tenant",
+    ),
+    CheckConstraint(
+        "status IN ('PENDING','RUNNING','COMPLETED','FAILED','CANCELLED')",
+        name="specialist_delegation_status",
+    ),
+    CheckConstraint(
+        "(status IN ('PENDING','RUNNING') AND completed_at IS NULL AND "
+        "result_json IS NULL AND error_code IS NULL) OR "
+        "(status = 'COMPLETED' AND completed_at IS NOT NULL AND "
+        "result_json IS NOT NULL AND error_code IS NULL) OR "
+        "(status = 'FAILED' AND completed_at IS NOT NULL AND "
+        "result_json IS NULL AND error_code IS NOT NULL) OR "
+        "(status = 'CANCELLED' AND completed_at IS NOT NULL AND "
+        "result_json IS NULL)",
+        name="specialist_delegation_lifecycle",
+    ),
+    UniqueConstraint("idempotency_key", name="uq_product_specialist_delegation_idempotency"),
+    UniqueConstraint("child_run_id", name="uq_product_specialist_delegation_child_run"),
+    UniqueConstraint("tool_job_id", name="uq_product_specialist_delegation_tool_job"),
+    ForeignKeyConstraint(
+        ["tool_job_tenant_id", "tool_job_id"],
+        [TOOL_JOBS.c.tenant_id, TOOL_JOBS.c.job_id],
+        name="fk_specialist_delegation_tool_job",
+        ondelete="RESTRICT",
+    ),
+)
+Index(
+    "ix_product_specialist_delegations_project_status",
+    SPECIALIST_DELEGATIONS.c.project_id,
+    SPECIALIST_DELEGATIONS.c.status,
+)
+Index(
+    "ix_product_specialist_delegations_parent_run",
+    SPECIALIST_DELEGATIONS.c.parent_run_id,
 )
 
 INBOX_AGENT_RUNS = Table(
@@ -1210,6 +1331,7 @@ ALL_PRODUCT_TABLES = (
     PROJECT_ACTIVITIES,
     PROJECT_ACTIVITY_CURSORS,
     PROJECT_AGENT_RUNS,
+    SPECIALIST_DELEGATIONS,
     INBOX_AGENT_RUNS,
     PROJECT_TOPICS,
     PROJECT_TOPIC_CONTRIBUTIONS,

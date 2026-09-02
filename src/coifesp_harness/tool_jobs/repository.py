@@ -86,7 +86,8 @@ TOOL_JOBS = Table(
         name="attempts",
     ),
     CheckConstraint(
-        "status IN ('queued','leased','running','retry_wait','succeeded','failed','cancelled')",
+        "status IN ('queued','leased','running','retry_wait','awaiting_specialist',"
+        "'succeeded','failed','cancelled')",
         name="status",
     ),
     CheckConstraint(

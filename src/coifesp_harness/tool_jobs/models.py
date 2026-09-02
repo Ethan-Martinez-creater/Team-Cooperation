@@ -11,6 +11,7 @@ class ToolJobStatus(str, Enum):
     LEASED = "leased"
     RUNNING = "running"
     RETRY_WAIT = "retry_wait"
+    AWAITING_SPECIALIST = "awaiting_specialist"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
