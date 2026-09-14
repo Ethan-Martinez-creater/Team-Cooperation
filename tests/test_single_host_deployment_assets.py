@@ -1,3 +1,4 @@
+import runpy
 from pathlib import Path
 
 import yaml
@@ -117,3 +118,34 @@ def test_generator_wires_explicit_internal_tls_ca_bundle() -> None:
     text = (BUNDLE / "prepare-deployment.py").read_text(encoding="utf-8")
     assert 'parser.add_argument("--identity-origin", required=True)' in text
     assert 'app["COIFESP_TLS_CA_BUNDLE"] = args.ssl_cert_file' in text
+    assert '"serviceAccountClientId": "coifesp-agent-worker"' in text
+    assert '"serviceAccountClientId": "coifesp-tool-worker"' in text
+    assert '"tenant_id": ["platform"]' in text
+
+
+def test_prepared_realm_contains_bounded_service_accounts() -> None:
+    prepare_realm = runpy.run_path(str(BUNDLE / "prepare-deployment.py"))[
+        "prepare_realm"
+    ]
+    realm, _ = prepare_realm(
+        ROOT / "deploy" / "keycloak" / "coifesp-realm.json",
+        public_origin="https://public.example.test",
+        client_secrets={
+            "coifesp-agent-worker": "a" * 64,
+            "coifesp-tool-worker": "b" * 64,
+            "coifesp-directory-reader": "c" * 64,
+        },
+    )
+    services = {
+        user["serviceAccountClientId"]: user
+        for user in realm["users"]
+        if "serviceAccountClientId" in user
+    }
+    assert services["coifesp-agent-worker"]["attributes"]["tenant_id"] == [
+        "platform"
+    ]
+    assert services["coifesp-agent-worker"]["realmRoles"] == ["agent_worker"]
+    assert services["coifesp-tool-worker"]["realmRoles"] == ["tool_worker"]
+    assert services["coifesp-directory-reader"]["clientRoles"] == {
+        "realm-management": ["view-users", "query-users", "query-groups"]
+    }

@@ -80,7 +80,7 @@ def prepare_realm(
         team: compliant_password() for team in ("team-a", "team-b", "team-c")
     }
     roles = {"team-a": ["lead", "tool_approver"], "team-b": ["contributor"], "team-c": ["reviewer"]}
-    realm["users"] = [
+    demo_users = [
         {
             "username": f"{team}-demo",
             "enabled": True,
@@ -97,6 +97,36 @@ def prepare_realm(
         }
         for team, team_roles in roles.items()
     ]
+    service_attributes = {
+        "tenant_id": ["platform"],
+        "clearance": ["internal"],
+        "compartments": ["platform"],
+    }
+    service_users = [
+        {
+            "username": "service-account-coifesp-agent-worker",
+            "enabled": True,
+            "serviceAccountClientId": "coifesp-agent-worker",
+            "attributes": service_attributes,
+            "realmRoles": ["agent_worker"],
+        },
+        {
+            "username": "service-account-coifesp-tool-worker",
+            "enabled": True,
+            "serviceAccountClientId": "coifesp-tool-worker",
+            "attributes": service_attributes,
+            "realmRoles": ["tool_worker"],
+        },
+        {
+            "username": "service-account-coifesp-directory-reader",
+            "enabled": True,
+            "serviceAccountClientId": "coifesp-directory-reader",
+            "clientRoles": {
+                "realm-management": ["view-users", "query-users", "query-groups"]
+            },
+        },
+    ]
+    realm["users"] = demo_users + service_users
     return realm, demo_passwords
 
 
