@@ -26,8 +26,15 @@ def test_compose_uses_isolated_names_and_loopback_ports() -> None:
 
 
 def test_systemd_units_are_dedicated_and_hardened() -> None:
-    units = sorted((BUNDLE / "systemd").glob("*.service"))
-    assert len(units) == 4
+    units = [
+        BUNDLE / "systemd" / name
+        for name in (
+            "team-cooperation-agent-worker.service",
+            "team-cooperation-control-plane.service",
+            "team-cooperation-github-adapter.service",
+            "team-cooperation-tool-worker.service",
+        )
+    ]
     for unit in units:
         text = unit.read_text(encoding="utf-8")
         assert unit.name.startswith("team-cooperation-")
@@ -40,15 +47,31 @@ def test_systemd_units_are_dedicated_and_hardened() -> None:
 
 
 def test_nginx_keeps_backends_on_loopback_and_disables_sse_buffering() -> None:
-    text = (BUNDLE / "nginx-http.conf").read_text(encoding="utf-8")
+    http = (BUNDLE / "nginx-http.conf").read_text(encoding="utf-8")
+    text = (BUNDLE / "nginx-https.conf").read_text(encoding="utf-8")
     assert "proxy_pass http://127.0.0.1:8020" in text
     assert "proxy_pass http://127.0.0.1:8180" in text
     assert "proxy_pass http://127.0.0.1:8011" in text
     assert "proxy_buffering off" in text
     assert "server_name __PUBLIC_HOST__" in text
     assert "server_name __GITHUB_HOST__" in text
-    assert "/github-adapter" not in text
+    assert "listen 127.0.0.1:8444 ssl" in text
     assert "default_server" not in text
+    assert ".well-known/acme-challenge" in http
+    assert "listen 443 ssl" not in http
+
+
+def test_short_lived_ip_certificate_has_automatic_renewal() -> None:
+    service = (BUNDLE / "systemd" / "team-cooperation-certbot-renew.service").read_text(
+        encoding="utf-8"
+    )
+    timer = (BUNDLE / "systemd" / "team-cooperation-certbot-renew.timer").read_text(
+        encoding="utf-8"
+    )
+    assert "certbot renew" in service
+    assert "systemctl reload nginx" in service
+    assert "OnCalendar=" in timer
+    assert "Persistent=true" in timer
 
 
 def test_secret_examples_do_not_ship_values() -> None:

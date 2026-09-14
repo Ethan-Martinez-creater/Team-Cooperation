@@ -1,0 +1,13 @@
+[Unit]
+Description=Renew Team Cooperation short-lived IP certificate
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/team-cooperation/certbot-venv/bin/certbot renew --quiet --deploy-hook "systemctl reload nginx"
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/etc/letsencrypt /var/lib/letsencrypt /var/log/letsencrypt

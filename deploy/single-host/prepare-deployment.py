@@ -39,6 +39,11 @@ def random_hex() -> str:
     return secrets.token_hex(32)
 
 
+def compliant_password() -> str:
+    """Generate a password satisfying the imported production realm policy."""
+    return f"Aa1!{secrets.token_hex(20)}"
+
+
 def prepare_realm(
     template: Path,
     *,
@@ -71,7 +76,9 @@ def prepare_realm(
             },
         })
 
-    demo_passwords = {team: secrets.token_urlsafe(24) for team in ("team-a", "team-b", "team-c")}
+    demo_passwords = {
+        team: compliant_password() for team in ("team-a", "team-b", "team-c")
+    }
     roles = {"team-a": ["lead", "tool_approver"], "team-b": ["contributor"], "team-c": ["reviewer"]}
     realm["users"] = [
         {
@@ -101,6 +108,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--public-origin", required=True)
     parser.add_argument("--github-origin", required=True)
+    parser.add_argument("--ssl-cert-file", default="")
     args = parser.parse_args()
 
     if not args.public_origin.startswith("https://") or not args.github_origin.startswith("https://"):
@@ -225,6 +233,8 @@ def main() -> None:
         "COIFESP_LOG_LEVEL": "INFO",
     }
     app.update({key: source[key] for key in provider_keys})
+    if args.ssl_cert_file:
+        app["SSL_CERT_FILE"] = args.ssl_cert_file
     github = {
         "COIFESP_GITHUB_ADAPTER_CLIENT_ID": "team-a-github",
         "COIFESP_GITHUB_ADAPTER_CLIENT_SECRET": connector_secret,
