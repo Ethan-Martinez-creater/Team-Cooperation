@@ -1,0 +1,25 @@
+[Unit]
+Description=Team Cooperation GitHub adapter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=teamcoop
+Group=teamcoop
+WorkingDirectory=/opt/team-cooperation/current
+EnvironmentFile=/opt/team-cooperation/config/github-adapter.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/team-cooperation/venv/bin/python -m uvicorn coifesp_harness.connectors.github_adapter:create_app --factory --host 127.0.0.1 --port 8011 --workers 1
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=90
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/team-cooperation/runtime-data/github
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

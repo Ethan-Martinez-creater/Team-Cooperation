@@ -1,0 +1,29 @@
+[Unit]
+Description=Team Cooperation shared multi-tenant Tool Worker
+After=network-online.target team-cooperation-control-plane.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=teamcoop
+Group=teamcoop
+WorkingDirectory=/opt/team-cooperation/current
+EnvironmentFile=/opt/team-cooperation/config/app.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=HOME=/opt/team-cooperation/home
+Environment=XDG_RUNTIME_DIR=/run/team-cooperation-tool
+RuntimeDirectory=team-cooperation-tool
+RuntimeDirectoryMode=0700
+ExecStart=/opt/team-cooperation/venv/bin/python -m coifesp_harness.tool_worker_main
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=660
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/team-cooperation/runtime-data /opt/team-cooperation/home /run/team-cooperation-tool
+MemoryMax=2048M
+
+[Install]
+WantedBy=multi-user.target

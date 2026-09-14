@@ -1,0 +1,25 @@
+[Unit]
+Description=Team Cooperation shared multi-tenant Agent Worker
+After=network-online.target team-cooperation-control-plane.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=teamcoop
+Group=teamcoop
+WorkingDirectory=/opt/team-cooperation/current
+EnvironmentFile=/opt/team-cooperation/config/app.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/team-cooperation/venv/bin/python -m coifesp_harness.worker_main
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=660
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/team-cooperation/runtime-data
+MemoryMax=2048M
+
+[Install]
+WantedBy=multi-user.target
