@@ -11,7 +11,8 @@ uses names, ports, databases, services and storage separate from any legacy
 - Agent Worker: one bounded shared multi-tenant systemd process
 - Tool Worker: one bounded shared multi-tenant systemd process using rootless
   Podman; never mount `/var/run/docker.sock` and never run it privileged
-- GitHub adapter: optional loopback `8011`, published at `/github-adapter`
+- GitHub adapter: optional loopback `8011`, published on a dedicated HTTPS
+  hostname because connector base URLs cannot contain a path
 
 Filled `infrastructure.env`, `app.env`, `github-adapter.env`, generated realm
 imports and credentials are deployment Secrets. Keep them outside Git with mode
@@ -25,8 +26,9 @@ place. This keeps application rollback independent of database and secret data.
 
 Bring up PostgreSQL first, then Keycloak. Run `alembic upgrade head` exactly once
 with the application environment before enabling the four systemd units. Install
-`nginx-http.conf` under a new site name, replace `__PUBLIC_HOST__`, validate with
-`nginx -t`, and only then replace the placeholder site's enabled symlink. Obtain
+`nginx-http.conf` under a new site name, replace `__PUBLIC_HOST__` and
+`__GITHUB_HOST__`, validate with `nginx -t`, and only then replace the
+placeholder site's enabled symlink. Obtain
 a trusted TLS certificate before using `COIFESP_ENV=production`; every OIDC and
 connector URL must use the same HTTPS origin.
 

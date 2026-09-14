@@ -43,8 +43,11 @@ def test_nginx_keeps_backends_on_loopback_and_disables_sse_buffering() -> None:
     text = (BUNDLE / "nginx-http.conf").read_text(encoding="utf-8")
     assert "proxy_pass http://127.0.0.1:8020" in text
     assert "proxy_pass http://127.0.0.1:8180" in text
+    assert "proxy_pass http://127.0.0.1:8011" in text
     assert "proxy_buffering off" in text
     assert "server_name __PUBLIC_HOST__" in text
+    assert "server_name __GITHUB_HOST__" in text
+    assert "/github-adapter" not in text
 
 
 def test_secret_examples_do_not_ship_values() -> None:
