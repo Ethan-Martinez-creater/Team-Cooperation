@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from coifesp_harness.project_process.models import (
     ProjectProcess,
     ProjectProcessPhase,
@@ -135,6 +137,12 @@ def test_verification_integration_and_delivery_follow_explicit_facts():
         readiness=empty,
         integration_outcome=IntegrationOutcome.PASSED,
     ).action is DeterministicAction.ENTER_DELIVERY
+    with pytest.raises(ValueError, match="IntegrationService"):
+        orchestrator.decide(
+            process=integration,
+            readiness=empty,
+            integration_outcome=IntegrationOutcome.FAILED,
+        )
     delivery = process(phase=ProjectProcessPhase.DELIVERY)
     assert orchestrator.decide(
         process=delivery,

@@ -54,6 +54,7 @@ runtime-data/
 
 # Local artifact stores and editor files
 /artifacts/
+/experiment/
 node_modules/
 .idea/
 .vscode/

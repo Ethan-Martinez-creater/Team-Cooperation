@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - name: Python syntax and bounded lint gate
+        run: |
+          python -m compileall -q src scripts
+          ruff check --select E9,F,I \
+            src/coifesp_harness/project_process/orchestrator.py \
+            src/coifesp_harness/collaboration/legacy_inventory.py \
+            scripts/check_legacy_governance_inventory.py \
+            tests/test_project_deterministic_orchestrator.py \
+            tests/test_legacy_governance_retirement.py
+      - name: Bounded type gate
+        run: >-
+          mypy --ignore-missing-imports --follow-imports=skip
+          src/coifesp_harness/project_process/orchestrator.py
+          src/coifesp_harness/collaboration/legacy_inventory.py
+      - name: High-severity source security gate
+        run: bandit -q -lll -r src
+      - name: Frontend syntax gate
+        run: node --check src/coifesp_harness/control_plane/workspace_assets/project-workspace.js
+
+  pytest:
+    name: pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest --junitxml=pytest-results.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pytest-results
+          path: pytest-results.xml
+          if-no-files-found: error
+
+  migration-smoke:
+    name: migration-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: coifesp
+          POSTGRES_PASSWORD: coifesp-ci
+          POSTGRES_DB: coifesp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U coifesp -d coifesp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      COIFESP_DATABASE_URL: postgresql+psycopg://coifesp:coifesp-ci@127.0.0.1:5432/coifesp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - name: Require one migration head
+        run: test "$(python -m alembic heads | grep -c '(head)')" -eq 1
+      - name: Upgrade a fresh PostgreSQL database
+        run: |
+          python -m alembic upgrade head
+          python -m alembic current
+
+  recovery-e2e:
+    name: recovery-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - name: Durable recovery and fencing regression
+        run: >-
+          python -m pytest
+          tests/test_project_orchestrator_runtime.py
+          tests/test_project_orchestrator_lifespan.py
+          tests/test_control_plane_projection_reconciler.py
+          tests/test_specialist_tool_job_wait.py

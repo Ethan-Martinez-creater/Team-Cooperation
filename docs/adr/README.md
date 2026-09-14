@@ -37,6 +37,7 @@
 | 0010 | Capability Directory Integration | 复用唯一能力/容量事实源 |
 | 0011 | Integration and Delivery | DeliveryManifest 接受后才允许完成 |
 | 0012 | Task Verification Human Evidence | 任务级人工证据与项目级 Gate 分离；所有必需检查组合通过 |
+| 0013 | Legacy Governance Retirement Gate | 新项目仅走 Project Work；以存量、只读观察和分阶段移除收口旧域 |
 
 ## 规范性附录
 
@@ -73,7 +74,7 @@
 
 ### Gate 0：ADR Accepted
 
-11 份 ADR 全部经主线程复核为 `Accepted`，且不存在未裁决的公共 schema、迁移策略或身份语义。
+13 份 ADR 全部经主线程复核为 `Accepted`，且不存在未裁决的公共 schema、迁移策略或身份语义。
 
 ### Gate 1：Work Graph
 

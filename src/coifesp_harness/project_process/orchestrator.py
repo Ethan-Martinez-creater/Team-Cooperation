@@ -46,7 +46,6 @@ class DeterministicReason(StrEnum):
     VERIFICATION_FAILED = "VERIFICATION_FAILED"
     INTEGRATION_PENDING = "INTEGRATION_PENDING"
     INTEGRATION_PASSED = "INTEGRATION_PASSED"
-    INTEGRATION_FAILED = "INTEGRATION_FAILED"
     DELIVERY_PENDING = "DELIVERY_PENDING"
     DELIVERY_ACCEPTED = "DELIVERY_ACCEPTED"
     DELIVERY_REJECTED = "DELIVERY_REJECTED"
@@ -147,9 +146,8 @@ class DeterministicProjectOrchestrator:
                     DeterministicReason.INTEGRATION_PASSED,
                     transition_key="integration.passed",
                 )
-            return DeterministicDecision(
-                DeterministicAction.REOPEN_WORK,
-                DeterministicReason.INTEGRATION_FAILED,
+            raise ValueError(
+                "integration failures are applied atomically by IntegrationService"
             )
         if process.phase is ProjectProcessPhase.DELIVERY:
             if delivery_outcome is None:
