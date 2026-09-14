@@ -48,6 +48,7 @@ def test_nginx_keeps_backends_on_loopback_and_disables_sse_buffering() -> None:
     assert "server_name __PUBLIC_HOST__" in text
     assert "server_name __GITHUB_HOST__" in text
     assert "/github-adapter" not in text
+    assert "default_server" not in text
 
 
 def test_secret_examples_do_not_ship_values() -> None:
