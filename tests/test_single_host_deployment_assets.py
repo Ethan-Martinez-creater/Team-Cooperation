@@ -45,6 +45,22 @@ def test_systemd_units_are_dedicated_and_hardened() -> None:
         assert "/opt/coifesp" not in text
         assert "8000" not in text and "8010" not in text and "5432" not in text
 
+    github = (BUNDLE / "systemd" / "team-cooperation-github-adapter.service").read_text(
+        encoding="utf-8"
+    )
+    assert "-m coifesp_harness.connectors.github_adapter" in github
+    assert "--factory" not in github
+
+    tool = (BUNDLE / "systemd" / "team-cooperation-tool-worker.service").read_text(
+        encoding="utf-8"
+    )
+    assert "Delegate=yes" in tool
+    assert "run-tool-worker.sh" in tool
+    assert "ProtectHome=false" in tool
+    wrapper = (BUNDLE / "run-tool-worker.sh").read_text(encoding="utf-8")
+    assert 'runtime_dir="/run/user/$(id -u)"' in wrapper
+    assert "-S" in wrapper
+
 
 def test_nginx_keeps_backends_on_loopback_and_disables_sse_buffering() -> None:
     http = (BUNDLE / "nginx-http.conf").read_text(encoding="utf-8")
@@ -56,6 +72,9 @@ def test_nginx_keeps_backends_on_loopback_and_disables_sse_buffering() -> None:
     assert "server_name __PUBLIC_HOST__" in text
     assert "server_name __GITHUB_HOST__" in text
     assert "listen 127.0.0.1:8444 ssl" in text
+    assert "listen 127.0.0.1:8445 ssl" in text
+    assert "server_name __IDENTITY_HOST__" in text
+    assert "identity-internal.crt" in text
     assert "default_server" not in text
     assert ".well-known/acme-challenge" in http
     assert "listen 443 ssl" not in http

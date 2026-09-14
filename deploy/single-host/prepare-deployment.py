@@ -108,10 +108,14 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--public-origin", required=True)
     parser.add_argument("--github-origin", required=True)
+    parser.add_argument("--identity-origin", required=True)
     parser.add_argument("--ssl-cert-file", default="")
     args = parser.parse_args()
 
-    if not args.public_origin.startswith("https://") or not args.github_origin.startswith("https://"):
+    if not all(
+        value.startswith("https://")
+        for value in (args.public_origin, args.github_origin, args.identity_origin)
+    ):
         raise SystemExit("public origins must use https")
     outputs = {
         name: args.output_dir / name
@@ -162,6 +166,7 @@ def main() -> None:
     }
     connector_secret = random_hex()
     oidc_origin = f"{args.public_origin}/auth/realms/coifesp"
+    identity_oidc_origin = f"{args.identity_origin}/auth/realms/coifesp"
     app = {
         "COIFESP_ENV": "production",
         "COIFESP_AUTH_MODE": "oidc",
@@ -176,18 +181,26 @@ def main() -> None:
             "coifesp-local-ui,coifesp-agent-worker,coifesp-tool-worker"
         ),
         "COIFESP_UI_OIDC_CLIENT_ID": "coifesp-local-ui",
-        "COIFESP_OIDC_JWKS_URL": f"{oidc_origin}/protocol/openid-connect/certs",
+        "COIFESP_OIDC_JWKS_URL": (
+            f"{identity_oidc_origin}/protocol/openid-connect/certs"
+        ),
         "COIFESP_OIDC_ALGORITHMS": "RS256",
-        "COIFESP_WORKER_TOKEN_ENDPOINT": f"{oidc_origin}/protocol/openid-connect/token",
+        "COIFESP_WORKER_TOKEN_ENDPOINT": (
+            f"{identity_oidc_origin}/protocol/openid-connect/token"
+        ),
         "COIFESP_WORKER_CLIENT_ID": "coifesp-agent-worker",
         "COIFESP_WORKER_CLIENT_SECRET": clients["coifesp-agent-worker"],
         "COIFESP_WORKER_TENANTS": "team-a,team-b,team-c",
-        "COIFESP_DIRECTORY_API_BASE_URL": f"{args.public_origin}/auth/admin",
+        "COIFESP_DIRECTORY_API_BASE_URL": f"{args.identity_origin}/auth/admin",
         "COIFESP_DIRECTORY_REALM": "coifesp",
-        "COIFESP_DIRECTORY_TOKEN_ENDPOINT": f"{oidc_origin}/protocol/openid-connect/token",
+        "COIFESP_DIRECTORY_TOKEN_ENDPOINT": (
+            f"{identity_oidc_origin}/protocol/openid-connect/token"
+        ),
         "COIFESP_DIRECTORY_CLIENT_ID": "coifesp-directory-reader",
         "COIFESP_DIRECTORY_CLIENT_SECRET": clients["coifesp-directory-reader"],
-        "COIFESP_TOOL_WORKER_TOKEN_ENDPOINT": f"{oidc_origin}/protocol/openid-connect/token",
+        "COIFESP_TOOL_WORKER_TOKEN_ENDPOINT": (
+            f"{identity_oidc_origin}/protocol/openid-connect/token"
+        ),
         "COIFESP_TOOL_WORKER_CLIENT_ID": "coifesp-tool-worker",
         "COIFESP_TOOL_WORKER_CLIENT_SECRET": clients["coifesp-tool-worker"],
         "COIFESP_TOOL_WORKER_TENANTS": "team-a,team-b,team-c",

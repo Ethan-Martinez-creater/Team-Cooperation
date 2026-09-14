@@ -13,6 +13,8 @@ uses names, ports, databases, services and storage separate from any legacy
   Podman; never mount `/var/run/docker.sock` and never run it privileged
 - GitHub adapter: optional loopback `8011`, reached only through a loopback TLS
   Nginx listener and a private, fixed internal hostname
+- Keycloak service traffic: loopback TLS `8445`; browser redirects and token
+  issuer remain on the public HTTPS origin
 
 Filled `infrastructure.env`, `app.env`, `github-adapter.env`, generated realm
 imports and credentials are deployment Secrets. Keep them outside Git with mode
@@ -32,6 +34,21 @@ ICP-filed domain can use a short-lived Let's Encrypt IP certificate, provided
 Certbot 5.4 or newer renews it automatically. The GitHub adapter uses a separate
 loopback-only certificate and an internal hostname because connector base URLs
 must be HTTPS DNS names without paths or IP literals.
+
+Use distinct internal DNS names such as
+`github-adapter.team-cooperation.internal` and
+`identity.team-cooperation.internal`, both mapped to `127.0.0.1`. Generate
+separate certificates for them, append both public certificates to the
+application CA bundle, and pass the latter address as
+`prepare-deployment.py --identity-origin https://identity.team-cooperation.internal:8445`.
+This keeps service credentials off a cloud public-IP hairpin while preserving
+the public issuer required by browsers.
+
+Before enabling the Tool Worker, allocate non-overlapping subordinate UID/GID
+ranges for `teamcoop`, enable its persistent user manager with
+`loginctl enable-linger teamcoop`, and delegate `cpu`, `cpuset`, `io`, `memory`
+and `pids` on that account's `user@UID.service`. The Tool Worker wrapper requires
+the user bus and fails closed when it is unavailable.
 
 The database volume is not deleted during ordinary rollback. Rollback disables
 only `team-cooperation-*` units, restores the previous Nginx enabled-site
