@@ -45,6 +45,7 @@ dev = [
   "bandit>=1.8,<2",
   "black>=24",
   "mypy>=1.18,<2",
+  "psutil>=7,<8",
   "ruff>=0.13,<1",
   "promql-parser>=0.10,<1",
   "pytest>=8",
