@@ -14,6 +14,33 @@ from coifesp_harness.errors import IdentityProviderUnavailable
 from coifesp_harness.product import ProductAccountService, ProjectDirectoryService
 
 
+def test_oidc_session_lifecycle_propagates_explicit_ca_bundle(monkeypatch):
+    captured = {}
+
+    class Fetcher:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr(
+        "coifesp_harness.control_plane.session_lifecycle.HttpxJSONFetcher",
+        Fetcher,
+    )
+    settings = Settings.from_environment({
+        "COIFESP_ENV": "production",
+        "COIFESP_TLS_CA_BUNDLE": "/opt/team-cooperation/config/ca-bundle.pem",
+    })
+    service = SessionLifecycleService(settings=settings)
+
+    assert captured == {
+        "allow_insecure_http": False,
+        "tls_ca_bundle": "/opt/team-cooperation/config/ca-bundle.pem",
+    }
+    asyncio.run(service.aclose())
+
+
 def builtin_app():
     engine = create_engine(
         "sqlite+pysqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool

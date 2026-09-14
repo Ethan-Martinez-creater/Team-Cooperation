@@ -16,11 +16,12 @@ def build_connector_client(
     runtime_environment,
     environment=None,
     github_tenant_ids=None,
+    tls_ca_bundle=None,
 ):
     source = os.environ if environment is None else environment
     mode = source.get("COIFESP_GITHUB_ADAPTER_MODE", "external")
     if mode == "external":
-        return SecureConnectorClient(catalog=catalog)
+        return SecureConnectorClient(catalog=catalog, tls_ca_bundle=tls_ca_bundle)
     if mode != "embedded":
         raise ConfigurationError("GitHub adapter mode must be external or embedded")
     if runtime_environment == Environment.PRODUCTION:

@@ -11,6 +11,7 @@ import httpx
 
 from ..auth import ClientCredentialsConfig, ClientCredentialsTokenProvider
 from ..errors import PolicyDenied
+from ..tls import explicit_ca_context
 from .catalog import ConnectorCatalog
 from .models import ConnectorRequest, ConnectorResponse
 
@@ -38,11 +39,13 @@ class SecureConnectorClient:
         client_factory: Callable[..., httpx.AsyncClient] | None = None,
         clock: Callable[[], float] = time.monotonic,
         random_source: random.Random | None = None,
+        tls_ca_bundle: str | None = None,
     ) -> None:
         self.catalog = catalog
         self.client_factory = client_factory or httpx.AsyncClient
         self.clock = clock
         self.random = random_source or random.SystemRandom()
+        self._tls_context = explicit_ca_context(tls_ca_bundle)
         self._circuits: dict[tuple[str, str], _Circuit] = {}
 
     async def execute(self, request: ConnectorRequest) -> ConnectorResponse:
@@ -72,10 +75,12 @@ class SecureConnectorClient:
         circuit = self._circuits.setdefault(key, _Circuit())
         if circuit.open_until > self.clock():
             raise ConnectorError("circuit_open", retryable=True)
+        transport_options = {"verify": self._tls_context} if self._tls_context else {}
         auth_client = self.client_factory(
             timeout=httpx.Timeout(endpoint.timeout_seconds),
             follow_redirects=False,
             trust_env=False,
+            **transport_options,
         )
         token_provider = ClientCredentialsTokenProvider(
             ClientCredentialsConfig(
@@ -92,6 +97,7 @@ class SecureConnectorClient:
             follow_redirects=False,
             trust_env=False,
             headers={"Accept": "application/json", "User-Agent": "coifesp-connector/0.1"},
+            **transport_options,
         )
         try:
             token = await token_provider.token()

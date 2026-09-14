@@ -111,3 +111,9 @@ def test_secret_examples_do_not_ship_values() -> None:
         for key, value in [line.split("=", 1)]
     }
     assert all(values[name] == "" for name in secret_names)
+
+
+def test_generator_wires_explicit_internal_tls_ca_bundle() -> None:
+    text = (BUNDLE / "prepare-deployment.py").read_text(encoding="utf-8")
+    assert 'parser.add_argument("--identity-origin", required=True)' in text
+    assert 'app["COIFESP_TLS_CA_BUNDLE"] = args.ssl_cert_file' in text

@@ -244,6 +244,7 @@ async def build_worker_runtime(settings: Settings) -> WorkerRuntime:
                     client_id=settings.worker_client_id,
                     client_secret=settings.worker_client_secret,
                     allow_insecure_http=allow_http,
+                    tls_ca_bundle=settings.tls_ca_bundle,
                 )
             )
             directory_tokens = ClientCredentialsTokenProvider(
@@ -252,6 +253,7 @@ async def build_worker_runtime(settings: Settings) -> WorkerRuntime:
                     client_id=settings.directory_client_id,
                     client_secret=settings.directory_client_secret,
                     allow_insecure_http=allow_http,
+                    tls_ca_bundle=settings.tls_ca_bundle,
                 )
             )
             directory = KeycloakPrincipalResolver(
@@ -259,6 +261,7 @@ async def build_worker_runtime(settings: Settings) -> WorkerRuntime:
                     admin_api_base_url=settings.directory_api_base_url,
                     realm=settings.directory_realm,
                     allow_insecure_http=allow_http,
+                    tls_ca_bundle=settings.tls_ca_bundle,
                 ),
                 tokens=directory_tokens,
             )

@@ -129,6 +129,7 @@ async def build_tool_worker_runtime(
                     client_id=settings.tool_worker_client_id,
                     client_secret=settings.tool_worker_client_secret,
                     allow_insecure_http=allow_http,
+                    tls_ca_bundle=settings.tls_ca_bundle,
                 )
             )
             identity = OIDCWorkerIdentityProvider(
@@ -231,6 +232,7 @@ async def build_tool_worker_runtime(
                 connector_client = build_connector_client(
                     catalog=catalog,
                     runtime_environment=settings.environment,
+                    tls_ca_bundle=settings.tls_ca_bundle,
                     github_tenant_ids=github_tenants,
                 )
                 if "/v1/messages" in connector_paths:

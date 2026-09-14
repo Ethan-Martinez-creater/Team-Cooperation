@@ -16,6 +16,7 @@ import jwt
 from ..config import Environment, Settings
 from ..errors import AuthenticationError, IdentityProviderUnavailable
 from ..security.models import Classification, Principal
+from ..tls import explicit_ca_context
 from .roles import APPLICATION_ROLES
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$")
@@ -46,11 +47,13 @@ class HttpxJSONFetcher:
         *,
         timeout_seconds: float = 5.0,
         allow_insecure_http: bool = False,
+        tls_ca_bundle: str | None = None,
     ) -> None:
         self.allow_insecure_http = allow_insecure_http
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(timeout_seconds),
             follow_redirects=False,
+            verify=explicit_ca_context(tls_ca_bundle) or True,
             headers={
                 "Accept": "application/json",
                 "User-Agent": "coifesp-harness/0.1",
@@ -152,7 +155,10 @@ class OIDCVerifier:
         self.clock_skew_seconds = settings.oidc_clock_skew_seconds
         self.max_token_age_seconds = settings.oidc_max_token_age_seconds
         self._allow_insecure_http = settings.environment is not Environment.PRODUCTION
-        self._fetcher = fetcher or HttpxJSONFetcher(allow_insecure_http=self._allow_insecure_http)
+        self._fetcher = fetcher or HttpxJSONFetcher(
+            allow_insecure_http=self._allow_insecure_http,
+            tls_ca_bundle=settings.tls_ca_bundle,
+        )
         self._owns_fetcher = fetcher is None
         self._clock = clock
         self._lock = asyncio.Lock()
@@ -306,7 +312,6 @@ class OIDCVerifier:
             raise AuthenticationError("invalid_token")
 
     def _validate_authorized_party(self, claims: Mapping[str, Any]) -> None:
-        audience = claims.get("aud")
         authorized_party = claims.get("azp")
         if authorized_party is None:
             raise AuthenticationError("invalid_token")

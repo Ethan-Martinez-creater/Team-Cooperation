@@ -33,7 +33,8 @@ class SessionLifecycleService:
         self.settings = settings
         self._allow_insecure_http = settings.environment is not Environment.PRODUCTION
         self._fetcher = fetcher or HttpxJSONFetcher(
-            allow_insecure_http=self._allow_insecure_http
+            allow_insecure_http=self._allow_insecure_http,
+            tls_ca_bundle=settings.tls_ca_bundle,
         )
         self._owns_fetcher = fetcher is None
         self._clock = clock

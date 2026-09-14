@@ -18,6 +18,7 @@ from ..errors import (
     PolicyDenied,
 )
 from ..security import Classification, Principal
+from ..tls import explicit_ca_context
 from .oidc import OIDCVerifier
 from .roles import APPLICATION_ROLES
 
@@ -34,6 +35,7 @@ class ClientCredentialsConfig:
     timeout_seconds: float = 5.0
     refresh_skew_seconds: int = 30
     allow_insecure_http: bool = False
+    tls_ca_bundle: str | None = None
 
     def validate(self) -> None:
         parsed = urlparse(self.token_endpoint)
@@ -80,6 +82,7 @@ class ClientCredentialsTokenProvider:
             timeout=httpx.Timeout(config.timeout_seconds),
             follow_redirects=False,
             trust_env=False,
+            verify=explicit_ca_context(config.tls_ca_bundle) or True,
             headers={"Accept": "application/json", "User-Agent": "coifesp-worker/0.1"},
         )
         self._owns_client = client is None
@@ -196,6 +199,7 @@ class KeycloakDirectoryConfig:
     realm: str
     timeout_seconds: float = 5.0
     allow_insecure_http: bool = False
+    tls_ca_bundle: str | None = None
 
     def validate(self) -> None:
         parsed = urlparse(self.admin_api_base_url)
@@ -231,6 +235,7 @@ class KeycloakPrincipalResolver:
             timeout=httpx.Timeout(config.timeout_seconds),
             follow_redirects=False,
             trust_env=False,
+            verify=explicit_ca_context(config.tls_ca_bundle) or True,
             headers={"Accept": "application/json", "User-Agent": "coifesp-worker/0.1"},
         )
         self._owns_client = client is None

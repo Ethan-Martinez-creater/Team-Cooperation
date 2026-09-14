@@ -108,6 +108,15 @@ def test_production_rejects_local_worker_tenant_configuration() -> None:
         settings.validate()
 
 
+def test_production_tls_ca_bundle_must_be_absolute() -> None:
+    settings = Settings.from_environment({
+        "COIFESP_ENV": "production",
+        "COIFESP_TLS_CA_BUNDLE": "relative-ca.pem",
+    })
+    with pytest.raises(ConfigurationError, match="COIFESP_TLS_CA_BUNDLE"):
+        settings.validate()
+
+
 def test_tool_worker_requires_a_third_distinct_oauth_client() -> None:
     values = {
         "COIFESP_ENV": "development",

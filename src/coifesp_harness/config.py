@@ -73,6 +73,7 @@ class Settings:
     environment: Environment
     auth_mode: str
     database_url: str | None
+    tls_ca_bundle: str | None
     oidc_issuer: str | None
     oidc_audience: str | None
     oidc_authorized_parties: frozenset[str]
@@ -279,6 +280,7 @@ class Settings:
             environment=environment,
             auth_mode=auth_mode,
             database_url=optional("COIFESP_DATABASE_URL"),
+            tls_ca_bundle=optional("COIFESP_TLS_CA_BUNDLE"),
             oidc_issuer=optional("COIFESP_OIDC_ISSUER"),
             oidc_audience=optional("COIFESP_OIDC_AUDIENCE"),
             oidc_authorized_parties=frozenset(
@@ -473,6 +475,8 @@ class Settings:
                     problems.append(f"{name} is required in production")
             if self.database_url and self.database_url.startswith("sqlite"):
                 problems.append("production control plane requires a non-SQLite database")
+            if self.tls_ca_bundle and not os.path.isabs(self.tls_ca_bundle):
+                problems.append("COIFESP_TLS_CA_BUNDLE must be an absolute path")
             if self.oidc_issuer and not _is_secure_http_url(self.oidc_issuer):
                 problems.append("COIFESP_OIDC_ISSUER must be an https URL")
             for name, value in (

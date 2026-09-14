@@ -248,6 +248,7 @@ def main() -> None:
     app.update({key: source[key] for key in provider_keys})
     if args.ssl_cert_file:
         app["SSL_CERT_FILE"] = args.ssl_cert_file
+        app["COIFESP_TLS_CA_BUNDLE"] = args.ssl_cert_file
     github = {
         "COIFESP_GITHUB_ADAPTER_CLIENT_ID": "team-a-github",
         "COIFESP_GITHUB_ADAPTER_CLIENT_SECRET": connector_secret,
