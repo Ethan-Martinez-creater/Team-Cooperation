@@ -53,6 +53,25 @@ COIFESP_LLM_CIRCUIT_COOLDOWN_SECONDS=30
 完整语义见 [多 Provider LLM Gateway](model-gateway.md)。当前官方模型和价格页面：
 [DeepSeek Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing)。
 
+### 本地 INTERNAL 演示项目授权
+
+经项目负责人明确授权后，`local + development` 环境可以让指定的外部 Provider 处理
+`INTERNAL` 级演示项目上下文。推荐在仓库根目录创建被 Git 忽略的
+`.env.local-model-authorization`，只写 Provider ID，不写 API Key：
+
+```dotenv
+COIFESP_LOCAL_EXTERNAL_INTERNAL_PROVIDERS=deepseek_v4_flash
+```
+
+Provider ID 必须已经存在于 `COIFESP_LLM_PROVIDERS_JSON`，并且该 Provider 必须声明
+`external=true`。`scripts/start_local_workers.py` 仅在启动出的本地子进程环境中把名单内
+Provider 的 `public` 上限提升为 `internal`；它不会降低原本的 `confidential` 或
+`restricted` 上限，也不会改写 `.env`。控制面、共享 Agent Worker 和 Tool Worker 必须在
+变更后全部重启，确保会话、Planner、Exchange 与团队 Agent 使用同一份精确 allowlist。
+
+该开关在 `production` 或 `builtin` 认证模式下会令配置校验失败，默认空值仍保持
+`INTERNAL` 上下文禁止外部出站。生产 OIDC、旧单租户 Worker 配置和正式数据策略不受影响。
+
 ## Worker 服务身份
 
 本地 Keycloak、真实 OIDC、Agent Worker client-credentials 和最小权限目录读取已经完成验收。公网
@@ -69,9 +88,22 @@ COIFESP_DIRECTORY_CLIENT_ID=coifesp-directory-reader
 COIFESP_DIRECTORY_CLIENT_SECRET=由Keycloak单独生成
 ```
 
-Tool Worker 每次领取 Job 前重新获取或验证服务令牌，只接受 `tool_worker` 角色和配置中的固定租户；
-`agent_worker` 或 `execution_worker` 不能替代。当前暂停点是为本地 Keycloak 新建
-`coifesp-tool-worker`、分配 `tool_worker` 角色并把新密钥填入 `.env`，不能复用现有密钥绕过。
+生产部署默认使用受控的多租户共享 Worker 池，而不是为每个账号常驻一组 Worker。两个进程分别配置
+租户允许列表，通常应保持一致：
+
+```dotenv
+COIFESP_WORKER_TENANTS=tenant-a,tenant-b,tenant-c
+COIFESP_TOOL_WORKER_TENANTS=tenant-a,tenant-b,tenant-c
+```
+
+OIDC client 表示平台级 Worker 服务身份，不绑定某个永久租户。Agent Run 和 Tool Job 自身携带权威
+`tenant_id`；Worker 只有在该值属于自身允许列表时才可领取任务，仓储查询、租约、审计、连接器和工具
+调用继续按任务租户隔离。Agent Worker 只接受 `agent_worker` 角色，Tool Worker 只接受
+`tool_worker` 角色，`execution_worker` 或另一类 Worker 的角色不能替代。
+
+旧变量 `COIFESP_WORKER_TENANT_ID` 和 `COIFESP_TOOL_WORKER_TENANT_ID` 仅保留给已有单租户部署平滑
+升级。它们分别不能与对应的复数变量同时设置，冲突时启动会失败；新生产部署不得再使用旧变量。共享池
+允许列表应保持有界，并由部署配置审阅后变更，不能通过用户请求动态扩大。
 
 A2A 所需的本地真实 OIDC 环境已经完成验收；当前只实现并测试 Agent Card、端点校验和最小任务
 交付消息构造，不挂载可执行的入站 A2A 路由，原因是协议业务路由、授权适配和持久 TaskStore 尚未

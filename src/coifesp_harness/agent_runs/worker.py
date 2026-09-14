@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import logging
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Protocol
 
@@ -165,6 +165,7 @@ class DurableAgentWorker:
         retry_cap_seconds: int = 300,
         observer: AgentWorkerObserver | None = None,
         tool_dispatcher: ToolBatchDispatcher | None = None,
+        allowed_tenant_ids: tuple[str, ...] | None = None,
     ) -> None:
         if not 5 <= lease_seconds <= 3600:
             raise ValueError("worker lease duration is invalid")
@@ -183,15 +184,33 @@ class DurableAgentWorker:
         self.retry_cap_seconds = retry_cap_seconds
         self.observer = observer
         self.tool_dispatcher = tool_dispatcher
+        if allowed_tenant_ids is not None and (
+            not allowed_tenant_ids or len(set(allowed_tenant_ids)) != len(allowed_tenant_ids)
+        ):
+            raise ValueError("allowed tenant set is invalid")
+        self.allowed_tenant_ids = allowed_tenant_ids
+        self._tenant_cursor = 0
 
     async def process_once(self, *, worker: Principal) -> AgentWorkerOutcome:
+        allowed = self.allowed_tenant_ids
+        if allowed:
+            offset = self._tenant_cursor % len(allowed)
+            ordered = allowed[offset:] + allowed[:offset]
+            self._tenant_cursor = (offset + 1) % len(allowed)
+            claim = self.service.claim_allowed
+            claim_arguments = {"allowed_tenant_ids": ordered}
+        else:
+            claim = self.service.claim
+            claim_arguments = {}
         lease = await asyncio.to_thread(
-            self.service.claim,
+            claim,
             worker=worker,
             lease_seconds=self.lease_seconds,
+            **claim_arguments,
         )
         if lease is None:
             return self._outcome(AgentWorkerOutcomeStatus.IDLE)
+        worker = replace(worker, tenant_id=lease.run.tenant_id)
         run_id = lease.run.run_id
         try:
             await asyncio.to_thread(
@@ -514,11 +533,20 @@ class DurableAgentWorkerRunner:
     async def _reconcile(self, principal):
         if self.terminal_reconciler is None:
             return
-        try:
-            await asyncio.to_thread(self.terminal_reconciler.reconcile,
-                                    tenant_id=principal.tenant_id)
-        except Exception as exc:  # noqa: BLE001 - polling retries independent projection failures
-            logger.warning("terminal reconciliation deferred error_type=%s", type(exc).__name__)
+        tenant_ids = getattr(self.worker, "allowed_tenant_ids", None) or (
+            principal.tenant_id,
+        )
+        for tenant_id in tenant_ids:
+            try:
+                await asyncio.to_thread(
+                    self.terminal_reconciler.reconcile, tenant_id=tenant_id
+                )
+            except Exception as exc:  # noqa: BLE001 - polling retries independent projection failures
+                logger.warning(
+                    "terminal reconciliation deferred tenant_id=%s error_type=%s",
+                    tenant_id,
+                    type(exc).__name__,
+                )
 
     def _identity_delay(self, failures: int) -> float:
         value = min(

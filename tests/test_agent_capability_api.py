@@ -12,6 +12,12 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
+from coifesp_harness.agent_runs import (
+    AgentCheckpointKeyring,
+    AgentControlKeyring,
+    AgentRunService,
+    SQLAlchemyAgentRunRepository,
+)
 from coifesp_harness.config import Settings
 from coifesp_harness.control_plane import create_app
 from coifesp_harness.control_plane.agent_capabilities import AgentCapabilityService
@@ -21,15 +27,10 @@ from coifesp_harness.product import (
     ProjectDirectoryService,
     TeamCollaborationService,
 )
+from coifesp_harness.security import Principal
 from coifesp_harness.security.policy import PolicyEngine
 from coifesp_harness.skills import SkillCatalog, SkillTrustStore
 from coifesp_harness.tool_catalog import build_builtin_manifests
-from coifesp_harness.agent_runs import (
-    AgentCheckpointKeyring,
-    AgentRunService,
-    AgentControlKeyring,
-    SQLAlchemyAgentRunRepository,
-)
 
 PASSWORD = "Admin-Correct-Horse-42!"
 
@@ -229,6 +230,31 @@ def test_capability_report_marks_unconfigured_tools():
         assert response.json()["skills"] == []
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_connector_capabilities_are_hidden_from_other_tenants():
+    service = AgentCapabilityService(
+        manifests=build_builtin_manifests(github_connector_configured=True),
+        policy=PolicyEngine(),
+        tool_tenant_ids={
+            "github.create_issue": frozenset({"team-engineering"}),
+            "github.dispatch_workflow": frozenset({"team-engineering"}),
+            "github.get_commit_checks": frozenset({"team-engineering"}),
+        },
+    )
+
+    engineering = service.report(
+        principal=Principal("eng", "team-engineering", frozenset({"contributor"}))
+    )
+    product = service.report(
+        principal=Principal("product", "team-product", frozenset({"contributor"}))
+    )
+    engineering_status = {item.tool_id: item.status for item in engineering.tools}
+    product_status = {item.tool_id: item.status for item in product.tools}
+
+    assert engineering_status["github.get_commit_checks"] == "available"
+    assert product_status["github.get_commit_checks"] == "not_configured"
+    assert product_status["github.create_issue"] == "not_configured"
 
 
 def test_skills_listing_and_version_metadata_without_instructions():

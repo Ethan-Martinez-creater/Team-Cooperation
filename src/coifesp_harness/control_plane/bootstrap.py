@@ -30,7 +30,13 @@ from ..collaboration import (
     SQLAlchemyGovernanceRepository,
 )
 from ..config import ConfigurationError, Settings
-from ..connectors import SQLAlchemyConnectorRegistry
+from ..connectors import (
+    GITHUB_ADAPTER_PATHS,
+    SQLAlchemyConnectorRegistry,
+    configured_connector_path_sets,
+    configured_connector_paths,
+    configured_connector_tenants,
+)
 from ..context import SemanticCheckpointKeyring, SemanticCheckpointService
 from ..contracts import ContractCoordinationService, SQLAlchemyContractRepository
 from ..execution import SQLAlchemyTaskRepository, TaskExecutionService
@@ -71,7 +77,8 @@ from ..project_process import (
     SQLAlchemyProjectProcessRepository,
     SQLAlchemyProjectProcessWakeupRepository,
 )
-from ..security import PolicyEngine
+from ..runtime import ModelRoutePolicy
+from ..security import Classification, PolicyEngine
 from ..work_graph import ProjectWorkGraphService, SQLAlchemyWorkGraphRepository
 from .app import create_app
 from .session_lifecycle import SessionLifecycleService
@@ -284,6 +291,12 @@ def build_application(
     settings.validate(require_auth=True, require_memory=True)
     if not settings.database_url:
         raise ConfigurationError("COIFESP_DATABASE_URL is required by the control plane")
+    local_provider_ids = settings.local_external_internal_provider_ids
+    project_model_route_policy = ModelRoutePolicy(
+        data_classification=Classification.INTERNAL,
+        allowed_provider_ids=frozenset(local_provider_ids),
+        allow_external_egress=bool(local_provider_ids),
+    )
 
     owns_engine = engine is None
     runtime_engine = engine or create_engine(
@@ -380,7 +393,8 @@ def build_application(
             project_process_repository
         )
         project_planner_intent_service = ProjectPlannerIntentService(
-            project_process_repository
+            project_process_repository,
+            model_route_policy=project_model_route_policy,
         )
         project_process_outbox_service = ProjectProcessOutboxService(
             project_process_repository
@@ -413,16 +427,39 @@ def build_application(
             sandbox_timeout_seconds = max(profile.limits.timeout_seconds for profile in sandbox_profiles) + 10
         from .agent_capabilities import AgentCapabilityService
 
+        connector_paths = configured_connector_paths(settings.connectors_json)
+        connector_path_sets = configured_connector_path_sets(settings.connectors_json)
         agent_capabilities = AgentCapabilityService(
             manifests=build_builtin_manifests(
                 sandbox_profile_ids=sandbox_profile_ids,
                 sandbox_timeout_seconds=sandbox_timeout_seconds,
-                office_connector_configured=bool(settings.connectors_json),
+                office_connector_configured="/v1/messages" in connector_paths,
+                github_connector_configured=any(
+                    GITHUB_ADAPTER_PATHS.issubset(paths) for paths in connector_path_sets
+                ),
                 task_artifact_publication_configured=bool(settings.artifact_store_root),
+                specialist_delegation_configured=True,
             ),
             skill_catalog=skill_catalog,
             policy=PolicyEngine(),
             llm_providers=settings.llm_providers,
+            tool_tenant_ids={
+                "office.send_message": configured_connector_tenants(
+                    settings.connectors_json,
+                    required_paths=frozenset({"/v1/messages"}),
+                ),
+                **{
+                    tool_id: configured_connector_tenants(
+                        settings.connectors_json,
+                        required_paths=GITHUB_ADAPTER_PATHS,
+                    )
+                    for tool_id in (
+                        "github.get_commit_checks",
+                        "github.create_issue",
+                        "github.dispatch_workflow",
+                    )
+                },
+            },
         )
         contract_service = ContractCoordinationService(
             SQLAlchemyContractRepository(engine=runtime_engine, audit_log=audit)
@@ -433,8 +470,10 @@ def build_application(
                 audit_log=audit,
             ),
             impact_guard=contract_service,
-            artifact_guard=ArtifactDeliveryGuard(artifact_repository),
-        )
+                artifact_guard=ArtifactDeliveryGuard(artifact_repository),
+                allow_legacy_assignment_writes=False,
+            )
+
         task_repository = SQLAlchemyTaskRepository(
             engine=runtime_engine,
             audit_log=audit,
@@ -444,6 +483,7 @@ def build_application(
             governance=governance_service,
             project_repository=project_process_repository,
             work_graph_repository=project_work_graph_service.repository,
+            allow_legacy_assignments=False,
         )
         approval_service = ApprovalService(
             SQLAlchemyApprovalRepository(
@@ -478,8 +518,13 @@ def build_application(
 
         from ..delivery.service import DeliveryService
         from ..team_agents.accounting import TeamTaskRunAccounting
+        from ..team_agents.specialists import SpecialistRunProjection
         from ..team_agents.task_projection import TeamTaskResultProjection
-        from ..tool_jobs import SQLAlchemyToolJobRepository, ToolJobKeyring
+        from ..tool_jobs import (
+            SQLAlchemyToolJobRepository,
+            ToolBatchCoordinator,
+            ToolJobKeyring,
+        )
         from ..verification.agent_reviews import AgentReviewChecks
         from ..verification.service import TaskVerificationService
         from ..verification.tool_checks import DurableVerificationChecks
@@ -501,6 +546,22 @@ def build_application(
             run_repository=agent_run_service.repository,
             artifact_content=artifact_content_service,
         )
+        specialist_jobs = SQLAlchemyToolJobRepository(
+            engine=runtime_engine,
+            keyring=ToolJobKeyring.from_settings(settings),
+            audit_log=audit,
+        )
+        specialist_coordinator = ToolBatchCoordinator(
+            engine=runtime_engine,
+            agent_runs=agent_run_service.repository,
+            tool_jobs=specialist_jobs,
+        )
+        _specialist_projection = SpecialistRunProjection(
+            repository=project_process_repository,
+            runs=agent_run_service.repository,
+            jobs=specialist_jobs,
+            coordinator=specialist_coordinator,
+        )
 
         task_verification_service = TaskVerificationService(
             repository=project_process_repository, artifact_content=artifact_content_service,
@@ -510,19 +571,18 @@ def build_application(
                 artifact_content=artifact_content_service,
             ),
             tool_checks=DurableVerificationChecks(
-                jobs=SQLAlchemyToolJobRepository(
-                    engine=runtime_engine, keyring=ToolJobKeyring.from_settings(settings),
-                    audit_log=audit,
-                ),
-                profiles=load_code_profiles(settings.sandbox_profiles_json),
-            ) if settings.sandbox_profiles_json else None,
+                jobs=specialist_jobs,
+                profiles=load_code_profiles(settings.sandbox_profiles_json)
+                if settings.sandbox_profiles_json else (),
+            ),
         )
 
         def project_terminal_callback(run):
             first_error = None
             for projector in (_projection, _planner_projection, _planner_accounting,
                               _task_accounting,
-                              _task_result_projection, task_verification_service):
+                              _task_result_projection, task_verification_service,
+                              _specialist_projection):
                 try:
                     projector.on_run_terminal(run)
                 except Exception as exc:  # noqa: BLE001
@@ -546,6 +606,7 @@ def build_application(
             capability_repository=capability_service.repository,
             artifact_content=artifact_content_service,
             snapshot_loader_factory=PersistentProjectOrchestrationSnapshotLoader,
+            model_route_policy=project_model_route_policy,
         )
         collaboration_transport = None
         if settings.envelope_signing_key is not None or settings.envelope_keys:
@@ -621,6 +682,7 @@ def build_application(
     app.state.project_planner_run_accounting = _planner_accounting
     app.state.team_task_run_accounting = _task_accounting
     app.state.team_task_result_projection = _task_result_projection
+    app.state.specialist_run_projection = _specialist_projection
     app.state.project_planner_intent_service = project_planner_intent_service
     app.state.governance_service = governance_service
     app.state.task_repository = task_repository

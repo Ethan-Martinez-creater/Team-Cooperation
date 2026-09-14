@@ -24,7 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
-from sqlalchemy.schema import CreateTable
+from sqlalchemy.schema import CreateIndex, CreateTable
 
 from coifesp_harness.errors import GovernanceConflictError, PolicyDenied
 from coifesp_harness.product import ProductAccountService, TeamCollaborationService
@@ -66,7 +66,11 @@ def _migration(revision="20260830_52"):
     migration = module_from_spec(spec)
     spec.loader.exec_module(migration)
     assert migration.revision == revision
-    assert migration.down_revision == {"20260830_52": "20260830_51", "20260830_54": "20260830_53"}[revision]
+    assert migration.down_revision == {
+        "20260830_52": "20260830_51",
+        "20260830_54": "20260830_53",
+        "20260901_63": "20260901_62",
+    }[revision]
     return migration
 
 
@@ -395,7 +399,14 @@ def test_same_process_task_attempt_cannot_be_dispatched_twice(binding_engine):
 
 @pytest.mark.parametrize(
     "run_kind",
-    [item.value for item in ProjectAgentRunKind if item is not ProjectAgentRunKind.TASK_EXECUTION],
+        [
+            item.value
+            for item in ProjectAgentRunKind
+            if item not in {
+                ProjectAgentRunKind.TASK_EXECUTION,
+                ProjectAgentRunKind.SPECIALIST,
+            }
+        ],
 )
 def test_non_task_run_still_requires_real_account_and_legacy_mode(binding_engine, run_kind):
     values = dict(
@@ -464,7 +475,14 @@ def test_postgresql_run_table_compiles_without_cross_metadata_dependencies():
     ddl = str(CreateTable(PROJECT_AGENT_RUNS).compile(dialect=postgresql.dialect()))
     assert "executed_as_principal_id = 'team-agent:' || team_id" in ddl
     assert "length(delegation_scope_digest) = 64" in ddl
-    assert "UNIQUE (process_id, team_task_id, execution_attempt)" in ddl
+    attempt_index = next(
+        index
+        for index in PROJECT_AGENT_RUNS.indexes
+        if index.name == "uq_product_project_agent_run_task_attempt"
+    )
+    index_ddl = str(CreateIndex(attempt_index).compile(dialect=postgresql.dialect()))
+    assert "UNIQUE (process_id, team_task_id, execution_attempt)" not in ddl
+    assert "WHERE run_kind = 'task_execution'" in index_ddl
     assert {fk.column.table.metadata for fk in PROJECT_AGENT_RUNS.foreign_keys} == {
         PRODUCT_METADATA
     }
@@ -489,7 +507,13 @@ def test_postgresql_upgrade_emits_portable_constraints_and_legacy_backfill():
 
 
 def test_fresh_metadata_schema_can_downgrade_and_reupgrade_legacy_rows():
+    from coifesp_harness.tool_jobs.repository import TOOL_JOB_METADATA
+
     engine = _engine()
+    TOOL_JOB_METADATA.create_all(engine)
+    # Revision 63 replaced the task-attempt UNIQUE constraint with a partial
+    # index and introduced Specialist state. Undo it before older revisions.
+    _migrate(engine, "downgrade", "20260901_63")
     # Revision 54 owns a CHECK referencing run_kind. Undo it before revision 52
     # removes that column, exactly as a real ordered Alembic downgrade does.
     _migrate(engine, "downgrade", "20260830_54")
@@ -500,5 +524,6 @@ def test_fresh_metadata_schema_can_downgrade_and_reupgrade_legacy_rows():
     }
     _migrate(engine, "upgrade")
     _migrate(engine, "upgrade", "20260830_54")
+    _migrate(engine, "upgrade", "20260901_63")
     assert _row(engine)["initiated_by_principal_id"] == "account-a"
     assert _row(engine)["task_result_status"] is None

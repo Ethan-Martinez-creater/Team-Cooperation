@@ -35,7 +35,10 @@ class LocalIdentityProvider:
                 LocalProfile(
                     "contributor", "周宁 · 开发配合", "工程团队",
                     Principal("contributor-zhou", "team-engineering",
-                        frozenset({"contributor", "artifact_publisher"}),
+                        frozenset({
+                            "contributor", "artifact_publisher",
+                            "agent_run_controller", "tool_approver",
+                        }),
                         Classification.CONFIDENTIAL, frozenset({"demo-project"})),
                 ),
                 LocalProfile(
@@ -93,3 +96,24 @@ class LocalIdentityProvider:
 
     async def aclose(self) -> None:
         self._sessions.clear()
+
+
+class LocalPrincipalResolver:
+    """Resolve the same fixed demo principals used by local browser sessions."""
+
+    def __init__(self) -> None:
+        self._provider = LocalIdentityProvider()
+
+    async def resolve(self, *, tenant_id: str, principal_id: str) -> Principal:
+        matches = [
+            profile.principal
+            for profile in self._provider.profiles.values()
+            if profile.principal.tenant_id == tenant_id
+            and profile.principal.principal_id == principal_id
+        ]
+        if len(matches) != 1:
+            raise AuthenticationError("unknown local principal")
+        return matches[0]
+
+    async def aclose(self) -> None:
+        await self._provider.aclose()

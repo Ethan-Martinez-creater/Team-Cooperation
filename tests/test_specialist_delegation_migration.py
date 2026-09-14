@@ -344,9 +344,13 @@ def test_repository_metadata_exposes_specialist_contract_and_wait_state():
         "product_teams.team_id",
         "product_team_project_agents.agent_id",
         "product_team_tasks.task_id",
-        "tool_jobs.tenant_id",
-        "tool_jobs.job_id",
     }
+    # The cross-metadata ToolJob FK is migration-owned. Keeping it out of the
+    # product metadata lets historical/subset metadata schemas compile.
+    assert not any(
+        key.target_fullname.startswith("tool_jobs.")
+        for key in SPECIALIST_DELEGATIONS.foreign_keys
+    )
     assert ToolJobStatus.AWAITING_SPECIALIST.value == "awaiting_specialist"
     partial = next(index for index in PROJECT_AGENT_RUNS.indexes if index.name == _RUN_UNIQUE)
     ddl = str(CreateIndex(partial).compile(dialect=postgresql.dialect()))
@@ -573,8 +577,7 @@ def test_postgresql_ddl_and_revision_head_are_aligned():
     assert "ck_product_project_agent_runs_specialist" in run_ddl
     assert "specialist-agent:" in run_ddl
     assert "UNIQUE (process_id, team_task_id, execution_attempt)" not in run_ddl
-    assert "FOREIGN KEY(tool_job_tenant_id, tool_job_id)" in delegation_ddl
-    assert "ON DELETE RESTRICT" in delegation_ddl
+    assert "FOREIGN KEY(tool_job_tenant_id, tool_job_id)" not in delegation_ddl
     assert "tool_job_tenant_id = team_id" in delegation_ddl
     assert "status IN ('PENDING','RUNNING','COMPLETED','FAILED','CANCELLED')" in delegation_ddl
     migration = _module()
@@ -588,6 +591,8 @@ def test_postgresql_ddl_and_revision_head_are_aligned():
     migration.upgrade()
     sql = output.getvalue()
     assert "CREATE TABLE product_specialist_delegations" in sql
+    assert "FOREIGN KEY(tool_job_tenant_id, tool_job_id)" in sql
+    assert "ON DELETE RESTRICT" in sql
     assert "awaiting_specialist" in sql
     assert "WHERE run_kind = 'task_execution'" in sql
     assert migration.revision == "20260901_63"

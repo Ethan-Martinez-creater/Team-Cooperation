@@ -31,6 +31,8 @@ from coifesp_harness.project_process import (
     ProjectProcessService,
     SQLAlchemyProjectProcessRepository,
 )
+from coifesp_harness.runtime import ModelRoutePolicy
+from coifesp_harness.security import Classification
 from coifesp_harness.work_graph import ProjectGraphSnapshot
 
 NOW = datetime(2026, 8, 30, tzinfo=UTC)
@@ -158,6 +160,30 @@ def test_launch_uses_an_ordinary_toolless_durable_agent_run():
     assert context_payload["intent"]["schema"] == PLANNER_DECISION_SCHEMA
     assert context_payload["graph"]["digest"] == graph.digest
     assert context_payload["graph"]["project_id"] == "project-a"
+
+
+def test_planner_run_freezes_explicit_local_model_route_policy():
+    repository, process, graph = _stack()
+    policy = ModelRoutePolicy(
+        data_classification=Classification.INTERNAL,
+        allowed_provider_ids=frozenset({"local-external"}),
+        allow_external_egress=True,
+    )
+    service = ProjectPlannerIntentService(
+        repository,
+        clock=lambda: NOW,
+        model_route_policy=policy,
+    )
+    intent = _create(service, process, graph)
+    runs = _run_service(repository.engine)
+    run = service.launch(intent=intent, graph=graph, run_service=runs)
+    checkpoint = AgentRunCheckpointCodec().decode(
+        runs.repository.load_checkpoint(
+            tenant_id="team-a",
+            run_id=run.run_id,
+        )
+    )
+    assert checkpoint["model_route_policy"] == policy
 
 
 def test_request_loads_current_snapshot_and_reuses_deterministic_run():

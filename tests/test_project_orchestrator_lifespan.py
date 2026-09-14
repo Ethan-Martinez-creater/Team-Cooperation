@@ -24,11 +24,26 @@ def test_consumer_starts_after_recovery_and_stops_before_engine_cleanup():
         app.state.agent_run_service = object()
         app.state.task_verification_service = SimpleNamespace(
             replay_pending=lambda _: events.append("recovery"))
+        app.state.specialist_run_projection = SimpleNamespace(
+            replay_all_tenants=lambda: events.append("specialist-recovery")
+        )
         app.state.project_orchestrator_worker = Worker()
         async with app.router.lifespan_context(app):
             await asyncio.wait_for(started.wait(), 2)
-            assert events == ["ready", "recovery", "worker-start"]
-        assert events == ["ready", "recovery", "worker-start", "worker-stop", "engine-cleanup"]
+            assert events == [
+                "ready",
+                "recovery",
+                "specialist-recovery",
+                "worker-start",
+            ]
+        assert events == [
+            "ready",
+            "recovery",
+            "specialist-recovery",
+            "worker-start",
+            "worker-stop",
+            "engine-cleanup",
+        ]
 
     asyncio.run(scenario())
 

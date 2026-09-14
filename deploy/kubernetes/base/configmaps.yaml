@@ -33,7 +33,7 @@ data:
   COIFESP_OIDC_ALGORITHMS: RS256
   COIFESP_WORKER_TOKEN_ENDPOINT: https://identity.invalid/realms/replace-me/protocol/openid-connect/token
   COIFESP_WORKER_CLIENT_ID: replace-me-agent-worker
-  COIFESP_WORKER_TENANT_ID: replace-me-tenant
+  COIFESP_WORKER_TENANTS: replace-me-tenant-a,replace-me-tenant-b
   COIFESP_DIRECTORY_API_BASE_URL: https://identity.invalid
   COIFESP_DIRECTORY_REALM: replace-me
   COIFESP_DIRECTORY_TOKEN_ENDPOINT: https://identity.invalid/realms/replace-me/protocol/openid-connect/token
@@ -69,7 +69,7 @@ data:
   COIFESP_OIDC_ALGORITHMS: RS256
   COIFESP_TOOL_WORKER_TOKEN_ENDPOINT: https://identity.invalid/realms/replace-me/protocol/openid-connect/token
   COIFESP_TOOL_WORKER_CLIENT_ID: replace-me-tool-worker
-  COIFESP_TOOL_WORKER_TENANT_ID: replace-me-tenant
+  COIFESP_TOOL_WORKER_TENANTS: replace-me-tenant-a,replace-me-tenant-b
   COIFESP_TOOL_WORKER_IDLE_POLL_SECONDS: "2"
   COIFESP_TOOL_WORKER_LEASE_SECONDS: "60"
   COIFESP_TOOL_WORKER_HEARTBEAT_SECONDS: "20"

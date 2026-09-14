@@ -60,6 +60,63 @@ from .workspace_routes import build_workspace_router
 
 logger = logging.getLogger("coifesp.control_plane")
 
+_TERMINAL_PROJECTION_NAMES = (
+    "turn_projection",
+    "project_planner_projection",
+    "project_planner_run_accounting",
+    "team_task_run_accounting",
+    "team_task_result_projection",
+    "task_verification_service",
+)
+
+
+async def _replay_terminal_projections(app: FastAPI, *, tolerate_errors: bool) -> None:
+    agent_run_service = getattr(app.state, "agent_run_service", None)
+    first_error = None
+    if agent_run_service is not None:
+        for name in _TERMINAL_PROJECTION_NAMES:
+            projection = getattr(app.state, name, None)
+            if projection is None:
+                continue
+            try:
+                await run_in_threadpool(
+                    projection.replay_pending,
+                    agent_run_service,
+                )
+            except Exception as exc:  # noqa: BLE001 - every projection recovers independently
+                first_error = first_error or exc
+                logger.warning(
+                    "terminal projection replay deferred projection=%s error_type=%s",
+                    name,
+                    type(exc).__name__,
+                )
+    specialist = getattr(app.state, "specialist_run_projection", None)
+    if specialist is not None:
+        try:
+            await run_in_threadpool(specialist.replay_all_tenants)
+        except Exception as exc:  # noqa: BLE001 - every projection recovers independently
+            first_error = first_error or exc
+            logger.warning(
+                "terminal projection replay deferred projection=specialist "
+                "error_type=%s",
+                type(exc).__name__,
+            )
+    if first_error is not None and not tolerate_errors:
+        raise first_error
+
+
+async def _run_terminal_projection_reconciler(
+    app: FastAPI,
+    *,
+    stop: asyncio.Event,
+    interval_seconds: float = 1.0,
+) -> None:
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
+        except TimeoutError:
+            await _replay_terminal_projections(app, tolerate_errors=True)
+
 
 def create_app(
     *,
@@ -112,6 +169,7 @@ def create_app(
     async def lifespan(app: FastAPI):
         orchestration_stop = asyncio.Event()
         orchestration_task = None
+        projection_task = None
         try:
             if readiness_probe is not None:
                 ready = await run_in_threadpool(readiness_probe)
@@ -119,16 +177,15 @@ def create_app(
                     raise RuntimeError("control-plane startup readiness check failed")
             # Crash recovery: replay terminal runs whose conversation turn is
             # still active so an interrupted projection is not lost forever.
-            agent_run_service = getattr(app.state, "agent_run_service", None)
-            if agent_run_service is not None:
-                for name in ("turn_projection", "project_planner_projection",
-                             "project_planner_run_accounting", "team_task_run_accounting",
-                             "team_task_result_projection", "task_verification_service"):
-                    projection = getattr(app.state, name, None)
-                    if projection is not None:
-                        await run_in_threadpool(
-                            projection.replay_pending, agent_run_service
-                        )
+            await _replay_terminal_projections(app, tolerate_errors=False)
+            if getattr(app.state, "agent_run_service", None) is not None:
+                projection_task = asyncio.create_task(
+                    _run_terminal_projection_reconciler(
+                        app,
+                        stop=orchestration_stop,
+                    ),
+                    name="terminal-projection-reconciler",
+                )
             orchestration_worker = getattr(app.state, "project_orchestrator_worker", None)
             if orchestration_worker is not None:
                 orchestration_task = asyncio.create_task(
@@ -139,8 +196,9 @@ def create_app(
         finally:
             orchestration_stop.set()
             try:
-                if orchestration_task is not None:
-                    await orchestration_task
+                for task in (projection_task, orchestration_task):
+                    if task is not None:
+                        await task
             finally:
                 # Do not dispose the engine until the consumer has drained its
                 # current transaction, including cancellation during shutdown.

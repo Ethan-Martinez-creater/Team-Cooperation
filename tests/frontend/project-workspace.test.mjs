@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -68,3 +69,38 @@ assert.match(css, /\.activity-list/);
 assert.match(css, /\.delivery-section/);
 
 console.log("project-workspace frontend contract: OK");
+
+// Execute the real download function against a bounded browser double.
+const downloadCode = script.slice(script.indexOf("  async function downloadResource("),
+  script.indexOf("  function uploadAttachment()"));
+const downloads = [], requests = [], errors = [], revoked = [];
+const context = {
+  active: { projectId: "project-a", generation: 1 }, W: { token: "test-token" },
+  ownActive: (id, generation) => context.active.projectId === id && context.active.generation === generation,
+  fetch: async (url, options) => {
+    requests.push({ url, options });
+    return { ok: true, blob: async () => ({}), headers: { get: () => "application/json" } };
+  },
+  URL: { createObjectURL: () => "blob:test", revokeObjectURL: (url) => revoked.push(url) },
+  document: { body: { appendChild() {} }, createElement: () => ({
+    click() { downloads.push(this.download); }, remove() {},
+  }) },
+  setTimeout: (callback) => callback(), toast: (message) => errors.push(message),
+};
+vm.createContext(context);
+vm.runInContext(downloadCode, context);
+await context.downloadResource("receipt:1", "checks/result");
+assert.equal(requests[0].url, "/v1/projects/project-a/resources/receipt%3A1/content");
+assert.equal(requests[0].options.headers.Authorization, "Bearer test-token");
+assert.deepEqual(downloads, ["checks_result.json"]);
+assert.deepEqual(revoked, ["blob:test"]);
+context.fetch = async () => ({ ok: true, blob: async () => {
+  context.active = { projectId: "project-b", generation: 2 }; return {};
+} });
+await context.downloadResource("receipt:2", "stale");
+assert.equal(downloads.length, 1, "stale response must not trigger a download");
+context.fetch = async () => ({ ok: false });
+await context.downloadResource("receipt:3", "denied");
+assert.equal(downloads.length, 1);
+assert.equal(errors.length, 1, "permission failure is visible without downloading");
+console.log("resource download behavior: OK");

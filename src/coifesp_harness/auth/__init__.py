@@ -5,25 +5,27 @@ from .oidc import (
     OIDCVerifier,
     VerifiedIdentity,
 )
+from .roles import APPLICATION_ROLES
 from .service_identity import (
     ClientCredentialsConfig,
     ClientCredentialsTokenProvider,
     KeycloakDirectoryConfig,
     KeycloakPrincipalResolver,
+    LocalWorkerIdentityProvider,
     OIDCWorkerIdentityProvider,
 )
-from .roles import APPLICATION_ROLES
 
 __all__ = [
+    "APPLICATION_ROLES",
+    "ClientCredentialsConfig",
+    "ClientCredentialsTokenProvider",
     "FetchResult",
     "HttpxJSONFetcher",
     "JSONFetcher",
-    "OIDCVerifier",
-    "VerifiedIdentity",
-    "ClientCredentialsConfig",
-    "ClientCredentialsTokenProvider",
     "KeycloakDirectoryConfig",
     "KeycloakPrincipalResolver",
+    "LocalWorkerIdentityProvider",
+    "OIDCVerifier",
     "OIDCWorkerIdentityProvider",
-    "APPLICATION_ROLES",
+    "VerifiedIdentity",
 ]

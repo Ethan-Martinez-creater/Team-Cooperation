@@ -28,16 +28,29 @@ logger = logging.getLogger("coifesp.verification.worker")
 
 
 class AgentReviewReconciler:
-    def __init__(self, verifier, *, batch_size=50, task_reconciler=None):
+    def __init__(
+        self,
+        verifier,
+        *,
+        batch_size=50,
+        task_reconciler=None,
+        specialist_reconciler=None,
+    ):
         if not 1 <= batch_size <= 500:
             raise ValueError("review recovery batch size is invalid")
         self.verifier, self.batch_size = verifier, batch_size
         self._cursors = {}
         self.task_reconciler = task_reconciler
+        self.specialist_reconciler = specialist_reconciler
 
     def reconcile(self, *, tenant_id):
         task_count = (self.task_reconciler.reconcile(tenant_id=tenant_id)
                       if self.task_reconciler is not None else 0)
+        specialist_count = (
+            self.specialist_reconciler.replay_pending(tenant_id=tenant_id)
+            if self.specialist_reconciler is not None
+            else 0
+        )
         statement = select(AGENT_REVIEWS.c.run_id).join(
             TASK_VERIFICATIONS,
             TASK_VERIFICATIONS.c.verification_id == AGENT_REVIEWS.c.verification_id,
@@ -59,7 +72,7 @@ class AgentReviewReconciler:
                     self.verifier.verify_run(run_id=source)
             except Exception as exc:  # noqa: BLE001 - one unavailable review cannot starve others
                 logger.warning("review recovery deferred run_id=%s error_type=%s", run_id, type(exc).__name__)
-        return task_count + len(rows)
+        return task_count + specialist_count + len(rows)
 
 
 def configure_worker_reviews(*, settings, engine, service, jobs, audit):
@@ -84,18 +97,39 @@ def configure_worker_reviews(*, settings, engine, service, jobs, audit):
         review_checks=AgentReviewChecks(repository=repository, runs=service.repository,
                                        artifact_content=content),
         tool_checks=DurableVerificationChecks(jobs=jobs, profiles=load_code_profiles(
-            settings.sandbox_profiles_json)) if settings.sandbox_profiles_json else None,
+            settings.sandbox_profiles_json) if settings.sandbox_profiles_json else ()),
     )
     previous = service.terminal_callback
     accounting = TeamTaskRunAccounting(repository=repository, run_repository=service.repository,
         capability_repository=SQLAlchemyCapabilityRepository(engine=engine, audit_log=audit))
     projection = TeamTaskResultProjection(repository=repository, run_repository=service.repository,
                                          artifact_content=content)
+    from ..team_agents.specialists import SpecialistRunProjection
+
+    specialist_projection = (
+        SpecialistRunProjection(
+            repository=repository,
+            runs=service.repository,
+            jobs=jobs,
+        )
+        if jobs is not None
+        else None
+    )
 
     def terminal(run):
         first_error = None
-        for callback in (previous, accounting.on_run_terminal, projection.on_run_terminal,
-                         verifier.on_run_terminal):
+        specialist_terminal = (
+            specialist_projection.on_run_terminal
+            if specialist_projection is not None
+            else None
+        )
+        for callback in (
+            previous,
+            accounting.on_run_terminal,
+            projection.on_run_terminal,
+            verifier.on_run_terminal,
+            specialist_terminal,
+        ):
             if callback is not None:
                 try:
                     callback(run)
@@ -105,6 +139,14 @@ def configure_worker_reviews(*, settings, engine, service, jobs, audit):
             raise first_error
 
     service.terminal_callback = terminal
-    return AgentReviewReconciler(verifier, task_reconciler=TeamTaskTerminalReconciler(
-        repository=repository, runs=service.repository, accounting=accounting,
-        projection=projection, verifier=verifier))
+    return AgentReviewReconciler(
+        verifier,
+        task_reconciler=TeamTaskTerminalReconciler(
+            repository=repository,
+            runs=service.repository,
+            accounting=accounting,
+            projection=projection,
+            verifier=verifier,
+        ),
+        specialist_reconciler=specialist_projection,
+    )

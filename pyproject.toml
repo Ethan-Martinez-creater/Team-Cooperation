@@ -51,6 +51,7 @@ dev = [
 [project.scripts]
 coifesp-agent-worker = "coifesp_harness.worker_main:main"
 coifesp-tool-worker = "coifesp_harness.tool_worker_main:main"
+coifesp-github-adapter = "coifesp_harness.connectors.github_adapter:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

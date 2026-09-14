@@ -5,11 +5,11 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import yaml
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 KUBERNETES_ROOT = REPO_ROOT / "deploy" / "kubernetes"
@@ -63,6 +63,10 @@ def render_overlay() -> tuple[list[dict[str, Any]], str]:
 def containers(pod_spec: dict[str, Any]) -> Iterable[dict[str, Any]]:
     yield from pod_spec.get("initContainers", [])
     yield from pod_spec.get("containers", [])
+
+
+def tenant_pool(value: Any) -> tuple[str, ...]:
+    return tuple(item.strip() for item in str(value or "").split(",") if item.strip())
 
 
 def validate(*, allow_placeholders: bool) -> tuple[list[str], str]:
@@ -170,6 +174,35 @@ def validate(*, allow_placeholders: bool) -> tuple[list[str], str]:
     if missing_secret_env:
         errors.append("missing Secret references for: " + ", ".join(missing_secret_env))
 
+    agent_config = by_key.get(("ConfigMap", "coifesp-agent-worker-config"), {}).get("data", {})
+    tool_config = by_key.get(("ConfigMap", "coifesp-tool-worker-config"), {}).get("data", {})
+    worker_pools = (
+        (
+            "Agent Worker",
+            agent_config,
+            "COIFESP_WORKER_TENANTS",
+            "COIFESP_WORKER_TENANT_ID",
+        ),
+        (
+            "Tool Worker",
+            tool_config,
+            "COIFESP_TOOL_WORKER_TENANTS",
+            "COIFESP_TOOL_WORKER_TENANT_ID",
+        ),
+    )
+    parsed_pools: list[tuple[str, ...]] = []
+    for label, config, plural_name, singular_name in worker_pools:
+        pool = tenant_pool(config.get(plural_name))
+        parsed_pools.append(pool)
+        if len(pool) < 2:
+            errors.append(f"{label} production template must configure a shared tenant pool")
+        if len(pool) != len(set(pool)):
+            errors.append(f"{label} shared tenant pool contains duplicate tenant IDs")
+        if singular_name in config:
+            errors.append(f"{label} production template must not use legacy {singular_name}")
+    if all(parsed_pools) and set(parsed_pools[0]) != set(parsed_pools[1]):
+        errors.append("Agent and Tool Worker shared tenant pools must match in the baseline")
+
     control = deployments.get("coifesp-control-plane", {})
     control_container = (
         control.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [{}])[0]
@@ -238,8 +271,8 @@ def validate(*, allow_placeholders: bool) -> tuple[list[str], str]:
         if item.get("spec", {}).get("minReplicaCount", 0) < 2:
             errors.append(f"optional {name} must keep at least two replicas")
         query = str(item.get("spec", {}).get("triggers", [{}])[0].get("metadata", {}).get("query", ""))
-        if "claimable" not in query or "tenant_id=" not in query:
-            errors.append(f"optional {name} metric is not tenant-scoped claimable backlog")
+        if "claimable" not in query or "tenant_id=~" not in query or "sum(" not in query:
+            errors.append(f"optional {name} metric is not shared-pool claimable backlog")
 
     return errors, renderer
 

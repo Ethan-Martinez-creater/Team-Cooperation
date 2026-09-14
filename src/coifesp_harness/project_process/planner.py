@@ -14,7 +14,7 @@ from ..agent_runs import AgentRunCheckpointCodec, AgentRunService
 from ..context import ContentTrust, ContextItem, ContextSource, InstructionTrust
 from ..errors import GovernanceConflictError, ResourceNotFound
 from ..product.repository import PROJECT_TEAMS
-from ..runtime import AgentRunRequest, Message, RunBudget
+from ..runtime import AgentRunRequest, Message, ModelRoutePolicy, RunBudget
 from ..security import Classification, Principal, ResourceLabel
 from ..work_graph import ProjectGraphSnapshot
 from .commands import ProjectPlannerIntent, ProjectPlannerIntentStatus
@@ -58,9 +58,16 @@ _TERMINAL_INTENT_STATUSES = frozenset(
 
 
 class ProjectPlannerIntentService:
-    def __init__(self, repository: SQLAlchemyProjectProcessRepository, *, clock=None) -> None:
+    def __init__(
+        self,
+        repository: SQLAlchemyProjectProcessRepository,
+        *,
+        clock=None,
+        model_route_policy: ModelRoutePolicy | None = None,
+    ) -> None:
         self.repository = repository
         self.clock = clock or (lambda: datetime.now(UTC))
+        self.model_route_policy = model_route_policy or ModelRoutePolicy()
 
     def create(
         self,
@@ -253,6 +260,7 @@ class ProjectPlannerIntentService:
             context_items=(context,),
             context_purpose=f"project-orchestration:{intent.project_id}",
             tool_authorization=None,
+            model_route_policy=self.model_route_policy,
         )
         checkpoint = AgentRunCheckpointCodec().initial(request)
         # The worker resolves the service principal from this exact binding.
@@ -268,7 +276,9 @@ class ProjectPlannerIntentService:
         with self.repository.transaction() as connection:
             bound_repository = self.repository.using_connection(connection)
             bound_intents = ProjectPlannerIntentService(
-                bound_repository, clock=self.clock
+                bound_repository,
+                clock=self.clock,
+                model_route_policy=self.model_route_policy,
             )
             current_row = connection.execute(select(PROJECT_PLANNER_INTENTS).where(
                 PROJECT_PLANNER_INTENTS.c.planner_intent_id == intent.planner_intent_id

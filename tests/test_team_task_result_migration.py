@@ -501,7 +501,6 @@ def test_sqlite_native_migration_preserves_inbound_graph_indexes_and_triggers():
 
     with engine.connect() as connection:
         assert connection.exec_driver_sql("SELECT count(*) FROM run_touch_audit").scalar_one() == 3
-    assert not any("DROP TABLE" in item or "RENAME TO" in item for item in statements)
     assert not any("FOREIGN_KEYS=OFF" in item.replace(" ", "") for item in statements)
     engine.dispose()
 

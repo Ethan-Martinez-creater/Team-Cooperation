@@ -9,6 +9,9 @@ from sqlalchemy.pool import StaticPool
 
 from coifesp_harness.config import Settings
 from coifesp_harness.control_plane import create_app
+from coifesp_harness.control_plane.conversation_routes import (
+    launch_conversation_turn_run,
+)
 from coifesp_harness.errors import GovernanceConflictError, ResourceNotFound
 from coifesp_harness.product import (
     ProductAccountService,
@@ -20,6 +23,7 @@ from coifesp_harness.product import (
 from coifesp_harness.product.models import TurnStatus
 from coifesp_harness.product.repository import ACCOUNT_SESSIONS
 from coifesp_harness.product.workspace import ProjectWorkspaceService
+from coifesp_harness.security import Principal
 
 
 def seed(*, with_engine=None):
@@ -567,7 +571,7 @@ def test_api_project_creation_returns_unique_conversation():
 
 def test_api_messages_round_trip():
     app, engine = _stack()
-    s = seed(with_engine=engine)
+    seed(with_engine=engine)
     token = _issue_token(engine, "lead-lin")
     sent = asyncio.run(
         _call(
@@ -678,9 +682,70 @@ class FailingRunService:
         raise RuntimeError("simulated run creation failure")
 
 
-def _stack_with_run_service(run_service):
-    from types import SimpleNamespace as SN
+class RecordingRunService:
+    def __init__(self):
+        self.created = []
 
+    def create(self, **kwargs):
+        self.created.append(kwargs)
+        return SimpleNamespace(run_id=kwargs["run_id"])
+
+
+def test_conversation_run_external_internal_egress_requires_local_provider_opt_in():
+    for provider_ids, expected_external in (((), False), (("deepseek",), True)):
+        s = seed()
+        workspace = s["workspace"]
+        conversation = workspace.ensure_conversation(
+            project_id="project-demo", actor_id="lead-lin"
+        )
+        message, turn = workspace.append_user_message(
+            conversation_id=conversation.conversation_id,
+            actor_id="lead-lin",
+            content="Analyze the current project context",
+            idempotency_key=f"local-model-{expected_external}",
+        )
+        run_service = RecordingRunService()
+        settings = Settings.from_environment(
+            {
+                "COIFESP_ENV": "development",
+                "COIFESP_AUTH_MODE": "local",
+                "COIFESP_LOCAL_EXTERNAL_INTERNAL_PROVIDERS": ",".join(provider_ids),
+            }
+        )
+        state = SimpleNamespace(
+            settings=settings,
+            project_workspace_service=workspace,
+            agent_run_service=run_service,
+            team_collaboration_service=None,
+            project_resource_service=None,
+            artifact_content_service=None,
+        )
+        request = SimpleNamespace(app=SimpleNamespace(state=state))
+        authenticated = SimpleNamespace(
+            principal=Principal(
+                "lead-lin",
+                "team-product",
+                frozenset({"project_lead"}),
+            )
+        )
+        asyncio.run(
+            launch_conversation_turn_run(
+                request=request,
+                authenticated=authenticated,
+                project_id="project-demo",
+                conversation_id=conversation.conversation_id,
+                turn_id=turn.turn_id,
+                user_message=message.content,
+                user_message_sequence=message.sequence,
+            )
+        )
+        policy = run_service.created[0]["checkpoint"]["model_route_policy"]
+        assert policy["data_classification"] == 1
+        assert policy["allowed_provider_ids"] == list(provider_ids)
+        assert policy["allow_external_egress"] is expected_external
+
+
+def _stack_with_run_service(run_service):
     engine = create_engine(
         "sqlite+pysqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )

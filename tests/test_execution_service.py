@@ -5,7 +5,7 @@ from sqlalchemy.pool import StaticPool
 from coifesp_harness.audit import InMemoryAuditSink
 from coifesp_harness.collaboration import CollaborationRole, GovernanceBoard
 from coifesp_harness.collaboration.governance_models import BoardMember
-from coifesp_harness.errors import PolicyDenied
+from coifesp_harness.errors import GovernanceConflictError, PolicyDenied
 from coifesp_harness.execution import SQLAlchemyTaskRepository, TaskExecutionService
 from coifesp_harness.security import Classification, Principal
 
@@ -77,7 +77,21 @@ def service() -> TaskExecutionService:
     )
 
 
-def test_only_assignee_can_enqueue_and_only_service_identity_can_claim() -> None:
+def test_legacy_assignment_enqueue_can_be_disabled_for_project_runtime() -> None:
+    value = service()
+    value.allow_legacy_assignments = False
+    with pytest.raises(GovernanceConflictError, match="project work execution"):
+        value.enqueue_assignment(
+            principal=Principal("worker-b", "team-b"),
+            idempotency_key="enqueue-legacy-disabled",
+            task_id="execution-legacy-disabled",
+            program_id="program-1",
+            assignment_id="assignment-1",
+            queue="coding",
+            payload={"tool": "contract-tests"},
+        )
+
+
     value = service()
     contributor = Principal("worker-b", "team-b")
     task = value.enqueue_assignment(

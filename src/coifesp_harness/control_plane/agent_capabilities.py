@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from ..security.models import Principal
@@ -10,10 +11,25 @@ from ..tool_catalog import ToolManifest
 KNOWN_TOOL_IDS = (
     "code.run_profile",
     "office.send_message",
+    "github.create_issue",
+    "github.dispatch_workflow",
+    "github.get_commit_checks",
     "list_skills",
     "load_skill",
     "project.list_context",
     "project.read_context",
+)
+READ_ONLY_TOOL_IDS = frozenset(
+    {
+        "list_skills",
+        "load_skill",
+        "project.list_context",
+        "project.read_context",
+        "github.get_commit_checks",
+    }
+)
+EXTERNAL_TOOL_IDS = frozenset(
+    {"office.send_message", "github.create_issue", "github.dispatch_workflow"}
 )
 
 STATUS_AVAILABLE = "available"
@@ -72,11 +88,13 @@ class AgentCapabilityService:
         skill_catalog: SkillCatalog | None = None,
         policy: PolicyEngine | None = None,
         llm_providers: tuple = (),
+        tool_tenant_ids: Mapping[str, frozenset[str]] | None = None,
     ) -> None:
         self.manifests = {manifest.tool_id: manifest for manifest in manifests}
         self.skill_catalog = skill_catalog
         self.policy = policy or PolicyEngine()
         self.llm_providers = tuple(llm_providers)
+        self.tool_tenant_ids = dict(tool_tenant_ids or {})
 
     def report(self, *, principal: Principal, project_id: str | None = None) -> CapabilityReport:
         tools: list[CapabilityToolView] = []
@@ -125,16 +143,18 @@ class AgentCapabilityService:
         self, tool_id: str, principal: Principal, *, project_id: str | None = None
     ) -> CapabilityToolView:
         manifest = self.manifests.get(tool_id)
-        if tool_id in {"list_skills", "load_skill", "project.list_context", "project.read_context"}:
-            if self.skill_catalog is None:
-                return CapabilityToolView(
-                    tool_id=tool_id,
-                    version="1",
-                    status=STATUS_NOT_CONFIGURED,
-                    reason="Skill 目录未配置，请联系管理员预置已签名 Skill",
-                    read_only=True,
-                    modifies_external_system=False,
-                )
+        if (
+            tool_id in {"list_skills", "load_skill", "project.list_context", "project.read_context"}
+            and self.skill_catalog is None
+        ):
+            return CapabilityToolView(
+                tool_id=tool_id,
+                version="1",
+                status=STATUS_NOT_CONFIGURED,
+                reason="Skill 目录未配置，请联系管理员预置已签名 Skill",
+                read_only=True,
+                modifies_external_system=False,
+            )
         if manifest is None:
             if tool_id == "code.run_profile":
                 reason = "Sandbox profile 未配置，无法执行代码工具"
@@ -147,9 +167,18 @@ class AgentCapabilityService:
                 version="1",
                 status=STATUS_NOT_CONFIGURED,
                 reason=reason,
-                read_only=tool_id
-                in {"list_skills", "load_skill", "project.list_context", "project.read_context"},
+                read_only=tool_id in READ_ONLY_TOOL_IDS,
                 modifies_external_system=False,
+            )
+        allowed_tenants = self.tool_tenant_ids.get(tool_id)
+        if allowed_tenants is not None and principal.tenant_id not in allowed_tenants:
+            return CapabilityToolView(
+                tool_id=tool_id,
+                version=manifest.version,
+                status=STATUS_NOT_CONFIGURED,
+                reason="当前团队未配置此连接器",
+                read_only=tool_id in READ_ONLY_TOOL_IDS,
+                modifies_external_system=tool_id in EXTERNAL_TOOL_IDS,
             )
         if project_id is not None and tool_id == "office.send_message":
             return CapabilityToolView(
@@ -178,9 +207,8 @@ class AgentCapabilityService:
             version=manifest.version,
             status=status,
             reason=reason,
-            read_only=tool_id
-            in {"list_skills", "load_skill", "project.list_context", "project.read_context"},
-            modifies_external_system=tool_id == "office.send_message",
+            read_only=tool_id in READ_ONLY_TOOL_IDS,
+            modifies_external_system=tool_id in EXTERNAL_TOOL_IDS,
         )
 
     def authorize_tools(

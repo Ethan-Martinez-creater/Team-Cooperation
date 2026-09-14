@@ -30,6 +30,66 @@ _FIELDS = frozenset(
 )
 
 
+def configured_connector_paths(raw: str | None) -> frozenset[str]:
+    """Read non-secret capability paths for model and worker catalog parity."""
+    return frozenset(path for paths in configured_connector_path_sets(raw) for path in paths)
+
+
+def configured_connector_path_sets(raw: str | None) -> tuple[frozenset[str], ...]:
+    """Return each configured connector's paths without resolving any secret."""
+    if not raw:
+        return ()
+    if len(raw.encode("utf-8")) > 262_144:
+        raise ValueError("connector registry is too large")
+    try:
+        values = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("connector registry is invalid JSON") from exc
+    if not isinstance(values, list) or not 1 <= len(values) <= 64:
+        raise ValueError("connector registry must contain 1 to 64 endpoints")
+    path_sets = []
+    for value in values:
+        if not isinstance(value, dict) or set(value) != _FIELDS:
+            raise ValueError("connector registry fields are invalid")
+        configured = value.get("allowed_paths")
+        if not isinstance(configured, list) or any(not isinstance(path, str) for path in configured):
+            raise ValueError("connector scopes or paths are invalid")
+        path_sets.append(frozenset(configured))
+    return tuple(path_sets)
+
+
+def configured_connector_tenants(
+    raw: str | None, *, required_paths: frozenset[str]
+) -> frozenset[str]:
+    """Return tenants whose configured connector contains every required path."""
+    if not raw:
+        return frozenset()
+    if len(raw.encode("utf-8")) > 262_144:
+        raise ValueError("connector registry is too large")
+    try:
+        values = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("connector registry is invalid JSON") from exc
+    if not isinstance(values, list) or not 1 <= len(values) <= 64:
+        raise ValueError("connector registry must contain 1 to 64 endpoints")
+    tenants: set[str] = set()
+    for value in values:
+        if not isinstance(value, dict) or set(value) != _FIELDS:
+            raise ValueError("connector registry fields are invalid")
+        tenant_id = value.get("tenant_id")
+        paths = value.get("allowed_paths")
+        if (
+            not isinstance(tenant_id, str)
+            or not tenant_id
+            or not isinstance(paths, list)
+            or any(not isinstance(path, str) for path in paths)
+        ):
+            raise ValueError("connector tenant or paths are invalid")
+        if required_paths.issubset(paths):
+            tenants.add(tenant_id)
+    return frozenset(tenants)
+
+
 def load_connector_endpoints(
     raw: str, *, tenant_id: str, environment: Mapping[str, str] | None = None
 ) -> tuple[ConnectorEndpoint, ...]:
@@ -57,7 +117,7 @@ def load_connector_endpoints(
         scopes = value["scopes"]
         paths = value["allowed_paths"]
         if not isinstance(scopes, list) or not isinstance(paths, list):
-            raise ValueError("connector scopes or paths are invalid")
+            raise TypeError("connector scopes or paths are invalid")
         try:
             endpoint = ConnectorEndpoint(
                 connector_id=value["connector_id"],
@@ -80,4 +140,32 @@ def load_connector_endpoints(
         endpoints.append(endpoint)
     if len({item.connector_id for item in endpoints}) != len(endpoints):
         raise ValueError("connector IDs are duplicated")
+    return tuple(endpoints)
+
+
+def load_connector_endpoints_for_tenants(
+    raw: str,
+    *,
+    tenant_ids: tuple[str, ...],
+    environment: Mapping[str, str] | None = None,
+) -> tuple[ConnectorEndpoint, ...]:
+    """Load one deployment document while rejecting endpoints outside the pool scope."""
+    if not tenant_ids or len(set(tenant_ids)) != len(tenant_ids):
+        raise ValueError("connector tenant scope is invalid")
+    try:
+        values = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("connector registry is invalid JSON") from exc
+    if not isinstance(values, list) or not 1 <= len(values) <= 64:
+        raise ValueError("connector registry must contain 1 to 64 endpoints")
+    allowed = set(tenant_ids)
+    if any(not isinstance(value, dict) or value.get("tenant_id") not in allowed for value in values):
+        raise ValueError("connector tenant is outside the Tool Worker pool")
+    endpoints = []
+    for tenant_id in tenant_ids:
+        selected = [value for value in values if value.get("tenant_id") == tenant_id]
+        if selected:
+            endpoints.extend(load_connector_endpoints(
+                json.dumps(selected), tenant_id=tenant_id, environment=environment,
+            ))
     return tuple(endpoints)

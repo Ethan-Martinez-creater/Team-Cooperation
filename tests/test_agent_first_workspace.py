@@ -166,6 +166,8 @@ def test_agent_first_assets_cover_browser_acceptance_fixes():
     assert 'saveRoute({ view: "project-workspace", project_id: projectId })' in workspace_script.text
     assert 'sessionStorage.getItem("local_profile")' in app_script.text
     assert 'route.view==="project-workspace"' in app_script.text
+    assert "/agent-exchanges/${encodeURIComponent(x.exchange_id)}/responses" in workspace_script.text
+    assert "来自 ${esc(response.recipient_team_id)} 的回复" in workspace_script.text
     assert "if(approvalBadge)" in app_script.text
     assert "grid-template-columns: auto minmax(0, 1fr) auto" in workspace_css.text
     assert "@media (max-width: 560px)" in workspace_css.text

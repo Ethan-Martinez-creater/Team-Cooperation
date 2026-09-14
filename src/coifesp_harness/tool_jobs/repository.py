@@ -19,7 +19,6 @@ from sqlalchemy import (
     MetaData,
     String,
     Table,
-    Text,
     UniqueConstraint,
     and_,
     func,
@@ -351,6 +350,31 @@ class SQLAlchemyToolJobRepository:
             )
             return ToolJobLease(job, worker_id, token, expiry)
 
+    def claim_next_allowed(
+        self,
+        *,
+        allowed_tenant_ids: tuple[str, ...],
+        worker_id: str,
+        lease_seconds: int = 60,
+    ) -> ToolJobLease | None:
+        """Claim across a bounded tenant set without disabling tenant transactions."""
+        if (
+            not allowed_tenant_ids
+            or len(allowed_tenant_ids) > 64
+            or len(set(allowed_tenant_ids)) != len(allowed_tenant_ids)
+        ):
+            raise ToolJobError("allowed tenant set is invalid")
+        for tenant_id in allowed_tenant_ids:
+            self._identifier("tenant", tenant_id)
+            lease = self.claim_next(
+                tenant_id=tenant_id,
+                worker_id=worker_id,
+                lease_seconds=lease_seconds,
+            )
+            if lease is not None:
+                return lease
+        return None
+
     def start(self, *, tenant_id: str, job_id: str, worker_id: str, lease_token: str) -> None:
         self._transition(
             tenant_id,
@@ -437,6 +461,155 @@ class SQLAlchemyToolJobRepository:
                 c, tenant_id, job_id, worker_id, target.value, ToolJobStatus.RUNNING, target
             )
             return target
+
+    def await_specialist(
+        self,
+        *,
+        tenant_id: str,
+        job_id: str,
+        worker_id: str,
+        lease_token: str,
+        delegation_id: str,
+    ) -> None:
+        """Release a Tool Worker lease while a durable child AgentRun executes."""
+
+        self._identifier("delegation", delegation_id)
+        now = datetime.now(UTC)
+        with self._transaction(tenant_id) as c:
+            row = self._lease(c, tenant_id, job_id, worker_id, lease_token, now)
+            if row["status"] != ToolJobStatus.RUNNING.value:
+                raise ToolJobError("only a running tool job may await a specialist")
+            if row["tool_name"] != "specialist.delegate":
+                raise ToolJobError("only the specialist delegation tool may await a child run")
+            c.execute(
+                update(TOOL_JOBS)
+                .where(
+                    and_(
+                        TOOL_JOBS.c.tenant_id == tenant_id,
+                        TOOL_JOBS.c.job_id == job_id,
+                    )
+                )
+                .values(
+                    status=ToolJobStatus.AWAITING_SPECIALIST.value,
+                    lease_owner=None,
+                    lease_token=None,
+                    lease_expires_at=None,
+                    error_code=delegation_id,
+                    updated_at=now,
+                    completed_at=None,
+                )
+            )
+            self._event(
+                c,
+                tenant_id,
+                job_id,
+                worker_id,
+                "awaiting_specialist",
+                ToolJobStatus.RUNNING,
+                ToolJobStatus.AWAITING_SPECIALIST,
+            )
+
+    def complete_specialist(
+        self,
+        *,
+        tenant_id: str,
+        job_id: str,
+        delegation_id: str,
+        actor_id: str,
+        result: Any | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        """Complete a suspended specialist ToolJob from its trusted projector."""
+
+        self._identifier("delegation", delegation_id)
+        self._identifier("actor", actor_id)
+        succeeded = result is not None and error_code is None
+        failed = result is None and error_code is not None
+        if not (succeeded or failed):
+            raise ToolJobError("specialist completion must contain exactly one result or error")
+        if error_code is not None:
+            self._identifier("error_code", error_code)
+        encrypted = (
+            self.keyring.encrypt(
+                tenant_id=tenant_id,
+                job_id=job_id,
+                purpose="result",
+                value=result,
+            )
+            if succeeded
+            else None
+        )
+        target = ToolJobStatus.SUCCEEDED if succeeded else ToolJobStatus.FAILED
+        now = datetime.now(UTC)
+        with self._transaction(tenant_id) as c:
+            row = (
+                c.execute(
+                    select(TOOL_JOBS)
+                    .where(
+                        and_(
+                            TOOL_JOBS.c.tenant_id == tenant_id,
+                            TOOL_JOBS.c.job_id == job_id,
+                        )
+                    )
+                    .with_for_update()
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if row is None or row["tool_name"] != "specialist.delegate":
+                raise ToolJobError("specialist tool job is unavailable")
+            if row["status"] in {
+                ToolJobStatus.SUCCEEDED.value,
+                ToolJobStatus.FAILED.value,
+            }:
+                stored = self._row(row, include_result=True)
+                exact = (
+                    row["status"] == target.value
+                    and (
+                        (succeeded and stored.result == result and row["error_code"] is None)
+                        or (failed and row["error_code"] == error_code)
+                    )
+                )
+                if exact:
+                    return
+                raise ToolJobError("specialist completion conflicts with the stored terminal result")
+            if (
+                row["status"] != ToolJobStatus.AWAITING_SPECIALIST.value
+                or row["error_code"] != delegation_id
+            ):
+                raise ToolJobError("tool job is not awaiting this specialist delegation")
+            values = {
+                "status": target.value,
+                "error_code": error_code,
+                "updated_at": now,
+                "completed_at": now,
+            }
+            if encrypted is not None:
+                values.update(
+                    result_ciphertext=encrypted.ciphertext,
+                    result_nonce=encrypted.nonce,
+                    result_fingerprint=encrypted.fingerprint,
+                    result_key_id=encrypted.key_id,
+                )
+            c.execute(
+                update(TOOL_JOBS)
+                .where(
+                    and_(
+                        TOOL_JOBS.c.tenant_id == tenant_id,
+                        TOOL_JOBS.c.job_id == job_id,
+                    )
+                )
+                .values(**values)
+            )
+            self._event(
+                c,
+                tenant_id,
+                job_id,
+                actor_id,
+                "specialist_completed" if succeeded else "specialist_failed",
+                ToolJobStatus.AWAITING_SPECIALIST,
+                target,
+            )
 
     def recover_expired(
         self,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import re
 import ipaddress
+import re
 from dataclasses import dataclass
 from enum import Enum
 from urllib.parse import urlparse

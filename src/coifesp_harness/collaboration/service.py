@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Protocol
 
 from ..audit import InMemoryAuditSink
 from ..errors import (
@@ -47,10 +48,12 @@ class GovernanceService:
         *,
         impact_guard: AssignmentImpactGuard | None = None,
         artifact_guard: AssignmentArtifactGuard | None = None,
+        allow_legacy_assignment_writes: bool = True,
     ) -> None:
         self.repository = repository
         self.impact_guard = impact_guard
         self.artifact_guard = artifact_guard
+        self.allow_legacy_assignment_writes = allow_legacy_assignment_writes
 
     def list_programs(
         self, *, principal: Principal, limit: int = 100
@@ -351,6 +354,10 @@ class GovernanceService:
         dependencies: tuple[str, ...],
         visible_to_tenants: frozenset[str],
     ) -> GovernanceCommandResult:
+        if not self.allow_legacy_assignment_writes:
+            raise GovernanceConflictError(
+                "legacy assignment writes are disabled; use project task contracts"
+            )
         return self._execute(
             principal=principal,
             idempotency_key=idempotency_key,

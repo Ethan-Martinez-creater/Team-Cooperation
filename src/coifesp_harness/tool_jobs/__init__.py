@@ -1,5 +1,5 @@
-from .crypto import EncryptedToolPayload, ToolJobKeyring
 from .coordinator import ToolBatchCoordinator
+from .crypto import EncryptedToolPayload, ToolJobKeyring
 from .models import ToolJob, ToolJobLease, ToolJobStatus
 from .repository import (
     TOOL_JOB_EVENTS,
@@ -9,35 +9,37 @@ from .repository import (
     ToolJobError,
 )
 from .worker import (
+    AwaitingSpecialistTool,
     DurableToolWorker,
     DurableToolWorkerRunner,
     PermanentToolError,
     RetryableToolError,
-    ToolExecutionContext,
     ToolBatchReconciler,
+    ToolExecutionContext,
     ToolWorkerIdentityProvider,
     ToolWorkspaceManager,
     current_tool_execution_context,
 )
 
 __all__ = [
-    "EncryptedToolPayload",
-    "ToolBatchCoordinator",
-    "ToolJobKeyring",
-    "ToolJob",
-    "ToolJobLease",
-    "ToolJobStatus",
+    "TOOL_JOBS",
     "TOOL_JOB_EVENTS",
     "TOOL_JOB_METADATA",
-    "TOOL_JOBS",
-    "SQLAlchemyToolJobRepository",
-    "ToolJobError",
+    "AwaitingSpecialistTool",
     "DurableToolWorker",
     "DurableToolWorkerRunner",
+    "EncryptedToolPayload",
     "PermanentToolError",
     "RetryableToolError",
-    "ToolExecutionContext",
+    "SQLAlchemyToolJobRepository",
+    "ToolBatchCoordinator",
     "ToolBatchReconciler",
+    "ToolExecutionContext",
+    "ToolJob",
+    "ToolJobError",
+    "ToolJobKeyring",
+    "ToolJobLease",
+    "ToolJobStatus",
     "ToolWorkerIdentityProvider",
     "ToolWorkspaceManager",
     "current_tool_execution_context",

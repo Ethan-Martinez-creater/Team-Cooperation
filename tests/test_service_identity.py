@@ -8,13 +8,101 @@ from coifesp_harness.auth import (
     ClientCredentialsTokenProvider,
     KeycloakDirectoryConfig,
     KeycloakPrincipalResolver,
+    LocalWorkerIdentityProvider,
+    OIDCWorkerIdentityProvider,
 )
 from coifesp_harness.config import SecretValue
 from coifesp_harness.errors import AuthenticationError, IntegrityError, PolicyDenied
-from coifesp_harness.security import Classification
-
+from coifesp_harness.security import Classification, Principal
 
 TOKEN_URL = "https://identity.example.test/realms/coifesp/protocol/openid-connect/token"
+
+
+def test_local_worker_identity_is_bounded_to_role_and_tenant() -> None:
+    provider = LocalWorkerIdentityProvider(required_role="tool_worker")
+    principal = asyncio.run(provider.resolve())
+    assert principal.principal_id == "service:local-tool-worker"
+    assert principal.tenant_id == "platform"
+    assert principal.roles == frozenset({"tool_worker"})
+    assert principal.is_service is True
+
+
+@pytest.mark.parametrize("role", ["contributor", "bad role"])
+def test_local_worker_identity_rejects_invalid_scope(role) -> None:
+    with pytest.raises(ValueError, match="scope"):
+        LocalWorkerIdentityProvider(required_role=role)
+
+
+def test_shared_pool_oidc_identity_is_platform_service_not_business_tenant() -> None:
+    class Tokens:
+        async def token(self):
+            return SecretValue("shared-pool-worker-token")
+
+        def invalidate(self):
+            raise AssertionError("valid token must not be invalidated")
+
+    class Verifier:
+        async def verify(self, token):
+            assert token == "shared-pool-worker-token"
+            return type(
+                "Identity",
+                (),
+                {
+                    "principal": Principal(
+                        principal_id="service:shared-agent-pool",
+                        tenant_id="platform",
+                        roles=frozenset({"agent_worker"}),
+                        clearance=Classification.INTERNAL,
+                        is_service=True,
+                    )
+                },
+            )()
+
+    provider = OIDCWorkerIdentityProvider(
+        tokens=Tokens(),
+        verifier=Verifier(),
+        required_role="agent_worker",
+        expected_tenant_id=None,
+    )
+    principal = asyncio.run(provider.resolve())
+
+    assert principal.principal_id == "service:shared-agent-pool"
+    assert principal.tenant_id == "platform"
+    assert principal.roles == frozenset({"agent_worker"})
+
+
+def test_legacy_single_tenant_oidc_identity_still_checks_business_tenant() -> None:
+    class Tokens:
+        async def token(self):
+            return SecretValue("legacy-worker-token")
+
+        def invalidate(self):
+            raise AssertionError("valid token must not be invalidated")
+
+    class Verifier:
+        async def verify(self, _token):
+            return type(
+                "Identity",
+                (),
+                {
+                    "principal": Principal(
+                        principal_id="service:legacy-agent-worker",
+                        tenant_id="team-b",
+                        roles=frozenset({"agent_worker"}),
+                        clearance=Classification.INTERNAL,
+                        is_service=True,
+                    )
+                },
+            )()
+
+    provider = OIDCWorkerIdentityProvider(
+        tokens=Tokens(),
+        verifier=Verifier(),
+        expected_tenant_id="team-a",
+    )
+
+    with pytest.raises(IntegrityError, match="tenant"):
+        asyncio.run(provider.resolve())
 
 
 def token_config(**overrides):

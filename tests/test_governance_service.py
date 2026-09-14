@@ -10,6 +10,7 @@ from coifesp_harness.collaboration import (
 )
 from coifesp_harness.collaboration.governance_models import BoardMember
 from coifesp_harness.errors import (
+    GovernanceConflictError,
     GovernanceError,
     IdempotencyConflict,
     ResourceNotFound,
@@ -33,7 +34,7 @@ def principal(
     )
 
 
-def service():
+def service(*, allow_legacy_assignment_writes=True):
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -49,10 +50,34 @@ def service():
     audit.create_schema()
     repository = SQLAlchemyGovernanceRepository(engine=engine, audit_log=audit)
     repository.create_schema()
-    return GovernanceService(repository), audit
+    return GovernanceService(
+        repository,
+        allow_legacy_assignment_writes=allow_legacy_assignment_writes,
+    ), audit
 
 
-def test_service_executes_lead_contributor_discussion_and_delivery_lifecycle() -> None:
+def test_legacy_assignment_writes_can_be_disabled_for_modern_runtime():
+    governance, _audit = service(allow_legacy_assignment_writes=False)
+    with pytest.raises(
+        GovernanceConflictError,
+        match="legacy assignment writes are disabled",
+    ):
+        governance.propose_assignment(
+            principal=principal("lead-a", "team-a", roles=frozenset({"lead"})),
+            idempotency_key="legacy-disabled",
+            program_id="program-1",
+            expected_version=0,
+            assignment_id="assignment-1",
+            plan_id="plan-1",
+            assignee_id="worker-b",
+            title="Legacy task",
+            description="Should not be created",
+            deliverable_contract="none",
+            dependencies=(),
+            visible_to_tenants=frozenset({"team-a"}),
+        )
+
+
     governance, audit = service()
     lead = principal(
         "lead-a",

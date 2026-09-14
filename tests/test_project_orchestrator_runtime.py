@@ -12,6 +12,8 @@ from coifesp_harness.project_process import (
 )
 from coifesp_harness.project_process.runtime import build_project_orchestrator_worker
 from coifesp_harness.project_process.worker_loop import ProjectOrchestratorLoop
+from coifesp_harness.runtime import ModelRoutePolicy
+from coifesp_harness.security import Classification
 
 
 def test_factory_reuses_existing_database_services_without_launching_runs(tmp_path):
@@ -35,7 +37,12 @@ def test_factory_reuses_existing_database_services_without_launching_runs(tmp_pa
     assert dispatcher.capabilities is captures[0]["capability_adapter"]
     assert dispatcher.work_graph is captures[0]["work_graph_repository"]
     resolved = dispatcher.runtime_resolver.resolve(agent_id=value.agent.agent_id, project_id="project-a")
-    assert [tool.tool_id for tool in resolved.tool_authorization.tools] == ["project.publish_artifact"]
+    assert [tool.tool_id for tool in resolved.tool_authorization.tools] == [
+        "project.list_context",
+        "project.publish_artifact",
+        "project.read_context",
+        "specialist.delegate",
+    ]
     assert isinstance(worker.runner.snapshot_loader, Loader)
     assert worker.runner.command_consumer.repository is value.repository
     assert worker.runner.command_consumer.graph is captures[0]["work_graph_repository"]
@@ -44,7 +51,7 @@ def test_factory_reuses_existing_database_services_without_launching_runs(tmp_pa
         assert value.repository.usage(connection, "process-a").agent_runs_started == 1
 
 
-def test_factory_without_artifact_store_keeps_default_tool_policy_empty(tmp_path):
+def test_factory_without_artifact_store_keeps_bounded_specialist_policy(tmp_path):
     value = setup(tmp_path, completed=False)
     worker = build_project_orchestrator_worker(repository=value.repository,
         scheduler=None, agent_run_service=value.dispatcher.run_service,
@@ -52,7 +59,35 @@ def test_factory_without_artifact_store_keeps_default_tool_policy_empty(tmp_path
         snapshot_loader_factory=lambda **_: None)
     resolved = worker.runner.effect.dispatcher.runtime_resolver.resolve(
         agent_id=value.agent.agent_id, project_id="project-a")
-    assert resolved.tool_authorization.tools == ()
+    assert [tool.tool_id for tool in resolved.tool_authorization.tools] == [
+        "project.list_context",
+        "project.read_context",
+        "specialist.delegate",
+    ]
+
+
+def test_factory_injects_explicit_model_policy_into_team_agents_and_planner(tmp_path):
+    value = setup(tmp_path, completed=False)
+    policy = ModelRoutePolicy(
+        data_classification=Classification.INTERNAL,
+        allowed_provider_ids=frozenset({"local-external"}),
+        allow_external_egress=True,
+    )
+    worker = build_project_orchestrator_worker(
+        repository=value.repository,
+        scheduler=None,
+        agent_run_service=value.dispatcher.run_service,
+        capability_repository=value.capabilities,
+        artifact_content=value.content,
+        snapshot_loader_factory=lambda **_: None,
+        model_route_policy=policy,
+    )
+    resolved = worker.runner.effect.dispatcher.runtime_resolver.resolve(
+        agent_id=value.agent.agent_id,
+        project_id="project-a",
+    )
+    assert resolved.model_route_policy == policy
+    assert worker.runner.intent_launcher.intents.model_route_policy == policy
 
 
 def test_mismatched_runtime_engine_is_rejected(tmp_path):

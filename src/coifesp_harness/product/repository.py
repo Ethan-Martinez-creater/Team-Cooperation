@@ -18,8 +18,6 @@ from sqlalchemy import (
     text,
 )
 
-from ..tool_jobs.repository import TOOL_JOBS
-
 PRODUCT_METADATA = MetaData()
 
 TEAMS = Table(
@@ -709,12 +707,6 @@ SPECIALIST_DELEGATIONS = Table(
     UniqueConstraint("idempotency_key", name="uq_product_specialist_delegation_idempotency"),
     UniqueConstraint("child_run_id", name="uq_product_specialist_delegation_child_run"),
     UniqueConstraint("tool_job_id", name="uq_product_specialist_delegation_tool_job"),
-    ForeignKeyConstraint(
-        ["tool_job_tenant_id", "tool_job_id"],
-        [TOOL_JOBS.c.tenant_id, TOOL_JOBS.c.job_id],
-        name="fk_specialist_delegation_tool_job",
-        ondelete="RESTRICT",
-    ),
 )
 Index(
     "ix_product_specialist_delegations_project_status",

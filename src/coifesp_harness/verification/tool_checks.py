@@ -35,7 +35,7 @@ class DurableVerificationChecks:
             raise ValueError("duplicate verification profiles")
 
     def evaluate(self, *, connection, outcome, existing_checks, verification_id,
-                 subject_digest, run_id, tenant_id, retry_tools=False):
+                 subject_digest, run_id, tenant_id, retry_tools=False, policy=None):
         # An unavailable or corrupt baseline cannot authorize external reads.
         if outcome["checks"][0]["status"] != "PASS" or outcome["status"] == "FAIL":
             return outcome
@@ -44,6 +44,17 @@ class DurableVerificationChecks:
         for original in outcome["checks"]:
             check = dict(original)
             tool = check.get("tool", "")
+            if check["type"] == "tool_check" and tool == "github.get_commit_checks":
+                from .github_checks import evaluate_github_check
+
+                criterion = next((item for item in (policy or {}).get("criteria", [])
+                                  if item["criterion_id"] == check["criterion_id"]), {})
+                check = evaluate_github_check(
+                    jobs=self.jobs.using_connection(connection), check=check,
+                    subject=criterion.get("github"), previous=previous.get(check["criterion_id"]),
+                    verification_id=verification_id, subject_digest=subject_digest,
+                    run_id=run_id, tenant_id=tenant_id, retry_tools=retry_tools,
+                )
             if check["type"] == "tool_check" and tool.startswith("sandbox.profile:"):
                 if not check["required"]:
                     # Optional checks do not hold task completion. Do not create

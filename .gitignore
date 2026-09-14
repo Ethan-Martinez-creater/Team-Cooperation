@@ -37,11 +37,20 @@ runtime-data/
 /.audit-*/
 /.codex*/
 /.codex_*/
+/.zcode/
 /.sandbox-*/
 /.test-*/
 /.tmp*/
 /tmp*/
+/.pt*/
+/.pytest_*/
+/phase*/
+/a*_full_pytest*/
+/planner_budget_tests_*/
+/pytest-cache-files-*/
+/handoff_verification/
 /*.tmp
+/*.xml
 
 # Local artifact stores and editor files
 /artifacts/
@@ -62,3 +71,17 @@ node_modules/
 /docs/roadmap.md
 /docs/product-realignment.md
 /scripts/patch_iteration4_frontend.py
+/scripts/check_github_live.py
+/scripts/check_local_internal_project_conversation.py
+/scripts/check_local_multitenant_workers.py
+/scripts/check_local_three_team_api.py
+/scripts/check_local_three_team_workers.py
+/scripts/check_shared_github_agent_roundtrip.py
+/scripts/check_shared_github_approval.py
+/scripts/check_shared_github_worker.py
+/scripts/check_shared_postgres_claims.py
+/scripts/detached_full_regression.py
+/Team-Cooperation_Multi-Agent_Harness_Execution_Plan_v1.1_Audited.md
+
+# Windows reserved-name artifact occasionally created by shell tooling
+/nul

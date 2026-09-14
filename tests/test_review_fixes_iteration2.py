@@ -7,8 +7,15 @@ messages, complete-turn context alignment, idempotent plan import and
 crash-safe plan materialization, and the bootstrap schema revision.
 """
 import json
+from pathlib import Path
+
+from test_agent_exchanges import seed as seed_exchanges
+from test_project_conversations import seed as seed_conversations
 
 from coifesp_harness.agent_runs import DurableRunStatus
+from coifesp_harness.control_plane.exchange_routes import (
+    _exchange_reply_trigger_idempotency_key,
+)
 from coifesp_harness.errors import GovernanceConflictError, ResourceNotFound
 from coifesp_harness.product import TeamCollaborationService
 from coifesp_harness.product.models import (
@@ -20,9 +27,6 @@ from coifesp_harness.product.models import (
 )
 from coifesp_harness.product.planning import ProjectPlanningService
 from coifesp_harness.product.turn_projection import AgentTurnProjection
-
-from test_agent_exchanges import seed as seed_exchanges
-from test_project_conversations import seed as seed_conversations
 
 PLAN_OUTPUT = json.dumps(
     {
@@ -52,6 +56,22 @@ EXCHANGE_DRAFT_OUTPUT = json.dumps(
     },
     ensure_ascii=False,
 )
+
+
+def test_exchange_reply_retry_uses_a_fresh_message_idempotency_key():
+    first = _exchange_reply_trigger_idempotency_key("exchange-1", "team-engineering")
+    second = _exchange_reply_trigger_idempotency_key("exchange-1", "team-engineering")
+
+    assert first != second
+    assert first.startswith("exchange-reply:exchange-1:team-engineering:")
+
+
+def test_exchange_reply_run_idempotency_is_scoped_to_the_turn():
+    source = Path("src/coifesp_harness/control_plane/conversation_routes.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'f"exchange-reply:{exchange_id}:{recipient_team_id}:{turn_id}"' in source
 
 
 class FakeRun:
@@ -499,11 +519,21 @@ def test_correlation_binding_parses_exchange_reply_format():
 
     class ReplyRun:
         correlation_id = (
+            f"exchange-reply:conv:{conversation.conversation_id}:turn:turn-reply-1"
+        )
+
+    assert len(ReplyRun.correlation_id) <= 128
+    binding = projection._binding_from_correlation(ReplyRun())
+    assert binding == (conversation.conversation_id, "turn-reply-1", "project-demo")
+
+    # The verbose layout written by older builds remains recoverable.
+    class LegacyReplyRun:
+        correlation_id = (
             f"exchange:exchange-abc:recipient:team-engineering:"
             f"conv:{conversation.conversation_id}:turn:turn-reply-1"
         )
 
-    binding = projection._binding_from_correlation(ReplyRun())
+    binding = projection._binding_from_correlation(LegacyReplyRun())
     assert binding == (conversation.conversation_id, "turn-reply-1", "project-demo")
 
     # legacy user-message format keeps resolving too
@@ -1081,8 +1111,9 @@ def test_replay_finds_unbound_exchange_draft_run_via_correlation():
 # Bootstrap schema revision
 # ---------------------------------------------------------------------------
 def test_bootstrap_schema_revision_matches_latest_migration():
-    from coifesp_harness.control_plane.bootstrap import SCHEMA_REVISION
     from alembic.script import ScriptDirectory
+
+    from coifesp_harness.control_plane.bootstrap import SCHEMA_REVISION
 
     script = ScriptDirectory("alembic")
     heads = script.get_heads()

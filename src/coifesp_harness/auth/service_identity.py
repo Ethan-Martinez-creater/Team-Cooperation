@@ -3,18 +3,23 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any
 from urllib.parse import quote, urlparse
 
 import httpx
 
 from ..config import SecretValue
-from ..errors import AuthenticationError, IdentityProviderUnavailable, IntegrityError, PolicyDenied
+from ..errors import (
+    AuthenticationError,
+    IdentityProviderUnavailable,
+    IntegrityError,
+    PolicyDenied,
+)
 from ..security import Classification, Principal
 from .oidc import OIDCVerifier
 from .roles import APPLICATION_ROLES
-
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$")
 _ATTRIBUTE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -165,6 +170,24 @@ class OIDCWorkerIdentityProvider:
         if self.expected_tenant_id is not None and principal.tenant_id != self.expected_tenant_id:
             raise IntegrityError("worker token tenant does not match worker configuration")
         return principal
+
+
+class LocalWorkerIdentityProvider:
+    """Deterministic machine identity for non-production local runtimes only."""
+
+    def __init__(self, *, required_role: str) -> None:
+        if required_role not in {"agent_worker", "tool_worker"}:
+            raise ValueError("local worker identity scope is invalid")
+        self.principal = Principal(
+            principal_id=f"service:local-{required_role.replace('_', '-')}",
+            tenant_id="platform",
+            roles=frozenset({required_role}),
+            clearance=Classification.INTERNAL,
+            is_service=True,
+        )
+
+    async def resolve(self) -> Principal:
+        return self.principal
 
 
 @dataclass(frozen=True, slots=True)

@@ -6,9 +6,23 @@ import re
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
-from sqlalchemy import (ARRAY, JSON, CheckConstraint, Column, DateTime, Integer,
-    MetaData, String, Table, and_, func, insert, select, text, update)
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import (
+    ARRAY,
+    JSON,
+    CheckConstraint,
+    Column,
+    DateTime,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    and_,
+    func,
+    insert,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.engine import Engine
 
 from ..audit import AuditEvent
@@ -208,9 +222,18 @@ class SQLAlchemyConnectorRegistry:
 
     def active_endpoint(self, *, principal: Principal, connector_id: str,
                         environment) -> ConnectorEndpoint:
-        with self.transaction(principal.tenant_id) as connection:
+        return self.active_endpoint_for_worker(
+            tenant_id=principal.tenant_id,
+            connector_id=connector_id,
+            environment=environment,
+        )
+
+    def active_endpoint_for_worker(self, *, tenant_id: str, connector_id: str,
+                                   environment) -> ConnectorEndpoint:
+        """Resolve the latest reviewed active revision for one tenant worker."""
+        with self.transaction(tenant_id) as connection:
             row=connection.execute(select(CONNECTOR_REGISTRATIONS).where(and_(
-                CONNECTOR_REGISTRATIONS.c.tenant_id==principal.tenant_id,
+                CONNECTOR_REGISTRATIONS.c.tenant_id==tenant_id,
                 CONNECTOR_REGISTRATIONS.c.connector_id==connector_id,
                 CONNECTOR_REGISTRATIONS.c.status=="active"))
                 .order_by(CONNECTOR_REGISTRATIONS.c.version.desc()).limit(1)).mappings().one_or_none()
@@ -227,12 +250,17 @@ class SQLAlchemyConnectorRegistry:
             circuit_cooldown_seconds=row["circuit_cooldown_millis"]/1000)
 
     @staticmethod
-    def _values(e, secret_env): return dict(tenant_id=e.tenant_id,connector_id=e.connector_id,
-        base_url=e.base_url,token_endpoint=e.token_endpoint,client_id=e.client_id,client_secret_env=secret_env,
-        scopes=list(e.scopes),allowed_paths=sorted(e.allowed_paths),max_classification=int(e.max_classification),
-        timeout_millis=round(e.timeout_seconds*1000),max_response_bytes=e.max_response_bytes,
-        max_attempts=e.max_attempts,circuit_failure_threshold=e.circuit_failure_threshold,
-        circuit_cooldown_millis=round(e.circuit_cooldown_seconds*1000))
+    def _values(e, secret_env): return {
+        "tenant_id": e.tenant_id, "connector_id": e.connector_id,
+        "base_url": e.base_url, "token_endpoint": e.token_endpoint,
+        "client_id": e.client_id, "client_secret_env": secret_env,
+        "scopes": list(e.scopes), "allowed_paths": sorted(e.allowed_paths),
+        "max_classification": int(e.max_classification),
+        "timeout_millis": round(e.timeout_seconds*1000),
+        "max_response_bytes": e.max_response_bytes, "max_attempts": e.max_attempts,
+        "circuit_failure_threshold": e.circuit_failure_threshold,
+        "circuit_cooldown_millis": round(e.circuit_cooldown_seconds*1000),
+    }
     @staticmethod
     def _digest(v): return hashlib.sha256(json.dumps(v,sort_keys=True,separators=(",",":")).encode()).hexdigest()
     def _audit(self,c,p,cid,event,outcome,version): self.audit_log.append_in_transaction(c,AuditEvent(

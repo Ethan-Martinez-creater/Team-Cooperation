@@ -9,13 +9,13 @@ from fastapi import APIRouter, Depends, Header, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
+from ..errors import HarnessError
 from ..product.models import (
     DataPropagation,
     ProjectAgentMode,
-    ProjectTeamKind,
-    TurnTriggerKind,
 )
-from ..runtime.models import AgentRunRequest, Message, RunBudget
+from ..runtime.models import AgentRunRequest, Message, ModelRoutePolicy, RunBudget
+from ..security import Classification
 from .auth import Authenticated, BearerAuthenticator
 from .conversation_models import (
     MessagePageView,
@@ -31,6 +31,17 @@ from .conversation_models import (
 )
 from .harness_view import ProjectHarnessViewService
 from .product_models import ProjectTeamView, ProjectView
+
+
+def _project_model_route_policy(request: Request) -> ModelRoutePolicy:
+    provider_ids = tuple(
+        request.app.state.settings.local_external_internal_provider_ids
+    )
+    return ModelRoutePolicy(
+        data_classification=Classification.INTERNAL,
+        allowed_provider_ids=frozenset(provider_ids),
+        allow_external_egress=bool(provider_ids),
+    )
 
 
 def build_conversation_router(*, authenticator: BearerAuthenticator) -> APIRouter:
@@ -450,6 +461,7 @@ async def launch_conversation_turn_run(
             context_items=tuple(items),
             context_purpose=f"project:{project_id}",
             tool_authorization=None,
+            model_route_policy=_project_model_route_policy(request),
         )
         checkpoint = codec.initial(request_obj)
         run = await run_in_threadpool(
@@ -616,16 +628,17 @@ async def start_exchange_reply_turn(
     principal = _recipient_principal(actor_id=actor_id, team_id=recipient_team_id)
     request_obj = AgentRunRequest(
         run_id=run_id,
-        correlation_id=(
-            f"exchange:{exchange_id}:recipient:{recipient_team_id}:"
-            f"conv:{conversation_id}:turn:{turn_id}"
-        ),
+        # Keep the recoverable conversation/turn binding while staying below
+        # the durable Agent Run repository's 128-character identifier limit.
+        # Exchange/team provenance already lives in the checkpoint context.
+        correlation_id=f"exchange-reply:conv:{conversation_id}:turn:{turn_id}",
         principal=principal,
         messages=tuple(messages),
         budget=RunBudget(),
         context_items=(item,),
         context_purpose=f"project:{project_id}",
         tool_authorization=None,
+        model_route_policy=_project_model_route_policy(request),
     )
     checkpoint = codec.initial(request_obj)
     run = await run_in_threadpool(
@@ -633,7 +646,9 @@ async def start_exchange_reply_turn(
         principal=principal,
         run_id=run_id,
         correlation_id=request_obj.correlation_id,
-        idempotency_key=f"exchange-reply:{exchange_id}:{recipient_team_id}",
+        idempotency_key=(
+            f"exchange-reply:{exchange_id}:{recipient_team_id}:{turn_id}"
+        ),
         checkpoint=checkpoint,
         max_failures=3,
     )
@@ -743,6 +758,7 @@ async def start_exchange_draft_run(
         context_items=tuple(items),
         context_purpose=f"project:{project_id}",
         tool_authorization=None,
+        model_route_policy=_project_model_route_policy(request),
     )
     checkpoint = codec.initial(request_obj)
     run = await run_in_threadpool(

@@ -17,6 +17,7 @@ Team Cooperation（代码包名 `coifesp-harness`）是一个 **Agent-first 的�
 ### Agent 协作能力
 
 - Agent Run 采用持久化队列、租约、心跳、fencing、检查点和失败恢复机制。
+- Agent Worker 与 Tool Worker 默认以共享多租户池运行；任务租户取自权威持久化记录，单个账号或团队不需要各自常驻一组 Worker。
 - 支持流式回复、继续对话、上下文窗口装配、早期上下文压缩提示和终态投影重放。
 - 支持 OpenAI-compatible、OpenAI 和 Anthropic 模型 Provider，并提供并发限制、预算、故障转移和熔断能力。
 - 支持工具调用、风险审批、幂等执行、Tool Worker 和隔离执行 profile。
@@ -42,6 +43,7 @@ Team Cooperation（代码包名 `coifesp-harness`）是一个 **Agent-first 的�
 - Agent 可生成包含阶段、负责团队、约束和验收信息的项目计划草稿。
 - 计划经人工确认后物化为阶段建议或团队任务，审批失败可安全重试且不会重复创建。
 - 支持团队任务的接受、拒绝、排期调整、交付与验收，以及协作通知和待办入口。
+- 支持有界 Specialist Agent 委派、任务结果回执、工具等待与验证/返工编排。
 - 对外发送、敏感工具和关键状态变更保留明确的人工确认点。
 
 ### 身份与运行模式
@@ -58,6 +60,7 @@ OIDC 只是可选运行方式。体验 Harness 核心功能时，建议优先使
 - 数据库：PostgreSQL、Alembic 版本化迁移
 - 前端：服务端静态资源 + 原生 HTML/CSS/JavaScript
 - Agent 运行时：独立 Agent Worker、Tool Worker、持久化 Run/Checkpoint/Projection
+- Worker 拓扑：共享多租户 Agent/Tool Worker 池，兼容旧单租户变量；生产继续使用 OIDC 平台服务身份
 - 模型接口：OpenAI-compatible、OpenAI、Anthropic
 - 可观测性：OpenTelemetry、Prometheus、结构化日志
 - 可选协议边界：MCP Streamable HTTP、A2A Agent Card/任务接口
@@ -125,7 +128,14 @@ alembic upgrade head
 
 ### 4. 启动控制面与 Worker
 
-分别在两个终端运行：
+本地演示推荐使用启动器。它会启动控制面，以及一组可处理三个演示租户的共享 Agent/Tool Worker，并把 PID、日志与 Artifact 写入被 Git 忽略的 `runtime-data/`：
+
+```bash
+python scripts/start_local_control_plane.py
+python scripts/start_local_workers.py
+```
+
+也可以分别运行底层入口：
 
 ```bash
 python -m uvicorn coifesp_harness.control_plane:create_application --factory --host 127.0.0.1 --port 8000
@@ -163,7 +173,9 @@ python -m pytest
 
 ## 外部集成边界
 
-GitHub/GitLab、Email、Calendar、IM 等真实纵向连接器需要由使用方选择具体平台，并提供测试租户、OAuth Client 与最小权限凭据。仓库包含连接器注册、策略和运行框架，但不会附带任何第三方账号或真实凭据；未配置连接器不影响本地 Harness 核心协作流程。
+仓库已经实现 GitHub 原生适配器，支持查询 commit checks，以及经人工审批创建 Issue、触发 Actions workflow；这些操作通过持久 Tool Job、稳定幂等键和加密回执接入任务验收。使用方仍需为自己的部署提供允许的仓库、最小权限 GitHub Token 或 GitHub App installation token，仓库不会附带任何真实凭据。配置说明见 [GitHub 原生适配器](docs/github-adapter.md)。
+
+GitLab、Email、Calendar、IM 等其他纵向平台尚未提供原生实现；未配置这些平台不影响站内 Harness 协作与 GitHub 闭环。
 
 ## License
 

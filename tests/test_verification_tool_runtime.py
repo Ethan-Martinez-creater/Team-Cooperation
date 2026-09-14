@@ -2,6 +2,7 @@ import asyncio
 import json
 from dataclasses import replace
 
+import pytest
 from test_bootstrap import StubVerifier, production_settings, sqlite_engine
 
 from coifesp_harness.config import SecretValue, Settings
@@ -43,6 +44,157 @@ def test_control_plane_constructs_queue_bridge_only_when_profiles_configured(tmp
     assert bridge.jobs.engine is engine
     assert set(bridge.profiles) == {"pytest"}
     assert app.state.agent_capabilities.manifests["code.run_profile"].timeout_seconds == 190
+
+
+def test_tool_worker_starts_with_configured_office_connector(tmp_path, monkeypatch):
+    from coifesp_harness import tool_worker_main as module
+
+    engine = sqlite_engine()
+
+    class AsyncResource:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def aclose(self):
+            pass
+
+    secret_name = "COIFESP_CONNECTOR_OFFICE_TEST_CLIENT_SECRET"
+    monkeypatch.setenv(secret_name, "s" * 32)
+    monkeypatch.setattr(Settings, "validate", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "create_engine", lambda *args, **kwargs: engine)
+    monkeypatch.setattr(module, "DatabaseReadinessProbe", lambda _: lambda: True)
+    monkeypatch.setattr(module, "OIDCVerifier", AsyncResource)
+    monkeypatch.setattr(module, "ClientCredentialsTokenProvider", AsyncResource)
+    configuration = replace(
+        settings(tmp_path),
+        connectors_json=json.dumps(
+            [
+                {
+                    "connector_id": "office-test",
+                    "tenant_id": "team-b",
+                    "base_url": "https://api.office.test",
+                    "token_endpoint": "https://identity.office.test/oauth/token",
+                    "client_id": "office-client",
+                    "client_secret_env": secret_name,
+                    "scopes": ["message.send"],
+                    "allowed_paths": ["/v1/messages"],
+                    "max_classification": "internal",
+                    "timeout_seconds": 15,
+                    "max_response_bytes": 1048576,
+                    "max_attempts": 3,
+                    "circuit_failure_threshold": 5,
+                    "circuit_cooldown_seconds": 30,
+                }
+            ]
+        ),
+    )
+
+    runtime = asyncio.run(module.build_tool_worker_runtime(configuration))
+    try:
+        tool = runtime.runner.registry.get("office.send_message")
+        assert tool is not None
+        assert set(tool.parameters_schema["required"]) == {"connector_id", "target", "text"}
+    finally:
+        asyncio.run(runtime.aclose())
+
+
+def test_tool_worker_starts_with_complete_github_adapter_contract(tmp_path, monkeypatch):
+    from coifesp_harness import tool_worker_main as module
+    from coifesp_harness.connectors import GITHUB_ADAPTER_PATHS
+
+    engine = sqlite_engine()
+
+    class AsyncResource:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def aclose(self):
+            pass
+
+    secret_name = "COIFESP_CONNECTOR_GITHUB_TEST_CLIENT_SECRET"
+    monkeypatch.setenv(secret_name, "g" * 32)
+    monkeypatch.setattr(Settings, "validate", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "create_engine", lambda *args, **kwargs: engine)
+    monkeypatch.setattr(module, "DatabaseReadinessProbe", lambda _: lambda: True)
+    monkeypatch.setattr(module, "OIDCVerifier", AsyncResource)
+    monkeypatch.setattr(module, "ClientCredentialsTokenProvider", AsyncResource)
+    configuration = replace(
+        settings(tmp_path),
+        sandbox_profiles_json=None, sandbox_runtime=None, sandbox_workspace_root=None,
+        connectors_json=json.dumps(
+            [
+                {
+                    "connector_id": "github-test",
+                    "tenant_id": "team-b",
+                    "base_url": "https://github-adapter.test",
+                    "token_endpoint": "https://identity.github-adapter.test/oauth/token",
+                    "client_id": "github-adapter",
+                    "client_secret_env": secret_name,
+                    "scopes": ["github.project"],
+                    "allowed_paths": sorted(GITHUB_ADAPTER_PATHS),
+                    "max_classification": "internal",
+                    "timeout_seconds": 15,
+                    "max_response_bytes": 1048576,
+                    "max_attempts": 3,
+                    "circuit_failure_threshold": 5,
+                    "circuit_cooldown_seconds": 30,
+                }
+            ]
+        ),
+    )
+
+    runtime = asyncio.run(module.build_tool_worker_runtime(configuration))
+    try:
+        names = {tool.name for tool in runtime.runner.registry.definitions()}
+        assert {
+            "github.create_issue",
+            "github.dispatch_workflow",
+            "github.get_commit_checks",
+        }.issubset(names)
+        assert "office.send_message" not in names
+        assert "verification.run_profile" not in names
+        assert isinstance(runtime.runner.reconciler, VerificationToolReconciler)
+        assert runtime.runner.reconciler.verifier.tool_checks.profiles == {}
+    finally:
+        asyncio.run(runtime.aclose())
+
+
+@pytest.mark.parametrize("placeholder", [False, True])
+def test_custom_registry_binds_specialist_to_current_runtime(tmp_path, monkeypatch, placeholder):
+    from coifesp_harness import tool_worker_main as module
+    from coifesp_harness.team_agents.specialists import (
+        SpecialistDelegationTool,
+        specialist_delegation_manifest,
+    )
+    from coifesp_harness.tools import ToolRegistry
+
+    engine = sqlite_engine()
+
+    class AsyncResource:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(Settings, "validate", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "create_engine", lambda *args, **kwargs: engine)
+    monkeypatch.setattr(module, "DatabaseReadinessProbe", lambda _: lambda: True)
+    monkeypatch.setattr(module, "OIDCVerifier", AsyncResource)
+    monkeypatch.setattr(module, "ClientCredentialsTokenProvider", AsyncResource)
+    registry = ToolRegistry()
+    if placeholder:
+        registry.register(specialist_delegation_manifest().declaration())
+    before = registry.definitions()
+    runtime = asyncio.run(module.build_tool_worker_runtime(settings(tmp_path), registry=registry))
+    try:
+        handler = runtime.runner.registry.get("specialist.delegate").handler
+        assert isinstance(handler.__self__, SpecialistDelegationTool)
+        assert handler.__self__.service.jobs is runtime.runner.repository
+        assert handler.__self__.service.runs.engine is engine
+        assert registry.definitions() == before
+    finally:
+        asyncio.run(runtime.aclose())
 
 
 def test_tool_worker_wires_internal_handler_and_reconciler_not_agent_catalog(tmp_path, monkeypatch):
@@ -118,8 +270,14 @@ def test_artifact_only_worker_needs_no_sandbox_and_matches_model_catalog(tmp_pat
     try:
         assert validation_options[0]["require_sandbox"] is False
         assert runtime.runner.workspace_manager is None
-        assert {tool.name for tool in runtime.runner.registry.definitions()} == {"project.publish_artifact"}
-        manifests = build_builtin_manifests(task_artifact_publication_configured=True)
+        assert {tool.name for tool in runtime.runner.registry.definitions()} == {
+            "project.publish_artifact",
+            "specialist.delegate",
+        }
+        manifests = build_builtin_manifests(
+            task_artifact_publication_configured=True,
+            specialist_delegation_configured=True,
+        )
         validate_registry_manifests(manifests, runtime.runner.registry, executor="tool_worker")
         tool = runtime.runner.registry.get("project.publish_artifact")
         assert tool.handler.__self__.service.jobs is runtime.runner.repository

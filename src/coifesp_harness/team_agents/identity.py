@@ -5,16 +5,23 @@ from __future__ import annotations
 import re
 from typing import Protocol
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, update
 from sqlalchemy.engine import Engine
 
 from ..errors import IntegrityError, PolicyDenied
-from ..product.repository import PROJECT_AGENT_RUNS, PROJECT_TEAMS, TEAM_PROJECT_AGENTS
-from ..project_process.repository import PROJECT_PLANNER_INTENTS
+from ..product.repository import (
+    PROJECT_AGENT_RUNS,
+    PROJECT_TEAMS,
+    SPECIALIST_DELEGATIONS,
+    TEAM_PROJECT_AGENTS,
+    TEAM_TASKS,
+)
+from ..project_process.repository import PROJECT_PLANNER_INTENTS, PROJECT_PROCESSES
 from ..security import Classification, Principal
 
 ORCHESTRATOR_PRINCIPAL_ID = "service:project-orchestrator"
 TEAM_AGENT_PREFIX = "team-agent:"
+SPECIALIST_AGENT_PREFIX = "specialist-agent:"
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
@@ -43,6 +50,8 @@ class TeamAgentPrincipalResolver:
         self.human_resolver = human_resolver
 
     async def resolve(self, *, tenant_id: str, principal_id: str) -> Principal:
+        if principal_id.startswith(SPECIALIST_AGENT_PREFIX):
+            raise PolicyDenied("Specialist Agent identity requires a durable run binding")
         if not principal_id.startswith(TEAM_AGENT_PREFIX):
             return await self.human_resolver.resolve(
                 tenant_id=tenant_id, principal_id=principal_id
@@ -116,6 +125,12 @@ class TeamAgentPrincipalResolver:
                 principal_id=principal_id,
                 run_id=run_id,
             )
+        if principal_id.startswith(SPECIALIST_AGENT_PREFIX):
+            return await self._resolve_specialist_run(
+                tenant_id=tenant_id,
+                principal_id=principal_id,
+                run_id=run_id,
+            )
         if principal_id.startswith(TEAM_AGENT_PREFIX):
             return await self._resolve_team_agent_run(
                 tenant_id=tenant_id,
@@ -123,6 +138,129 @@ class TeamAgentPrincipalResolver:
                 run_id=run_id,
             )
         return await self.resolve(tenant_id=tenant_id, principal_id=principal_id)
+
+    async def _resolve_specialist_run(
+        self,
+        *,
+        tenant_id: str,
+        principal_id: str,
+        run_id: str,
+    ) -> Principal:
+        identity = principal_id[len(SPECIALIST_AGENT_PREFIX) :]
+        try:
+            team_id, specialist_kind = identity.split(":", 1)
+        except ValueError as exc:
+            raise IntegrityError("Specialist Agent identity is malformed") from exc
+        if (
+            not _ID.fullmatch(tenant_id)
+            or not _ID.fullmatch(team_id)
+            or not _ID.fullmatch(specialist_kind)
+            or team_id != tenant_id
+        ):
+            raise IntegrityError("Specialist Agent owner identity does not match its tenant")
+        parent_runs = PROJECT_AGENT_RUNS.alias("specialist_parent_runs")
+        with self.engine.begin() as connection:
+            binding = (
+                connection.execute(
+                    select(
+                        SPECIALIST_DELEGATIONS.c.delegation_id,
+                        SPECIALIST_DELEGATIONS.c.project_id,
+                        SPECIALIST_DELEGATIONS.c.status,
+                    ).select_from(
+                        SPECIALIST_DELEGATIONS.join(
+                            PROJECT_AGENT_RUNS,
+                            PROJECT_AGENT_RUNS.c.run_id
+                            == SPECIALIST_DELEGATIONS.c.child_run_id,
+                        )
+                        .join(
+                            parent_runs,
+                            parent_runs.c.run_id
+                            == SPECIALIST_DELEGATIONS.c.parent_run_id,
+                        )
+                        .join(
+                            TEAM_PROJECT_AGENTS,
+                            and_(
+                                TEAM_PROJECT_AGENTS.c.agent_id
+                                == SPECIALIST_DELEGATIONS.c.team_agent_id,
+                                TEAM_PROJECT_AGENTS.c.project_id
+                                == SPECIALIST_DELEGATIONS.c.project_id,
+                                TEAM_PROJECT_AGENTS.c.team_id
+                                == SPECIALIST_DELEGATIONS.c.team_id,
+                            ),
+                        )
+                        .join(
+                            PROJECT_TEAMS,
+                            and_(
+                                PROJECT_TEAMS.c.project_id
+                                == SPECIALIST_DELEGATIONS.c.project_id,
+                                PROJECT_TEAMS.c.team_id
+                                == SPECIALIST_DELEGATIONS.c.team_id,
+                            ),
+                        )
+                        .join(
+                            TEAM_TASKS,
+                            and_(
+                                TEAM_TASKS.c.task_id
+                                == SPECIALIST_DELEGATIONS.c.team_task_id,
+                                TEAM_TASKS.c.project_id
+                                == SPECIALIST_DELEGATIONS.c.project_id,
+                            ),
+                        )
+                        .join(
+                            PROJECT_PROCESSES,
+                            PROJECT_PROCESSES.c.process_id
+                            == SPECIALIST_DELEGATIONS.c.process_id,
+                        )
+                    ).where(
+                        and_(
+                            SPECIALIST_DELEGATIONS.c.child_run_id == run_id,
+                            SPECIALIST_DELEGATIONS.c.team_id == team_id,
+                            SPECIALIST_DELEGATIONS.c.specialist_kind == specialist_kind,
+                            SPECIALIST_DELEGATIONS.c.status.in_(("PENDING", "RUNNING")),
+                            PROJECT_AGENT_RUNS.c.run_kind == "specialist",
+                            PROJECT_AGENT_RUNS.c.parent_run_id
+                            == SPECIALIST_DELEGATIONS.c.parent_run_id,
+                            PROJECT_AGENT_RUNS.c.executed_as_principal_id == principal_id,
+                            PROJECT_AGENT_RUNS.c.initiated_by_principal_id
+                            == TEAM_AGENT_PREFIX + team_id,
+                            parent_runs.c.run_kind == "task_execution",
+                            parent_runs.c.team_id == team_id,
+                            parent_runs.c.team_task_id == TEAM_TASKS.c.task_id,
+                            parent_runs.c.task_contract_version
+                            == TEAM_TASKS.c.accepted_contract_version,
+                            TEAM_TASKS.c.source_contract_version
+                            == TEAM_TASKS.c.accepted_contract_version,
+                            TEAM_TASKS.c.status == "in_progress",
+                            TEAM_TASKS.c.target_team_id == team_id,
+                            PROJECT_PROCESSES.c.phase == "EXECUTION",
+                            PROJECT_PROCESSES.c.status.in_(("READY", "RUNNING")),
+                            TEAM_PROJECT_AGENTS.c.status == "active",
+                        )
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if binding is not None and binding["status"] == "PENDING":
+                connection.execute(
+                    update(SPECIALIST_DELEGATIONS)
+                    .where(
+                        SPECIALIST_DELEGATIONS.c.delegation_id
+                        == binding["delegation_id"],
+                        SPECIALIST_DELEGATIONS.c.status == "PENDING",
+                    )
+                    .values(status="RUNNING")
+                )
+        if binding is None:
+            raise PolicyDenied("Specialist Agent run has no active delegation binding")
+        return Principal(
+            principal_id=principal_id,
+            tenant_id=tenant_id,
+            roles=frozenset({"specialist_agent"}),
+            clearance=Classification.INTERNAL,
+            compartments=frozenset({f"project:{binding['project_id']}"}),
+            is_service=True,
+        )
 
     async def _resolve_review_run(self, *, tenant_id, run_id):
         from ..verification.repository import AGENT_REVIEWS, TASK_VERIFICATIONS
@@ -261,6 +399,7 @@ class TeamAgentPrincipalResolver:
 
 __all__ = [
     "ORCHESTRATOR_PRINCIPAL_ID",
+    "SPECIALIST_AGENT_PREFIX",
     "TEAM_AGENT_PREFIX",
     "TeamAgentPrincipalResolver",
     "project_orchestrator_principal",

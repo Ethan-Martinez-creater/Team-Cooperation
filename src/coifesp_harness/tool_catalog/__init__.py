@@ -122,18 +122,111 @@ def office_message_manifest() -> ToolManifest:
         parameters_schema={
             "type": "object",
             "properties": {
-                "connector_id": {"type": "string", "minLength": 1, "maxLength": 128},
-                "recipient": {"type": "string", "minLength": 1, "maxLength": 320},
-                "content": {"type": "string", "minLength": 1, "maxLength": 8000},
+                "connector_id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$",
+                },
+                "target": {"type": "string", "minLength": 1, "maxLength": 256},
+                "text": {"type": "string", "minLength": 1, "maxLength": 100000},
             },
-            "required": ["connector_id", "recipient", "content"],
+            "required": ["connector_id", "target", "text"],
             "additionalProperties": False,
         },
         required_roles=frozenset({"contributor"}),
         risk=RiskLevel.HIGH,
         executor=TOOL_EXECUTOR_DURABLE,
-        timeout_seconds=30.0,
-        max_output_chars=20_000,
+        timeout_seconds=120.0,
+        max_output_chars=50_000,
+    )
+
+
+def github_connector_manifests() -> tuple[ToolManifest, ...]:
+    connector = {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$"}
+    repository = {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$",
+    }
+    common = {
+        "connector_id": connector,
+        "repository": repository,
+    }
+    return (
+        ToolManifest(
+            tool_id="github.create_issue",
+            version="1",
+            description="Create a reviewed issue through an approved GitHub adapter.",
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    **common,
+                    "title": {"type": "string", "minLength": 1, "maxLength": 256},
+                    "body": {"type": "string", "maxLength": 65536},
+                    "labels": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1, "maxLength": 64},
+                        "maxItems": 20,
+                        "uniqueItems": True,
+                    },
+                },
+                "required": ["connector_id", "repository", "title", "body"],
+                "additionalProperties": False,
+            },
+            required_roles=frozenset({"contributor"}),
+            risk=RiskLevel.HIGH,
+            executor=TOOL_EXECUTOR_DURABLE,
+            timeout_seconds=120.0,
+            max_output_chars=50_000,
+        ),
+        ToolManifest(
+            tool_id="github.dispatch_workflow",
+            version="1",
+            description="Dispatch a reviewed GitHub Actions workflow on an explicit ref.",
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    **common,
+                    "workflow": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_.!@/+-]{1,256}$",
+                    },
+                    "ref": {"type": "string", "minLength": 1, "maxLength": 256},
+                    "inputs": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string",
+                            "maxLength": 1000,
+                        },
+                        "maxProperties": 20,
+                    },
+                },
+                "required": ["connector_id", "repository", "workflow", "ref", "inputs"],
+                "additionalProperties": False,
+            },
+            required_roles=frozenset({"contributor"}),
+            risk=RiskLevel.HIGH,
+            executor=TOOL_EXECUTOR_DURABLE,
+            timeout_seconds=120.0,
+            max_output_chars=50_000,
+        ),
+        ToolManifest(
+            tool_id="github.get_commit_checks",
+            version="1",
+            description="Read bounded GitHub check results for one immutable commit SHA.",
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    **common,
+                    "commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                },
+                "required": ["connector_id", "repository", "commit_sha"],
+                "additionalProperties": False,
+            },
+            required_roles=frozenset({"contributor"}),
+            risk=RiskLevel.LOW,
+            executor=TOOL_EXECUTOR_DURABLE,
+            timeout_seconds=120.0,
+            max_output_chars=50_000,
+        ),
     )
 
 
@@ -213,7 +306,9 @@ def build_builtin_manifests(
     sandbox_profile_ids: Iterable[str] = (),
     sandbox_timeout_seconds: float = 90.0,
     office_connector_configured: bool = False,
+    github_connector_configured: bool = False,
     task_artifact_publication_configured: bool = False,
+    specialist_delegation_configured: bool = False,
 ) -> tuple[ToolManifest, ...]:
     manifests: list[ToolManifest] = []
     profiles = tuple(sandbox_profile_ids)
@@ -221,10 +316,16 @@ def build_builtin_manifests(
         manifests.append(sandbox_code_manifest(profiles, timeout_seconds=sandbox_timeout_seconds))
     if office_connector_configured:
         manifests.append(office_message_manifest())
+    if github_connector_configured:
+        manifests.extend(github_connector_manifests())
     if task_artifact_publication_configured:
         from ..artifacts.task_publication import task_artifact_manifest
 
         manifests.append(task_artifact_manifest())
+    if specialist_delegation_configured:
+        from ..team_agents.specialists import specialist_delegation_manifest
+
+        manifests.append(specialist_delegation_manifest())
     manifests.extend(skill_catalog_manifests())
     manifests.extend(project_context_manifests())
     return tuple(manifests)

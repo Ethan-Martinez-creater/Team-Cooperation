@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -49,6 +50,18 @@ class PermanentToolError(Exception):
     def __init__(self, error_code: str) -> None:
         super().__init__(error_code)
         self.error_code = error_code
+
+
+class AwaitingSpecialistTool(Exception):
+    """Signal that this leased job now waits on a durable Specialist AgentRun."""
+
+    def __init__(self, delegation_id: str) -> None:
+        if not isinstance(delegation_id, str) or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", delegation_id
+        ):
+            raise ValueError("specialist delegation identifier is invalid")
+        super().__init__(delegation_id)
+        self.delegation_id = delegation_id
 
 
 class ToolBatchReconciler(Protocol):
@@ -192,6 +205,19 @@ class DurableToolWorker:
                 lease_loss.cancel()
                 await self._discard_cancel(execution)
                 self._fail(job.job_id, lease.lease_token, "tool_timeout", retryable=True)
+        except AwaitingSpecialistTool as exc:
+            try:
+                self.repository.await_specialist(
+                    tenant_id=self.tenant_id,
+                    job_id=job.job_id,
+                    worker_id=self.worker_id,
+                    lease_token=lease.lease_token,
+                    delegation_id=exc.delegation_id,
+                )
+            except ToolJobError:
+                logger.exception(
+                    "specialist wait state could not be persisted job_id=%s", job.job_id
+                )
         except RetryableToolError as exc:
             self._fail(job.job_id, lease.lease_token, exc.error_code, retryable=True)
         except PermanentToolError as exc:
@@ -282,7 +308,8 @@ class DurableToolWorkerRunner:
         registry: ToolRegistry,
         reconciler: ToolBatchReconciler,
         identity_provider: ToolWorkerIdentityProvider,
-        tenant_id: str,
+        tenant_id: str | None = None,
+        allowed_tenant_ids: tuple[str, ...] | None = None,
         idle_poll_seconds: float = 2.0,
         lease_seconds: int = 60,
         heartbeat_seconds: float = 20,
@@ -292,7 +319,23 @@ class DurableToolWorkerRunner:
         self.registry = registry
         self.reconciler = reconciler
         self.identity_provider = identity_provider
+        if allowed_tenant_ids is None:
+            if tenant_id is None:
+                raise ValueError("Tool Worker tenant scope is required")
+            allowed_tenant_ids = (tenant_id,)
+            self._legacy_identity_tenant = tenant_id
+        else:
+            if (
+                not allowed_tenant_ids
+                or len(allowed_tenant_ids) > 64
+                or len(set(allowed_tenant_ids)) != len(allowed_tenant_ids)
+                or (tenant_id is not None and allowed_tenant_ids != (tenant_id,))
+            ):
+                raise ValueError("Tool Worker tenant scope is invalid")
+            self._legacy_identity_tenant = None
+        self.allowed_tenant_ids = allowed_tenant_ids
         self.tenant_id = tenant_id
+        self._tenant_cursor = 0
         self.idle_poll_seconds = idle_poll_seconds
         self.lease_seconds = lease_seconds
         self.heartbeat_seconds = heartbeat_seconds
@@ -303,21 +346,32 @@ class DurableToolWorkerRunner:
             principal = await self.identity_provider.resolve()
             if (
                 not principal.is_service
-                or principal.tenant_id != self.tenant_id
                 or "tool_worker" not in principal.roles
+                or (
+                    self._legacy_identity_tenant is not None
+                    and principal.tenant_id != self._legacy_identity_tenant
+                )
             ):
                 raise ToolJobError("Tool Worker identity is invalid")
-            worker = DurableToolWorker(
-                repository=self.repository,
-                registry=self.registry,
-                tenant_id=self.tenant_id,
-                worker_id=principal.principal_id,
-                lease_seconds=self.lease_seconds,
-                heartbeat_seconds=self.heartbeat_seconds,
-                reconciler=self.reconciler,
-                workspace_manager=self.workspace_manager,
-            )
-            if not await worker.run_once():
+            offset = self._tenant_cursor % len(self.allowed_tenant_ids)
+            ordered = self.allowed_tenant_ids[offset:] + self.allowed_tenant_ids[:offset]
+            self._tenant_cursor = (offset + 1) % len(self.allowed_tenant_ids)
+            processed = False
+            for tenant_id in ordered:
+                worker = DurableToolWorker(
+                    repository=self.repository,
+                    registry=self.registry,
+                    tenant_id=tenant_id,
+                    worker_id=principal.principal_id,
+                    lease_seconds=self.lease_seconds,
+                    heartbeat_seconds=self.heartbeat_seconds,
+                    reconciler=self.reconciler,
+                    workspace_manager=self.workspace_manager,
+                )
+                if await worker.run_once():
+                    processed = True
+                    break
+            if not processed:
                 try:
                     await asyncio.wait_for(stop.wait(), timeout=self.idle_poll_seconds)
                 except TimeoutError:

@@ -23,12 +23,19 @@ from .auth import (
     ClientCredentialsTokenProvider,
     KeycloakDirectoryConfig,
     KeycloakPrincipalResolver,
+    LocalWorkerIdentityProvider,
     OIDCVerifier,
     OIDCWorkerIdentityProvider,
 )
 from .config import ConfigurationError, Environment, Settings
+from .connectors import (
+    GITHUB_ADAPTER_PATHS,
+    configured_connector_path_sets,
+    configured_connector_paths,
+)
 from .context import ContextAssembler
 from .control_plane.bootstrap import DatabaseReadinessProbe, load_environment_settings
+from .control_plane.local_identity import LocalPrincipalResolver
 from .idempotency import InMemoryIdempotencyStore
 from .observability import ObservabilityRuntime, configure_structured_logging
 from .postgres_audit import AuditSigningKeyring, SQLAlchemyAuditLog
@@ -100,18 +107,21 @@ _build_skill_catalog = build_skill_catalog_from_settings
 @dataclass(slots=True)
 class WorkerRuntime:
     runner: DurableAgentWorkerRunner
-    worker_tokens: ClientCredentialsTokenProvider
-    directory_tokens: ClientCredentialsTokenProvider
-    directory: KeycloakPrincipalResolver
-    verifier: OIDCVerifier
+    worker_tokens: ClientCredentialsTokenProvider | None
+    directory_tokens: ClientCredentialsTokenProvider | None
+    directory: KeycloakPrincipalResolver | LocalPrincipalResolver
+    verifier: OIDCVerifier | None
     engine: Engine
     observability: ObservabilityRuntime
 
     async def aclose(self) -> None:
         await self.directory.aclose()
-        await self.directory_tokens.aclose()
-        await self.worker_tokens.aclose()
-        await self.verifier.aclose()
+        if self.directory_tokens is not None:
+            await self.directory_tokens.aclose()
+        if self.worker_tokens is not None:
+            await self.worker_tokens.aclose()
+        if self.verifier is not None:
+            await self.verifier.aclose()
         self.observability.shutdown()
         self.engine.dispose()
 
@@ -120,15 +130,21 @@ async def build_worker_runtime(settings: Settings) -> WorkerRuntime:
     settings.validate(require_auth=True, require_memory=True, require_llm=True, require_worker=True)
     if not settings.database_url:
         raise ConfigurationError("COIFESP_DATABASE_URL is required by the durable worker")
-    assert settings.worker_token_endpoint is not None
-    assert settings.worker_client_id is not None
-    assert settings.worker_client_secret is not None
-    assert settings.worker_tenant_id is not None
-    assert settings.directory_api_base_url is not None
-    assert settings.directory_realm is not None
-    assert settings.directory_token_endpoint is not None
-    assert settings.directory_client_id is not None
-    assert settings.directory_client_secret is not None
+    worker_tenant_ids = settings.worker_tenant_ids or (
+        (settings.worker_tenant_id,) if settings.worker_tenant_id else ()
+    )
+    if not worker_tenant_ids:
+        raise ConfigurationError("Agent Worker tenant scope is required")
+    local_mode = settings.auth_mode == "local"
+    if not local_mode:
+        assert settings.worker_token_endpoint is not None
+        assert settings.worker_client_id is not None
+        assert settings.worker_client_secret is not None
+        assert settings.directory_api_base_url is not None
+        assert settings.directory_realm is not None
+        assert settings.directory_token_endpoint is not None
+        assert settings.directory_client_id is not None
+        assert settings.directory_client_secret is not None
 
     configure_structured_logging(settings)
     observability = ObservabilityRuntime(settings=settings)
@@ -141,7 +157,7 @@ async def build_worker_runtime(settings: Settings) -> WorkerRuntime:
         pool_recycle=1800,
         hide_parameters=True,
     )
-    verifier = OIDCVerifier(settings=settings)
+    verifier = None if local_mode else OIDCVerifier(settings=settings)
     worker_tokens: ClientCredentialsTokenProvider | None = None
     directory_tokens: ClientCredentialsTokenProvider | None = None
     directory: KeycloakPrincipalResolver | None = None
@@ -185,11 +201,17 @@ async def build_worker_runtime(settings: Settings) -> WorkerRuntime:
             sandbox_profiles = load_code_profiles(settings.sandbox_profiles_json)
             sandbox_profile_ids = tuple(profile.profile_id for profile in sandbox_profiles)
             sandbox_timeout_seconds = max(profile.limits.timeout_seconds for profile in sandbox_profiles) + 10
+        connector_paths = configured_connector_paths(settings.connectors_json)
+        connector_path_sets = configured_connector_path_sets(settings.connectors_json)
         manifests = build_builtin_manifests(
             sandbox_profile_ids=sandbox_profile_ids,
             sandbox_timeout_seconds=sandbox_timeout_seconds,
-            office_connector_configured=bool(settings.connectors_json),
+            office_connector_configured="/v1/messages" in connector_paths,
+            github_connector_configured=any(
+                GITHUB_ADAPTER_PATHS.issubset(paths) for paths in connector_path_sets
+            ),
             task_artifact_publication_configured=bool(settings.artifact_store_root),
+            specialist_delegation_configured=True,
         )
         registry = build_agent_worker_registry(manifests)
         validate_registry_manifests(manifests, registry)
@@ -212,30 +234,43 @@ async def build_worker_runtime(settings: Settings) -> WorkerRuntime:
             durable_tools=True,
             skill_catalog=skill_catalog,
         )
-        worker_tokens = ClientCredentialsTokenProvider(
-            ClientCredentialsConfig(
-                token_endpoint=settings.worker_token_endpoint,
-                client_id=settings.worker_client_id,
-                client_secret=settings.worker_client_secret,
-                allow_insecure_http=allow_http,
+        if local_mode:
+            directory = LocalPrincipalResolver()
+            identity = LocalWorkerIdentityProvider(required_role="agent_worker")
+        else:
+            worker_tokens = ClientCredentialsTokenProvider(
+                ClientCredentialsConfig(
+                    token_endpoint=settings.worker_token_endpoint,
+                    client_id=settings.worker_client_id,
+                    client_secret=settings.worker_client_secret,
+                    allow_insecure_http=allow_http,
+                )
             )
-        )
-        directory_tokens = ClientCredentialsTokenProvider(
-            ClientCredentialsConfig(
-                token_endpoint=settings.directory_token_endpoint,
-                client_id=settings.directory_client_id,
-                client_secret=settings.directory_client_secret,
-                allow_insecure_http=allow_http,
+            directory_tokens = ClientCredentialsTokenProvider(
+                ClientCredentialsConfig(
+                    token_endpoint=settings.directory_token_endpoint,
+                    client_id=settings.directory_client_id,
+                    client_secret=settings.directory_client_secret,
+                    allow_insecure_http=allow_http,
+                )
             )
-        )
-        directory = KeycloakPrincipalResolver(
-            config=KeycloakDirectoryConfig(
-                admin_api_base_url=settings.directory_api_base_url,
-                realm=settings.directory_realm,
-                allow_insecure_http=allow_http,
-            ),
-            tokens=directory_tokens,
-        )
+            directory = KeycloakPrincipalResolver(
+                config=KeycloakDirectoryConfig(
+                    admin_api_base_url=settings.directory_api_base_url,
+                    realm=settings.directory_realm,
+                    allow_insecure_http=allow_http,
+                ),
+                tokens=directory_tokens,
+            )
+            identity = OIDCWorkerIdentityProvider(
+                tokens=worker_tokens,
+                verifier=verifier,
+                expected_tenant_id=(
+                    settings.worker_tenant_id
+                    if worker_tenant_ids == (settings.worker_tenant_id,)
+                    else None
+                ),
+            )
         worker = DurableAgentWorker(
             service=service,
             loop=agent_loop,
@@ -247,11 +282,7 @@ async def build_worker_runtime(settings: Settings) -> WorkerRuntime:
             heartbeat_interval_seconds=settings.worker_heartbeat_seconds,
             observer=observability,
             tool_dispatcher=tool_dispatcher,
-        )
-        identity = OIDCWorkerIdentityProvider(
-            tokens=worker_tokens,
-            verifier=verifier,
-            expected_tenant_id=settings.worker_tenant_id,
+            allowed_tenant_ids=worker_tenant_ids,
         )
         return WorkerRuntime(
             runner=DurableAgentWorkerRunner(
@@ -274,7 +305,8 @@ async def build_worker_runtime(settings: Settings) -> WorkerRuntime:
             await directory_tokens.aclose()
         if worker_tokens is not None:
             await worker_tokens.aclose()
-        await verifier.aclose()
+        if verifier is not None:
+            await verifier.aclose()
         observability.shutdown()
         engine.dispose()
         raise

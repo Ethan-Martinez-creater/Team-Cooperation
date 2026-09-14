@@ -1,5 +1,5 @@
-import json
 import base64
+import json
 
 import pytest
 
@@ -46,6 +46,66 @@ def test_durable_worker_requires_separate_bounded_oauth_clients() -> None:
     settings = Settings.from_environment({"COIFESP_ENV": "development"})
     with pytest.raises(ConfigurationError, match="COIFESP_WORKER_TOKEN_ENDPOINT"):
         settings.validate(require_worker=True)
+
+
+def test_local_workers_require_tenant_but_not_oidc_clients() -> None:
+    agent = Settings.from_environment({
+        "COIFESP_ENV": "development", "COIFESP_AUTH_MODE": "local",
+        "COIFESP_LOCAL_WORKER_TENANTS": "team-product,team-engineering,team-quality",
+    })
+    agent.validate(require_worker=True)
+    agent.validate(require_tool_worker=True)
+    assert agent.worker_tenant_ids == ("team-product", "team-engineering", "team-quality")
+    assert agent.tool_worker_tenant_ids == agent.worker_tenant_ids
+
+
+def test_local_worker_still_requires_explicit_tenant() -> None:
+    settings = Settings.from_environment({
+        "COIFESP_ENV": "development", "COIFESP_AUTH_MODE": "local",
+    })
+    with pytest.raises(ConfigurationError, match="COIFESP_WORKER_TENANTS"):
+        settings.validate(require_worker=True)
+
+
+@pytest.mark.parametrize(
+    "value", ["", "team-a,team-a", "team-a,bad tenant"]
+)
+def test_local_worker_tenant_set_rejects_empty_duplicate_or_invalid(value) -> None:
+    environment = {
+        "COIFESP_ENV": "development", "COIFESP_AUTH_MODE": "local",
+        "COIFESP_LOCAL_WORKER_TENANTS": value,
+    }
+    if value == "":
+        settings = Settings.from_environment(environment)
+        with pytest.raises(ConfigurationError, match="COIFESP_WORKER_TENANTS"):
+            settings.validate(require_worker=True)
+    else:
+        with pytest.raises(ConfigurationError, match="unique valid tenant"):
+            Settings.from_environment(environment)
+
+
+def test_legacy_single_tenant_maps_to_singleton_pool_and_conflicts_fail() -> None:
+    settings = Settings.from_environment({
+        "COIFESP_ENV": "development", "COIFESP_AUTH_MODE": "oidc",
+        "COIFESP_WORKER_TENANT_ID": "team-a",
+        "COIFESP_TOOL_WORKER_TENANT_ID": "team-a",
+    })
+    assert settings.worker_tenant_ids == ("team-a",)
+    assert settings.tool_worker_tenant_ids == ("team-a",)
+    with pytest.raises(ConfigurationError, match="conflicts"):
+        Settings.from_environment({
+            "COIFESP_ENV": "development", "COIFESP_WORKER_TENANT_ID": "team-a",
+            "COIFESP_WORKER_TENANTS": "team-a,team-b",
+        })
+
+
+def test_production_rejects_local_worker_tenant_configuration() -> None:
+    settings = Settings.from_environment({
+        "COIFESP_ENV": "production", "COIFESP_AUTH_MODE": "oidc",
+        "COIFESP_LOCAL_WORKER_TENANTS": "team-a",
+    })
+    with pytest.raises(ConfigurationError, match="forbidden in production"):
+        settings.validate()
 
 
 def test_tool_worker_requires_a_third_distinct_oauth_client() -> None:
@@ -196,6 +256,63 @@ def test_multi_provider_registry_resolves_secret_by_environment_reference() -> N
     assert "provider-secret" not in repr(value.llm_providers)
     gateway = build_model_gateway(value)
     assert gateway.max_failover_attempts == 2
+
+
+def test_local_external_internal_provider_authorization_is_explicit() -> None:
+    value = Settings.from_environment(
+        {
+            "COIFESP_ENV": "development",
+            "COIFESP_AUTH_MODE": "local",
+            "COIFESP_LLM_API_KEY": "provider-secret",
+            "COIFESP_LLM_PROVIDERS_JSON": provider_registry(
+                max_data_classification="internal"
+            ),
+            "COIFESP_LOCAL_EXTERNAL_INTERNAL_PROVIDERS": "deepseek",
+        }
+    )
+    value.validate(require_llm=True)
+    assert value.local_external_internal_provider_ids == ("deepseek",)
+
+
+@pytest.mark.parametrize(
+    ("environment", "auth_mode"),
+    (("production", "oidc"), ("development", "builtin")),
+)
+def test_local_external_internal_provider_authorization_fails_outside_local(
+    environment, auth_mode
+) -> None:
+    value = Settings.from_environment(
+        {
+            "COIFESP_ENV": environment,
+            "COIFESP_AUTH_MODE": auth_mode,
+            "COIFESP_LLM_API_KEY": "provider-secret",
+            "COIFESP_LLM_PROVIDERS_JSON": provider_registry(
+                max_data_classification="internal"
+            ),
+            "COIFESP_LOCAL_EXTERNAL_INTERNAL_PROVIDERS": "deepseek",
+        }
+    )
+    with pytest.raises(ConfigurationError, match="allowed only"):
+        value.validate(require_llm=True)
+
+
+def test_local_external_internal_provider_must_be_registered_and_internal() -> None:
+    base = {
+        "COIFESP_ENV": "development",
+        "COIFESP_AUTH_MODE": "local",
+        "COIFESP_LLM_API_KEY": "provider-secret",
+        "COIFESP_LLM_PROVIDERS_JSON": provider_registry(),
+    }
+    public = Settings.from_environment(
+        {**base, "COIFESP_LOCAL_EXTERNAL_INTERNAL_PROVIDERS": "deepseek"}
+    )
+    with pytest.raises(ConfigurationError, match="max_data_classification"):
+        public.validate(require_llm=True)
+    unknown = Settings.from_environment(
+        {**base, "COIFESP_LOCAL_EXTERNAL_INTERNAL_PROVIDERS": "unknown"}
+    )
+    with pytest.raises(ConfigurationError, match="unregistered"):
+        unknown.validate(require_llm=True)
 
 
 def test_provider_registry_accepts_explicit_local_tokenizer_encoding() -> None:

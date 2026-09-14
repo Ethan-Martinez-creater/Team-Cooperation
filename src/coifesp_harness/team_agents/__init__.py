@@ -1,10 +1,15 @@
 from .identity import (
     ORCHESTRATOR_PRINCIPAL_ID,
+    SPECIALIST_AGENT_PREFIX,
     TEAM_AGENT_PREFIX,
     TeamAgentPrincipalResolver,
     project_orchestrator_principal,
 )
-from .profiles import ContextScope, ResolvedTeamAgentRuntime, TeamAgentCapabilityResolver
+from .profiles import (
+    ContextScope,
+    ResolvedTeamAgentRuntime,
+    TeamAgentCapabilityResolver,
+)
 from .specialist_profiles import (
     SPECIALIST_DELEGATION_TOOL_ID,
     SPECIALIST_DELEGATION_TOOL_NAMES,
@@ -19,25 +24,38 @@ from .specialist_profiles import (
     get_specialist_profile,
     parse_specialist_profile,
 )
+from .specialists import (
+    SpecialistDelegationResult,
+    SpecialistDelegationService,
+    SpecialistDelegationTool,
+    SpecialistRunProjection,
+    specialist_delegation_manifest,
+)
 
 __all__ = [
     "ORCHESTRATOR_PRINCIPAL_ID",
-    "TEAM_AGENT_PREFIX",
-    "ContextScope",
-    "ResolvedTeamAgentRuntime",
-    "TeamAgentCapabilityResolver",
-    "TeamAgentPrincipalResolver",
-    "project_orchestrator_principal",
+    "SPECIALIST_AGENT_PREFIX",
     "SPECIALIST_DELEGATION_TOOL_ID",
     "SPECIALIST_DELEGATION_TOOL_NAMES",
     "SPECIALIST_PROFILE_CATALOG",
+    "TEAM_AGENT_PREFIX",
+    "ContextScope",
+    "ResolvedTeamAgentRuntime",
     "SpecialistAuthorization",
     "SpecialistContextPolicy",
     "SpecialistContextScope",
+    "SpecialistDelegationResult",
+    "SpecialistDelegationService",
+    "SpecialistDelegationTool",
     "SpecialistKind",
     "SpecialistProfile",
+    "SpecialistRunProjection",
+    "TeamAgentCapabilityResolver",
+    "TeamAgentPrincipalResolver",
     "compile_specialist_profile",
     "derive_specialist_authorization",
     "get_specialist_profile",
     "parse_specialist_profile",
+    "project_orchestrator_principal",
+    "specialist_delegation_manifest",
 ]

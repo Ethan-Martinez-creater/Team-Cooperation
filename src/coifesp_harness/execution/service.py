@@ -33,11 +33,13 @@ class TaskExecutionService:
         governance: GovernanceService,
         project_repository=None,
         work_graph_repository=None,
+        allow_legacy_assignments: bool = True,
     ) -> None:
         self.repository = repository
         self.governance = governance
         self.project_repository = project_repository
         self.work_graph_repository = work_graph_repository
+        self.allow_legacy_assignments = allow_legacy_assignments
         if project_repository is not None:
             engines = {id(repository.engine), id(project_repository.engine)}
             if work_graph_repository is not None:
@@ -130,6 +132,10 @@ class TaskExecutionService:
         priority: int = 0,
         max_attempts: int = 3,
     ) -> ExecutionTask:
+        if not self.allow_legacy_assignments:
+            raise GovernanceConflictError(
+                "legacy assignment execution is disabled; use project work execution"
+            )
         board = self.governance.read_program(principal=principal, program_id=program_id)
         assignment = board.assignments.get(assignment_id)
         if assignment is None or principal.tenant_id not in assignment.visible_to_tenants:

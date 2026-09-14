@@ -33,6 +33,7 @@ CHECKPOINT_SCHEMA = "coifesp.agent-run-checkpoint.v1"
 _MESSAGE_ROLES = frozenset({"system", "user", "assistant", "tool"})
 _ORCHESTRATOR_PRINCIPAL_ID = "service:project-orchestrator"
 _TEAM_AGENT_PREFIX = "team-agent:"
+_SPECIALIST_AGENT_PREFIX = "specialist-agent:"
 
 
 class AgentRunCheckpointCodec:
@@ -90,13 +91,19 @@ class AgentRunCheckpointCodec:
         principal_id = principal.principal_id
         canonical_service_id = isinstance(principal_id, str) and (
             principal_id == _ORCHESTRATOR_PRINCIPAL_ID
-            or principal_id.startswith(_TEAM_AGENT_PREFIX)
+            or principal_id.startswith(
+                (_TEAM_AGENT_PREFIX, _SPECIALIST_AGENT_PREFIX)
+            )
         )
         service_owner_verified = (
             principal.is_service is True
             and verified
             and (
                 principal_id == _ORCHESTRATOR_PRINCIPAL_ID
+                or (
+                    isinstance(principal_id, str)
+                    and principal_id.startswith(_SPECIALIST_AGENT_PREFIX)
+                )
                 or (
                     isinstance(principal_id, str)
                     and principal_id.startswith(_TEAM_AGENT_PREFIX)

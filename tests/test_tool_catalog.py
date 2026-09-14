@@ -12,6 +12,7 @@ from coifesp_harness.tool_catalog import (
     build_project_context_run_tools,
     build_skill_run_tools,
     catalog_digest,
+    github_connector_manifests,
     office_message_manifest,
     sandbox_code_manifest,
     skill_catalog_manifests,
@@ -64,6 +65,24 @@ def test_task_artifact_tool_only_advertised_when_storage_is_configured():
     assert manifest.executor == TOOL_EXECUTOR_DURABLE
     assert manifest.required_roles == frozenset({"team_agent"})
     assert catalog_digest(plain) != catalog_digest(enabled)
+
+
+def test_github_tools_only_advertised_for_complete_adapter_configuration():
+    plain = build_builtin_manifests()
+    enabled = build_builtin_manifests(github_connector_configured=True)
+    github_ids = {manifest.tool_id for manifest in github_connector_manifests()}
+    assert not github_ids.intersection(manifest.tool_id for manifest in plain)
+    assert github_ids.issubset(manifest.tool_id for manifest in enabled)
+
+
+def test_specialist_delegation_only_advertised_when_executor_is_configured():
+    plain = build_builtin_manifests()
+    enabled = build_builtin_manifests(specialist_delegation_configured=True)
+    assert "specialist.delegate" not in {item.tool_id for item in plain}
+    manifest = next(item for item in enabled if item.tool_id == "specialist.delegate")
+    assert manifest.executor == TOOL_EXECUTOR_DURABLE
+    assert manifest.required_roles == frozenset({"team_agent"})
+    assert manifest.risk is RiskLevel.LOW
 
 
 def test_verify_catalog_match_reports_ok_and_each_mismatch_kind():

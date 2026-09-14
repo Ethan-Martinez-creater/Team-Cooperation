@@ -12,11 +12,11 @@ from ..security import Principal
 from .checkpoint import AgentRunCheckpointCodec
 from .control_models import AgentControlCommand, AgentControlType
 from .models import (
+    TERMINAL_RUN_STATES,
     AgentRunLease,
     DurableAgentEvent,
     DurableAgentRun,
     DurableRunStatus,
-    TERMINAL_RUN_STATES,
 )
 from .repository import SQLAlchemyAgentRunRepository
 
@@ -249,6 +249,20 @@ class AgentRunService:
         self._require_worker(worker)
         return self.repository.claim_next(
             tenant_id=worker.tenant_id,
+            worker_id=worker.principal_id,
+            lease_seconds=lease_seconds,
+        )
+
+    def claim_allowed(
+        self,
+        *,
+        worker: Principal,
+        allowed_tenant_ids: tuple[str, ...],
+        lease_seconds: int = 60,
+    ) -> AgentRunLease | None:
+        self._require_worker(worker)
+        return self.repository.claim_next_allowed(
+            allowed_tenant_ids=allowed_tenant_ids,
             worker_id=worker.principal_id,
             lease_seconds=lease_seconds,
         )

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import os
 import base64
 import binascii
 import json
+import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping
 from urllib.parse import urlparse
 
 from .errors import HarnessError
@@ -89,6 +89,7 @@ class Settings:
     worker_client_id: str | None
     worker_client_secret: SecretValue | None
     worker_tenant_id: str | None
+    worker_tenant_ids: tuple[str, ...]
     directory_api_base_url: str | None
     directory_realm: str | None
     directory_token_endpoint: str | None
@@ -101,6 +102,8 @@ class Settings:
     tool_worker_client_id: str | None
     tool_worker_client_secret: SecretValue | None
     tool_worker_tenant_id: str | None
+    tool_worker_tenant_ids: tuple[str, ...]
+    local_worker_tenant_ids: tuple[str, ...]
     tool_worker_idle_poll_seconds: float
     tool_worker_lease_seconds: int
     tool_worker_heartbeat_seconds: float
@@ -128,6 +131,7 @@ class Settings:
     llm_base_url: str | None
     llm_api_key: SecretValue | None
     llm_providers: tuple[ModelProviderConfig, ...]
+    local_external_internal_provider_ids: tuple[str, ...]
     llm_max_failover_attempts: int
     llm_concurrency_wait_seconds: float
     llm_circuit_failure_threshold: int
@@ -199,6 +203,38 @@ class Settings:
                 raise ConfigurationError(f"{name} must be positive")
             return parsed
 
+        def tenant_ids(name: str) -> tuple[str, ...]:
+            raw = optional(name)
+            if raw is None:
+                return ()
+            values = tuple(item.strip() for item in raw.split(","))
+            if (
+                not values
+                or len(values) > 64
+                or any(not item or not _REGION_ID.fullmatch(item) for item in values)
+                or len(set(values)) != len(values)
+            ):
+                raise ConfigurationError(
+                    f"{name} must contain 1 to 64 unique valid tenant identifiers"
+                )
+            return values
+
+        def provider_ids(name: str) -> tuple[str, ...]:
+            raw = optional(name)
+            if raw is None:
+                return ()
+            values = tuple(item.strip() for item in raw.split(","))
+            if (
+                not values
+                or len(values) > 32
+                or any(not item or not _PROVIDER_ID.fullmatch(item) for item in values)
+                or len(set(values)) != len(values)
+            ):
+                raise ConfigurationError(
+                    f"{name} must contain 1 to 32 unique valid provider identifiers"
+                )
+            return values
+
         algorithms = tuple(
             value.strip()
             for value in (optional("COIFESP_OIDC_ALGORITHMS") or "RS256").split(",")
@@ -212,12 +248,36 @@ class Settings:
                 "COIFESP_ENV must be development, test, or production"
             ) from exc
 
+        auth_mode = (optional("COIFESP_AUTH_MODE") or (
+            "oidc" if environment is Environment.PRODUCTION or optional("COIFESP_OIDC_ISSUER")
+            else "builtin"
+        )).lower()
+        legacy_agent_tenant = optional("COIFESP_WORKER_TENANT_ID")
+        legacy_tool_tenant = optional("COIFESP_TOOL_WORKER_TENANT_ID")
+        local_tenants = tenant_ids("COIFESP_LOCAL_WORKER_TENANTS")
+        agent_tenants = tenant_ids("COIFESP_WORKER_TENANTS")
+        tool_tenants = tenant_ids("COIFESP_TOOL_WORKER_TENANTS")
+        if auth_mode == "local" and local_tenants:
+            if agent_tenants or tool_tenants:
+                raise ConfigurationError(
+                    "COIFESP_LOCAL_WORKER_TENANTS conflicts with pool-specific tenant settings"
+                )
+            agent_tenants = local_tenants
+            tool_tenants = local_tenants
+        for name, legacy, configured in (
+            ("COIFESP_WORKER_TENANTS", legacy_agent_tenant, agent_tenants),
+            ("COIFESP_TOOL_WORKER_TENANTS", legacy_tool_tenant, tool_tenants),
+        ):
+            if legacy and configured and configured != (legacy,):
+                raise ConfigurationError(f"{name} conflicts with its legacy single-tenant setting")
+        if not agent_tenants and legacy_agent_tenant:
+            agent_tenants = (legacy_agent_tenant,)
+        if not tool_tenants and legacy_tool_tenant:
+            tool_tenants = (legacy_tool_tenant,)
+
         return cls(
             environment=environment,
-            auth_mode=(optional("COIFESP_AUTH_MODE") or (
-                "oidc" if environment is Environment.PRODUCTION or optional("COIFESP_OIDC_ISSUER")
-                else "builtin"
-            )).lower(),
+            auth_mode=auth_mode,
             database_url=optional("COIFESP_DATABASE_URL"),
             oidc_issuer=optional("COIFESP_OIDC_ISSUER"),
             oidc_audience=optional("COIFESP_OIDC_AUDIENCE"),
@@ -244,7 +304,8 @@ class Settings:
             worker_token_endpoint=optional("COIFESP_WORKER_TOKEN_ENDPOINT"),
             worker_client_id=optional("COIFESP_WORKER_CLIENT_ID"),
             worker_client_secret=secret("COIFESP_WORKER_CLIENT_SECRET"),
-            worker_tenant_id=optional("COIFESP_WORKER_TENANT_ID"),
+            worker_tenant_id=legacy_agent_tenant,
+            worker_tenant_ids=agent_tenants,
             directory_api_base_url=optional("COIFESP_DIRECTORY_API_BASE_URL"),
             directory_realm=optional("COIFESP_DIRECTORY_REALM"),
             directory_token_endpoint=optional("COIFESP_DIRECTORY_TOKEN_ENDPOINT"),
@@ -256,7 +317,9 @@ class Settings:
             tool_worker_token_endpoint=optional("COIFESP_TOOL_WORKER_TOKEN_ENDPOINT"),
             tool_worker_client_id=optional("COIFESP_TOOL_WORKER_CLIENT_ID"),
             tool_worker_client_secret=secret("COIFESP_TOOL_WORKER_CLIENT_SECRET"),
-            tool_worker_tenant_id=optional("COIFESP_TOOL_WORKER_TENANT_ID"),
+            tool_worker_tenant_id=legacy_tool_tenant,
+            tool_worker_tenant_ids=tool_tenants,
+            local_worker_tenant_ids=local_tenants,
             tool_worker_idle_poll_seconds=positive_number(
                 "COIFESP_TOOL_WORKER_IDLE_POLL_SECONDS", 2.0
             ),
@@ -297,6 +360,9 @@ class Settings:
                 optional("COIFESP_LLM_PROVIDERS_JSON"),
                 source=source,
                 environment=environment,
+            ),
+            local_external_internal_provider_ids=provider_ids(
+                "COIFESP_LOCAL_EXTERNAL_INTERNAL_PROVIDERS"
             ),
             llm_max_failover_attempts=positive_integer(
                 "COIFESP_LLM_MAX_FAILOVER_ATTEMPTS",
@@ -346,6 +412,31 @@ class Settings:
             problems.append("COIFESP_AUTH_MODE must be builtin, oidc, or local")
         if self.environment is Environment.PRODUCTION and self.auth_mode != "oidc":
             problems.append("production requires COIFESP_AUTH_MODE=oidc")
+        if self.environment is Environment.PRODUCTION and self.local_worker_tenant_ids:
+            problems.append("COIFESP_LOCAL_WORKER_TENANTS is forbidden in production")
+        if self.local_external_internal_provider_ids:
+            if self.environment is Environment.PRODUCTION or self.auth_mode != "local":
+                problems.append(
+                    "COIFESP_LOCAL_EXTERNAL_INTERNAL_PROVIDERS is allowed only "
+                    "with non-production local authentication"
+                )
+            providers = {item.provider_id: item for item in self.llm_providers}
+            for provider_id in self.local_external_internal_provider_ids:
+                provider = providers.get(provider_id)
+                if provider is None:
+                    problems.append(
+                        "COIFESP_LOCAL_EXTERNAL_INTERNAL_PROVIDERS contains an "
+                        "unregistered provider"
+                    )
+                elif (
+                    not provider.external
+                    or provider.max_data_classification
+                    not in {"internal", "confidential", "restricted"}
+                ):
+                    problems.append(
+                        "locally authorized INTERNAL providers must be external "
+                        "and declare max_data_classification=internal or higher"
+                    )
         if self.artifact_max_upload_bytes > 2_147_483_648:
             problems.append("COIFESP_ARTIFACT_MAX_UPLOAD_BYTES must not exceed 2147483648")
         if self.environment is Environment.PRODUCTION:
@@ -486,17 +577,20 @@ class Settings:
                 problems.append("COIFESP_OIDC_MAX_TOKEN_AGE_SECONDS must be between 60 and 86400")
 
         if require_worker:
-            worker_required = {
-                "COIFESP_WORKER_TOKEN_ENDPOINT": self.worker_token_endpoint,
-                "COIFESP_WORKER_CLIENT_ID": self.worker_client_id,
-                "COIFESP_WORKER_CLIENT_SECRET": self.worker_client_secret,
-                "COIFESP_WORKER_TENANT_ID": self.worker_tenant_id,
-                "COIFESP_DIRECTORY_API_BASE_URL": self.directory_api_base_url,
-                "COIFESP_DIRECTORY_REALM": self.directory_realm,
-                "COIFESP_DIRECTORY_TOKEN_ENDPOINT": self.directory_token_endpoint,
-                "COIFESP_DIRECTORY_CLIENT_ID": self.directory_client_id,
-                "COIFESP_DIRECTORY_CLIENT_SECRET": self.directory_client_secret,
-            }
+            worker_required = (
+                {} if self.worker_tenant_ids else {"COIFESP_WORKER_TENANTS": None}
+            )
+            if self.auth_mode != "local":
+                worker_required.update({
+                    "COIFESP_WORKER_TOKEN_ENDPOINT": self.worker_token_endpoint,
+                    "COIFESP_WORKER_CLIENT_ID": self.worker_client_id,
+                    "COIFESP_WORKER_CLIENT_SECRET": self.worker_client_secret,
+                    "COIFESP_DIRECTORY_API_BASE_URL": self.directory_api_base_url,
+                    "COIFESP_DIRECTORY_REALM": self.directory_realm,
+                    "COIFESP_DIRECTORY_TOKEN_ENDPOINT": self.directory_token_endpoint,
+                    "COIFESP_DIRECTORY_CLIENT_ID": self.directory_client_id,
+                    "COIFESP_DIRECTORY_CLIENT_SECRET": self.directory_client_secret,
+                })
             problems.extend(
                 f"{name} is required by the durable worker"
                 for name, value in worker_required.items()
@@ -543,12 +637,15 @@ class Settings:
                 problems.append("COIFESP_WORKER_IDLE_POLL_SECONDS must be between 0.05 and 60")
 
         if require_tool_worker:
-            required = {
-                "COIFESP_TOOL_WORKER_TOKEN_ENDPOINT": self.tool_worker_token_endpoint,
-                "COIFESP_TOOL_WORKER_CLIENT_ID": self.tool_worker_client_id,
-                "COIFESP_TOOL_WORKER_CLIENT_SECRET": self.tool_worker_client_secret,
-                "COIFESP_TOOL_WORKER_TENANT_ID": self.tool_worker_tenant_id,
-            }
+            required = (
+                {} if self.tool_worker_tenant_ids else {"COIFESP_TOOL_WORKER_TENANTS": None}
+            )
+            if self.auth_mode != "local":
+                required.update({
+                    "COIFESP_TOOL_WORKER_TOKEN_ENDPOINT": self.tool_worker_token_endpoint,
+                    "COIFESP_TOOL_WORKER_CLIENT_ID": self.tool_worker_client_id,
+                    "COIFESP_TOOL_WORKER_CLIENT_SECRET": self.tool_worker_client_secret,
+                })
             problems.extend(
                 f"{name} is required by the durable Tool Worker"
                 for name, value in required.items()

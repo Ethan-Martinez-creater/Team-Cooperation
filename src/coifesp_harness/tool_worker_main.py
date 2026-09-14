@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,16 +14,20 @@ from .agent_runs import AgentCheckpointKeyring, SQLAlchemyAgentRunRepository
 from .auth import (
     ClientCredentialsConfig,
     ClientCredentialsTokenProvider,
+    LocalWorkerIdentityProvider,
     OIDCVerifier,
     OIDCWorkerIdentityProvider,
 )
 from .config import ConfigurationError, Environment, Settings
 from .connectors import (
-    ConnectorCatalog,
+    GITHUB_ADAPTER_PATHS,
+    GitHubTools,
     OfficeMessageTools,
-    SecureConnectorClient,
-    load_connector_endpoints,
+    ReviewedConnectorCatalog,
+    SQLAlchemyConnectorRegistry,
+    load_connector_endpoints_for_tenants,
 )
+from .connectors.runtime_client import build_connector_client
 from .control_plane.bootstrap import DatabaseReadinessProbe, load_environment_settings
 from .postgres_audit import AuditSigningKeyring, SQLAlchemyAuditLog
 from .sandbox import (
@@ -47,13 +52,15 @@ logger = logging.getLogger("coifesp.tool_worker")
 @dataclass(slots=True)
 class ToolWorkerRuntime:
     runner: DurableToolWorkerRunner
-    tokens: ClientCredentialsTokenProvider
-    verifier: OIDCVerifier
+    tokens: ClientCredentialsTokenProvider | None
+    verifier: OIDCVerifier | None
     engine: Engine
 
     async def aclose(self) -> None:
-        await self.tokens.aclose()
-        await self.verifier.aclose()
+        if self.tokens is not None:
+            await self.tokens.aclose()
+        if self.verifier is not None:
+            await self.verifier.aclose()
         self.engine.dispose()
 
 
@@ -72,10 +79,19 @@ async def build_tool_worker_runtime(
     )
     if not settings.database_url:
         raise ConfigurationError("COIFESP_DATABASE_URL is required by the Tool Worker")
-    assert settings.tool_worker_token_endpoint is not None
-    assert settings.tool_worker_client_id is not None
-    assert settings.tool_worker_client_secret is not None
-    assert settings.tool_worker_tenant_id is not None
+    tool_worker_tenant_ids = settings.tool_worker_tenant_ids or (
+        (settings.tool_worker_tenant_id,) if settings.tool_worker_tenant_id else ()
+    )
+    legacy_tool_worker_scope = (
+        not settings.tool_worker_tenant_ids and settings.tool_worker_tenant_id is not None
+    )
+    if not tool_worker_tenant_ids:
+        raise ConfigurationError("Tool Worker tenant scope is required")
+    local_mode = settings.auth_mode == "local"
+    if not local_mode:
+        assert settings.tool_worker_token_endpoint is not None
+        assert settings.tool_worker_client_id is not None
+        assert settings.tool_worker_client_secret is not None
     engine = create_engine(
         settings.database_url,
         pool_pre_ping=True,
@@ -85,7 +101,7 @@ async def build_tool_worker_runtime(
         pool_recycle=1800,
         hide_parameters=True,
     )
-    verifier = OIDCVerifier(settings=settings)
+    verifier = None if local_mode else OIDCVerifier(settings=settings)
     tokens: ClientCredentialsTokenProvider | None = None
     try:
         DatabaseReadinessProbe(engine)()
@@ -104,25 +120,71 @@ async def build_tool_worker_runtime(
         )
         coordinator = ToolBatchCoordinator(engine=engine, agent_runs=runs, tool_jobs=jobs)
         allow_http = settings.environment is not Environment.PRODUCTION
-        tokens = ClientCredentialsTokenProvider(
-            ClientCredentialsConfig(
-                token_endpoint=settings.tool_worker_token_endpoint,
-                client_id=settings.tool_worker_client_id,
-                client_secret=settings.tool_worker_client_secret,
-                allow_insecure_http=allow_http,
+        if local_mode:
+            identity = LocalWorkerIdentityProvider(required_role="tool_worker")
+        else:
+            tokens = ClientCredentialsTokenProvider(
+                ClientCredentialsConfig(
+                    token_endpoint=settings.tool_worker_token_endpoint,
+                    client_id=settings.tool_worker_client_id,
+                    client_secret=settings.tool_worker_client_secret,
+                    allow_insecure_http=allow_http,
+                )
             )
-        )
-        identity = OIDCWorkerIdentityProvider(
-            tokens=tokens,
-            verifier=verifier,
-            required_role="tool_worker",
-            expected_tenant_id=settings.tool_worker_tenant_id,
-        )
+            identity = OIDCWorkerIdentityProvider(
+                tokens=tokens,
+                verifier=verifier,
+                required_role="tool_worker",
+                expected_tenant_id=(
+                    settings.tool_worker_tenant_id
+                    if tool_worker_tenant_ids == (settings.tool_worker_tenant_id,)
+                    else None
+                ),
+            )
         effective_registry = registry
         workspace_manager = None
         reconciler = coordinator
+        if effective_registry is not None:
+            from .project_process.repository import SQLAlchemyProjectProcessRepository
+            from .team_agents.specialists import (
+                SpecialistDelegationService,
+                SpecialistDelegationTool,
+            )
+
+            # Preserve caller tools, but bind the built-in delegation handler
+            # to this runtime's repositories instead of a model placeholder.
+            supplied_registry = effective_registry
+            effective_registry = ToolRegistry()
+            for definition in supplied_registry.definitions():
+                if definition.name != "specialist.delegate":
+                    effective_registry.register(definition)
+            effective_registry.register(
+                SpecialistDelegationTool(
+                    SpecialistDelegationService(
+                        repository=SQLAlchemyProjectProcessRepository(engine),
+                        runs=runs,
+                        jobs=jobs,
+                    )
+                ).definition()
+            )
         if effective_registry is None:
             effective_registry = ToolRegistry()
+            from .project_process.repository import SQLAlchemyProjectProcessRepository
+            from .team_agents.specialists import (
+                SpecialistDelegationService,
+                SpecialistDelegationTool,
+            )
+
+            project_repository = SQLAlchemyProjectProcessRepository(engine)
+            effective_registry.register(
+                SpecialistDelegationTool(
+                    SpecialistDelegationService(
+                        repository=project_repository,
+                        runs=runs,
+                        jobs=jobs,
+                    )
+                ).definition()
+            )
             profiles = ()
             sandbox = None
             workspace_root = None
@@ -141,19 +203,59 @@ async def build_tool_worker_runtime(
                 ).definition())
                 workspace_manager = SandboxWorkspaceManager(root=workspace_root)
             if settings.connectors_json:
-                catalog = ConnectorCatalog()
-                for endpoint in load_connector_endpoints(
+                configured_endpoints = load_connector_endpoints_for_tenants(
                     settings.connectors_json,
-                    tenant_id=settings.tool_worker_tenant_id,
-                ):
-                    catalog.register(endpoint)
-                effective_registry.register(
-                    OfficeMessageTools(
-                        client=SecureConnectorClient(catalog=catalog),
-                        tenant_id=settings.tool_worker_tenant_id,
-                        classification=Classification[settings.office_data_classification.upper()],
-                    ).definition()
+                    tenant_ids=tool_worker_tenant_ids,
                 )
+                connector_tenants = frozenset(
+                    endpoint.tenant_id for endpoint in configured_endpoints
+                )
+                catalog = ReviewedConnectorCatalog(
+                    registry=SQLAlchemyConnectorRegistry(engine=engine, audit_log=audit),
+                    allowed_tenant_ids=connector_tenants,
+                    allowed_pairs=frozenset(
+                        (endpoint.tenant_id, endpoint.connector_id)
+                        for endpoint in configured_endpoints
+                    ),
+                    environment=os.environ,
+                )
+                connector_paths = frozenset(
+                    path
+                    for endpoint in configured_endpoints
+                    for path in endpoint.allowed_paths
+                )
+                github_tenants = frozenset(
+                    endpoint.tenant_id for endpoint in configured_endpoints
+                    if GITHUB_ADAPTER_PATHS.issubset(endpoint.allowed_paths)
+                )
+                connector_client = build_connector_client(
+                    catalog=catalog,
+                    runtime_environment=settings.environment,
+                    github_tenant_ids=github_tenants,
+                )
+                if "/v1/messages" in connector_paths:
+                    office_tenants = frozenset(
+                        endpoint.tenant_id for endpoint in configured_endpoints
+                        if "/v1/messages" in endpoint.allowed_paths
+                    )
+                    effective_registry.register(
+                        OfficeMessageTools(
+                            client=connector_client,
+                            allowed_tenant_ids=office_tenants,
+                            classification=Classification[
+                                settings.office_data_classification.upper()
+                            ],
+                        ).definition()
+                    )
+                github_connector_configured = bool(github_tenants)
+                if github_connector_configured:
+                    github_tools = GitHubTools(
+                        client=connector_client,
+                        allowed_tenant_ids=github_tenants,
+                        classification=Classification.INTERNAL,
+                    )
+                    for definition in github_tools.definitions():
+                        effective_registry.register(definition)
             content = None
             if settings.artifact_store_root:
                 from .artifacts.content import ArtifactContentService
@@ -163,15 +265,11 @@ async def build_tool_worker_runtime(
                     TaskArtifactPublicationService,
                     TaskArtifactPublicationTool,
                 )
-                from .project_process.repository import (
-                    SQLAlchemyProjectProcessRepository,
-                )
                 from .project_process.scheduler import (
                     ProjectProcessScheduler,
                     SQLAlchemyProjectProcessWakeupRepository,
                 )
 
-                project_repository = SQLAlchemyProjectProcessRepository(engine)
                 scheduler = ProjectProcessScheduler(SQLAlchemyProjectProcessWakeupRepository(engine))
 
                 def enqueue_project_event(connection, event):
@@ -194,12 +292,18 @@ async def build_tool_worker_runtime(
             manifests = build_builtin_manifests(
                 sandbox_profile_ids=(item.profile_id for item in profiles),
                 sandbox_timeout_seconds=max((item.limits.timeout_seconds for item in profiles), default=80) + 10,
-                office_connector_configured=bool(settings.connectors_json),
+                office_connector_configured="/v1/messages" in (
+                    connector_paths if settings.connectors_json else frozenset()
+                ),
+                github_connector_configured=(
+                    github_connector_configured if settings.connectors_json else False
+                ),
                 task_artifact_publication_configured=content is not None,
+                specialist_delegation_configured=True,
             )
             validate_registry_manifests(manifests, effective_registry, executor="tool_worker")
             # Internal verification is not part of the model-visible catalog.
-            if content is not None and sandbox is not None:
+            if (content is not None and sandbox is not None) or settings.connectors_json:
                 from .product.notifications import NotificationService
                 from .verification.agent_reviews import AgentReviewChecks
                 from .verification.sandbox_tool import SandboxedVerificationTool
@@ -209,10 +313,11 @@ async def build_tool_worker_runtime(
                     VerificationToolReconciler,
                 )
 
-                effective_registry.register(SandboxedVerificationTool(
-                    engine=engine, sandbox=sandbox, profiles=profiles,
-                    workspace_root=workspace_root, artifact_content=content,
-                ).definition())
+                if content is not None and sandbox is not None:
+                    effective_registry.register(SandboxedVerificationTool(
+                        engine=engine, sandbox=sandbox, profiles=profiles,
+                        workspace_root=workspace_root, artifact_content=content,
+                    ).definition())
                 verification = TaskVerificationService(
                     repository=project_repository,
                     artifact_content=content, notifier=NotificationService(engine),
@@ -231,7 +336,8 @@ async def build_tool_worker_runtime(
                 registry=effective_registry,
                 reconciler=reconciler,
                 identity_provider=identity,
-                tenant_id=settings.tool_worker_tenant_id,
+                tenant_id=(settings.tool_worker_tenant_id if legacy_tool_worker_scope else None),
+                allowed_tenant_ids=(None if legacy_tool_worker_scope else tool_worker_tenant_ids),
                 idle_poll_seconds=settings.tool_worker_idle_poll_seconds,
                 lease_seconds=settings.tool_worker_lease_seconds,
                 heartbeat_seconds=settings.tool_worker_heartbeat_seconds,
@@ -244,7 +350,8 @@ async def build_tool_worker_runtime(
     except Exception:
         if tokens is not None:
             await tokens.aclose()
-        await verifier.aclose()
+        if verifier is not None:
+            await verifier.aclose()
         engine.dispose()
         raise
 

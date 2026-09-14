@@ -646,6 +646,31 @@ class SQLAlchemyAgentRunRepository:
             run = self._load(connection, tenant_id, row["run_id"])
             return AgentRunLease(run, worker_id, token, expiry, checkpoint)
 
+    def claim_next_allowed(
+        self,
+        *,
+        allowed_tenant_ids: tuple[str, ...],
+        worker_id: str,
+        lease_seconds: int = 60,
+    ) -> AgentRunLease | None:
+        """Claim across a bounded tenant set using one RLS-scoped transaction per tenant."""
+        if (
+            not allowed_tenant_ids
+            or len(allowed_tenant_ids) > 64
+            or len(set(allowed_tenant_ids)) != len(allowed_tenant_ids)
+        ):
+            raise AgentRunPersistenceError("allowed tenant set is invalid")
+        for tenant_id in allowed_tenant_ids:
+            self._identifier("tenant_id", tenant_id)
+            lease = self.claim_next(
+                tenant_id=tenant_id,
+                worker_id=worker_id,
+                lease_seconds=lease_seconds,
+            )
+            if lease is not None:
+                return lease
+        return None
+
     def start(
         self,
         *,

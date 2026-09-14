@@ -9,13 +9,19 @@ from coifesp_harness.connectors import (
     ConnectorEndpoint,
     ConnectorError,
     ConnectorRequest,
-    SecureConnectorClient,
     OfficeMessageTools,
+    SecureConnectorClient,
     load_connector_endpoints,
+    load_connector_endpoints_for_tenants,
 )
 from coifesp_harness.errors import PolicyDenied
 from coifesp_harness.security import Classification
-from coifesp_harness.tool_jobs.worker import ToolExecutionContext, _CONTEXT
+from coifesp_harness.tool_catalog import (
+    office_message_manifest,
+    validate_registry_manifests,
+)
+from coifesp_harness.tool_jobs.worker import _CONTEXT, ToolExecutionContext
+from coifesp_harness.tools import ToolRegistry
 
 
 def endpoint(**overrides):
@@ -47,6 +53,29 @@ def request(**overrides):
     }
     values.update(overrides)
     return ConnectorRequest(**values)
+
+
+def test_multi_tenant_connector_loader_is_bounded_to_worker_pool(monkeypatch) -> None:
+    monkeypatch.setenv("COIFESP_CONNECTOR_TEST_CLIENT_SECRET", "s" * 32)
+    base = {
+        "connector_id": "office-main", "base_url": "https://api.office.test",
+        "token_endpoint": "https://identity.office.test/oauth/token",
+        "client_id": "office-client",
+        "client_secret_env": "COIFESP_CONNECTOR_TEST_CLIENT_SECRET",
+        "scopes": ["message.send"], "allowed_paths": ["/v1/messages"],
+        "max_classification": "internal", "timeout_seconds": 15,
+        "max_response_bytes": 1048576, "max_attempts": 3,
+        "circuit_failure_threshold": 5, "circuit_cooldown_seconds": 30,
+    }
+    document = [{**base, "tenant_id": tenant} for tenant in ("team-a", "team-b")]
+    loaded = load_connector_endpoints_for_tenants(
+        json.dumps(document), tenant_ids=("team-a", "team-b")
+    )
+    assert {item.tenant_id for item in loaded} == {"team-a", "team-b"}
+    with pytest.raises(ValueError, match="outside"):
+        load_connector_endpoints_for_tenants(
+            json.dumps(document), tenant_ids=("team-a",)
+        )
 
 
 class Factory:
@@ -244,3 +273,14 @@ def test_connector_registry_references_secrets_and_is_single_tenant() -> None:
         )
     with pytest.raises(ValueError, match="secret"):
         load_connector_endpoints(json.dumps([value]), tenant_id="team-a", environment={})
+
+
+def test_office_worker_definition_matches_agent_catalog_manifest() -> None:
+    tool = OfficeMessageTools(
+        client=object(), tenant_id="team-a", classification=Classification.INTERNAL
+    ).definition()
+    registry = ToolRegistry()
+    registry.register(tool)
+
+    validate_registry_manifests([office_message_manifest()], registry, executor="tool_worker")
+    assert tool.parameters_schema == office_message_manifest().parameters_schema

@@ -4,7 +4,11 @@ import re
 from typing import Any
 
 from ..security import Classification, RiskLevel
-from ..tool_jobs import PermanentToolError, RetryableToolError, current_tool_execution_context
+from ..tool_jobs import (
+    PermanentToolError,
+    RetryableToolError,
+    current_tool_execution_context,
+)
 from ..tools import (
     ApprovalReviewField,
     ApprovalReviewPolicy,
@@ -22,11 +26,19 @@ class OfficeMessageTools:
         self,
         *,
         client: SecureConnectorClient,
-        tenant_id: str,
+        tenant_id: str | None = None,
+        allowed_tenant_ids: frozenset[str] | None = None,
         classification: Classification,
     ) -> None:
         self.client = client
+        if allowed_tenant_ids is None:
+            allowed_tenant_ids = frozenset({tenant_id}) if tenant_id else frozenset()
+        elif tenant_id is not None and allowed_tenant_ids != frozenset({tenant_id}):
+            raise ValueError("Office tool tenant scope conflicts")
+        if not allowed_tenant_ids:
+            raise ValueError("Office tool tenant scope is required")
         self.tenant_id = tenant_id
+        self.allowed_tenant_ids = allowed_tenant_ids
         self.classification = classification
 
     def definition(self) -> ToolDefinition:
@@ -64,11 +76,13 @@ class OfficeMessageTools:
 
     async def send_message(self, arguments: dict[str, Any]) -> dict[str, Any]:
         context = current_tool_execution_context()
+        if context.tenant_id not in self.allowed_tenant_ids:
+            raise PermanentToolError("office_tenant_mismatch")
         try:
             response = await self.client.execute(
                 ConnectorRequest(
                     connector_id=arguments["connector_id"],
-                    tenant_id=self.tenant_id,
+                    tenant_id=context.tenant_id,
                     path="/v1/messages",
                     body={"target": arguments["target"], "text": arguments["text"]},
                     idempotency_key=context.idempotency_key,

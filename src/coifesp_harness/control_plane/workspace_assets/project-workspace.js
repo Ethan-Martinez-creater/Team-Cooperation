@@ -606,7 +606,8 @@
       : `<p class="muted small">Agent 尚未生成计划草案；在对话中描述项目目标即可。</p>`;
     const resourceCards = (resources || []).map((resource) => {
       const canShare = resource.owner_team_id === ownTeam && resource.propagation === "team_private";
-      return `<article class="card resource-summary-card"><div class="card-head"><div><strong>${esc(resource.title || "未命名资料")}</strong><div class="meta"><span class="pill ${resource.propagation === "team_private" ? "orange" : "green"}">${propagationLabel[resource.propagation] || "项目可见"}</span></div></div></div>${canShare ? `<button class="secondary" data-ws-share-resource="${esc(resource.resource_id)}">共享到项目</button>` : ""}</article>`;
+      const canDownload = resource.owner_team_id === ownTeam || resource.propagation === "portable";
+      return `<article class="card resource-summary-card"><div class="card-head"><div><strong>${esc(resource.title || "未命名资料")}</strong><div class="meta"><span class="pill ${resource.propagation === "team_private" ? "orange" : "green"}">${propagationLabel[resource.propagation] || "项目可见"}</span></div></div></div>${canDownload ? `<button class="secondary" data-ws-download-resource="${esc(resource.resource_id)}" data-resource-title="${esc(resource.title || "项目资料")}">下载资料</button>` : ""}${canShare ? `<button class="secondary" data-ws-share-resource="${esc(resource.resource_id)}">共享到项目</button>` : ""}</article>`;
     }).join("");
     const blockerSummary = blockers.length
       ? `<div class="overview-blockers"><strong>当前阻塞</strong>${blockers.map((item) => `<p class="muted small">${esc(firstValue(item, ["label", "summary", "reason"], item))}</p>`).join("")}</div>`
@@ -730,7 +731,11 @@
     for (const x of exchanges || []) {
       const inbound = x.source_team_id !== ownTeam;
       let receive = null;
+      let responses = [];
       let actions = "";
+      try {
+        responses = await W.api(`/v1/projects/${encodeURIComponent(projectId)}/agent-exchanges/${encodeURIComponent(x.exchange_id)}/responses`);
+      } catch (e) {}
       if (inbound) {
         try {
           const recipients = await W.api(`/v1/projects/${encodeURIComponent(projectId)}/agent-exchanges/${encodeURIComponent(x.exchange_id)}/recipients`);
@@ -750,9 +755,15 @@
           }
         }
       }
+      const responseCards = (responses || []).map((response) => `
+        <div class="draft-box exchange-response">
+          <p class="muted small">${inbound ? "本团队已确认的回复" : `来自 ${esc(response.recipient_team_id)} 的回复`}</p>
+          <p>${esc(response.content)}</p>
+        </div>`).join("");
       exchangeRows.push(`<article class="card">
         <div class="card-head"><div><strong>${esc(x.purpose)}</strong><div class="meta"><span class="pill ${inbound ? "orange" : "green"}">${inbound ? "收到的请求" : "已发出"}</span><span>${esc(x.source_team_id)}</span><span>${stateName(x.status)}</span></div></div></div>
         <p class="muted">${esc(x.summary)}</p>
+        ${responseCards}
         ${actions}
       </article>`);
     }
@@ -764,6 +775,9 @@
       (exchangeRows.join("") || `<p class="muted small">还没有已发送的跨团队 Agent 共享。草稿经你确认后才会发送给对方团队 Agent。</p>`);
   }
   function bindPaneActions(pane, tab) {
+    pane.querySelectorAll("[data-ws-download-resource]").forEach((button) =>
+      button.addEventListener("click", () => downloadResource(button.dataset.wsDownloadResource, button.dataset.resourceTitle))
+    );
     pane.querySelectorAll("[data-ws-upload]").forEach((b) => b.addEventListener("click", uploadAttachment));
     pane.querySelectorAll("[data-ws-share-resource]").forEach((b) =>
       b.addEventListener("click", () => shareResource(b.dataset.wsShareResource))
@@ -793,6 +807,29 @@
     pane.querySelectorAll("[data-ws-reject-plan]").forEach((b) =>
       b.addEventListener("click", () => decidePlan(b.dataset.wsRejectPlan, "reject"))
     );
+  }
+
+  async function downloadResource(resourceId, title) {
+    if (!active) return;
+    const projectId = active.projectId, generation = active.generation;
+    try {
+      const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}/resources/${encodeURIComponent(resourceId)}/content`, {
+        headers: { Authorization: `Bearer ${W.token}` }, cache: "no-store",
+      });
+      if (!response.ok) throw Error("资料不可下载或访问权限已改变");
+      const blob = await response.blob();
+      if (!ownActive(projectId, generation)) return;
+      const url = URL.createObjectURL(blob), link = document.createElement("a");
+      link.href = url;
+      link.download = String(title || "项目资料").replace(/[\\/:*?"<>|]/g, "_") +
+        (response.headers.get("content-type")?.includes("application/json") ? ".json" : "");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      if (ownActive(projectId, generation)) toast(error.message, true);
+    }
   }
 
   function uploadAttachment() {

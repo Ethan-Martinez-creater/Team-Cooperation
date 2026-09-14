@@ -30,7 +30,7 @@ _RESOURCE_KEYS = frozenset({"resource_id", "required", "mode"})
 _OUTPUT_ARTIFACT_KEYS = frozenset({"artifact_types", "required", "max_count"})
 _OUTPUT_SCHEMA_KEYS = frozenset({"schema", "required_fields"})
 _OUTPUT_KEYS = _OUTPUT_ARTIFACT_KEYS | _OUTPUT_SCHEMA_KEYS
-_CRITERION_KEYS = frozenset({"criterion_id", "type", "required", "tool"})
+_CRITERION_KEYS = frozenset({"criterion_id", "type", "required", "tool", "github"})
 _VERIFICATION_KEYS = frozenset({"criteria"})
 
 _RESOURCE_MODES = frozenset({"team_private", "project_readonly", "portable"})
@@ -216,6 +216,28 @@ def _verification_policy(value: object) -> dict[str, Any]:
             raise ValueError("agent_review criteria do not accept tool")
         elif criterion_type == "human_review" and "tool" in criterion:
             raise ValueError("human_review criteria do not accept tool")
+        if criterion_type == "tool_check" and normalized_criterion.get("tool") == "github.get_commit_checks":
+            github = criterion.get("github")
+            if type(github) is not dict or set(github) != {
+                "connector_id", "repository", "commit_sha", "required_checks",
+            }:
+                raise ValueError("GitHub verification requires an explicit subject and checks")
+            patterns = {
+                "connector_id": r"[a-z0-9][a-z0-9_.-]{0,63}",
+                "repository": r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}",
+                "commit_sha": r"[0-9a-f]{40}",
+            }
+            for key, pattern in patterns.items():
+                if type(github[key]) is not str or re.fullmatch(pattern, github[key]) is None:
+                    raise ValueError("GitHub verification subject is invalid")
+            names = github["required_checks"]
+            if (type(names) is not list or not 1 <= len(names) <= 100
+                    or any(type(name) is not str or not name.strip() or len(name) > 256 for name in names)
+                    or len(set(names)) != len(names)):
+                raise ValueError("GitHub verification required checks are invalid")
+            normalized_criterion["github"] = {**github, "required_checks": list(names)}
+        elif "github" in criterion:
+            raise ValueError("GitHub subject only applies to github.get_commit_checks")
         criteria.append(normalized_criterion)
 
     return {"criteria": criteria}

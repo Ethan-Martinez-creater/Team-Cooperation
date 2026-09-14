@@ -253,6 +253,7 @@ class TaskVerificationService:
                         verification_id=verification_id, subject_digest=subject_digest,
                         run_id=run_id, tenant_id=task["target_team_id"],
                         retry_tools=retry_tools,
+                        policy=policy,
                     )
                 if self.review_checks is not None:
                     outcome = self.review_checks.evaluate(
@@ -260,6 +261,12 @@ class TaskVerificationService:
                         subject_digest=subject_digest, binding=binding, task=task,
                         artifacts=artifacts, retry_reviews=retry_reviews,
                     )
+                from .evidence_artifacts import publish_github_evidence
+
+                outcome = publish_github_evidence(
+                    connection=connection, content=self.artifact_content, outcome=outcome,
+                    binding=binding, verification_id=verification_id, subject_digest=subject_digest,
+                )
                 outcome = self.human_checks.evaluate(
                     connection=connection, outcome=outcome, verification_id=verification_id,
                     subject_digest=subject_digest, binding=binding, task=task,

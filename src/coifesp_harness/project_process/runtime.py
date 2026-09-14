@@ -22,7 +22,8 @@ from .worker_loop import ProjectOrchestratorLoop
 def build_project_orchestrator_worker(*, repository, scheduler, agent_run_service,
                                      capability_repository, artifact_content,
                                      snapshot_loader_factory, runtime_resolver=None,
-                                     worker_id=None, idle_poll_seconds=1.0):
+                                     worker_id=None, idle_poll_seconds=1.0,
+                                     model_route_policy=None):
     """Construction only: no schema creation, new credentials, or background start.
 
     The caller owns migrations and the repository's transactional event/wakeup
@@ -32,15 +33,29 @@ def build_project_orchestrator_worker(*, repository, scheduler, agent_run_servic
     graph = SQLAlchemyWorkGraphRepository(repository.engine)
     capabilities = ProjectCapabilityAdapter(capability_repository)
     facts = PersistentTaskDispatchFactLoader(engine=repository.engine, artifact_content=artifact_content)
-    tools = ()
+    from ..runtime import AuthorizedTool
+    from ..team_agents.specialists import specialist_delegation_manifest
+    from ..tool_catalog import project_context_manifests
+
+    manifests = (*project_context_manifests(), specialist_delegation_manifest())
+    tools = tuple(
+        AuthorizedTool(manifest.tool_id, manifest.version, manifest.schema_digest)
+        for manifest in manifests
+    )
     if artifact_content is not None:
         from ..artifacts.task_publication import task_artifact_manifest
-        from ..runtime import AuthorizedTool
 
         manifest = task_artifact_manifest()
-        tools = (AuthorizedTool(manifest.tool_id, manifest.version, manifest.schema_digest),)
+        tools += (AuthorizedTool(manifest.tool_id, manifest.version, manifest.schema_digest),)
     resolver = runtime_resolver or TeamAgentCapabilityResolver(
-        engine=repository.engine, tool_policies={"default": tools})
+        engine=repository.engine,
+        tool_policies={"default": tools},
+        model_policies=(
+            {"default": model_route_policy}
+            if model_route_policy is not None
+            else None
+        ),
+    )
     dispatcher = TeamAgentDispatcher(repository=repository, work_graph_repository=graph,
         capability_adapter=capabilities, runtime_resolver=resolver,
         run_service=agent_run_service, fact_loader=facts, artifact_content=artifact_content)
@@ -59,7 +74,10 @@ def build_project_orchestrator_worker(*, repository, scheduler, agent_run_servic
         snapshot_loader=snapshot_loader,
         command_consumer=PlannerCommandConsumer(repository=repository, work_graph_repository=graph),
         intent_launcher=ProjectPlannerRunLauncher(
-            intent_service=ProjectPlannerIntentService(repository),
+            intent_service=ProjectPlannerIntentService(
+                repository,
+                model_route_policy=model_route_policy,
+            ),
             work_graph_repository=graph,
             run_service=agent_run_service,
             budget_service=ProjectExecutionBudgetService(repository),

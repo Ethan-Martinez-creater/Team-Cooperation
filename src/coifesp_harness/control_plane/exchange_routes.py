@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import secrets
 import uuid
 
@@ -27,6 +28,13 @@ from .exchange_models import (
     AgentExchangeView,
     ExchangeGenerateResult,
 )
+
+LOGGER = logging.getLogger(__name__)
+
+
+def _exchange_reply_trigger_idempotency_key(exchange_id: str, team_id: str) -> str:
+    """Return a per-attempt key so a failed draft turn remains retryable."""
+    return f"exchange-reply:{exchange_id}:{team_id}:{uuid.uuid4().hex}"
 
 
 def build_exchange_router(*, authenticator: BearerAuthenticator) -> APIRouter:
@@ -275,7 +283,9 @@ def build_exchange_router(*, authenticator: BearerAuthenticator) -> APIRouter:
             conversation_id=conversation.conversation_id,
             actor_id=actor.principal_id,
             content="（收到跨团队 Agent 共享请求，请本团队 Agent 起草回复草案）",
-            idempotency_key=f"exchange-reply-trigger:{exchange_id}:{actor.tenant_id}",
+            idempotency_key=_exchange_reply_trigger_idempotency_key(
+                exchange_id, actor.tenant_id
+            ),
             trigger_kind=TurnTriggerKind.EXCHANGE,
             message_kind=ConversationMessageKind.SYSTEM,
         )
@@ -289,7 +299,18 @@ def build_exchange_router(*, authenticator: BearerAuthenticator) -> APIRouter:
                 turn_id=turn.turn_id,
                 actor_id=actor.principal_id,
             )
-        except Exception:
+        except Exception as exc:
+            LOGGER.warning(
+                "manual recipient Agent reply draft launch failed",
+                extra={
+                    "project_id": project_id,
+                    "exchange_id": exchange_id,
+                    "recipient_team_id": actor.tenant_id,
+                    "turn_id": turn.turn_id,
+                    "error_type": type(exc).__name__,
+                },
+                exc_info=True,
+            )
             await run_in_threadpool(
                 workspace.fail_turn,
                 conversation_id=conversation.conversation_id,
@@ -461,7 +482,9 @@ async def launch_recipient_draft_turns(
                 conversation_id=conversation.conversation_id,
                 actor_id=conversation.account_id,
                 content="（收到跨团队 Agent 共享请求，请本团队 Agent 起草回复草案）",
-                idempotency_key=f"exchange-reply:{exchange_id}:{recipient.recipient_team_id}:{uuid.uuid4().hex}",
+                idempotency_key=_exchange_reply_trigger_idempotency_key(
+                    exchange_id, recipient.recipient_team_id
+                ),
                 trigger_kind=TurnTriggerKind.EXCHANGE,
                 message_kind=ConversationMessageKind.SYSTEM,
             )
@@ -474,7 +497,17 @@ async def launch_recipient_draft_turns(
                 turn_id=turn.turn_id,
                 actor_id=conversation.account_id,
             )
-        except Exception:  # noqa: BLE001
+        except Exception as exc:
+            LOGGER.warning(
+                "recipient Agent reply draft launch failed",
+                extra={
+                    "project_id": project_id,
+                    "exchange_id": exchange_id,
+                    "recipient_team_id": recipient.recipient_team_id,
+                    "error_type": type(exc).__name__,
+                },
+                exc_info=True,
+            )
             # A turn already written must be terminated, otherwise the
             # recipient's conversation locks on an active turn that will never
             # run. The recipient can still trigger the drafting from the UI.

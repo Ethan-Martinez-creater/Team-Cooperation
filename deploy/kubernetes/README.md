@@ -39,9 +39,21 @@ non-`BYPASSRLS` roles. The application readiness check also requires the exact
 Alembic revision and forced RLS/audit triggers expected by the checked-out code.
 Do not run migrations in these Deployments.
 
-The sample uses legacy single-key variables for clarity. For key rotation, put
-the keyring JSON metadata in a Secret too, because it contains Secret environment
-variable names; never place key material in a ConfigMap.
+The sample configures both Worker deployments as bounded multi-tenant shared
+pools through `COIFESP_WORKER_TENANTS` and `COIFESP_TOOL_WORKER_TENANTS`. Replace
+the comma-separated examples with the exact authorized tenant set. Keep both
+sets equal unless a reviewed deployment topology intentionally prevents some
+tenants from using tools. Do not add the legacy singular variables alongside
+the plural variables: `COIFESP_WORKER_TENANT_ID` and
+`COIFESP_TOOL_WORKER_TENANT_ID` remain runtime compatibility inputs only for
+existing single-tenant installations.
+
+The OAuth clients identify platform Worker services, not a permanent tenant.
+Each durable Run or Job carries the authoritative tenant, and a Worker may claim
+it only when that tenant is in its configured pool allowlist. Horizontal
+replicas consume the same pool; do not create one Deployment per account. For
+key rotation, put the keyring JSON metadata in a Secret too, because it contains
+Secret environment variable names; never place key material in a ConfigMap.
 
 Replace all identity/model URLs and client/tenant IDs in the ConfigMaps. In
 production those URLs must be HTTPS. Keep Agent Worker, Tool Worker, and directory
@@ -94,7 +106,7 @@ lease. The optional KEDA objects permit bounded scale-out only and explicitly
 disable scale-down. Their Prometheus metrics must be produced from a
 transactionally consistent query with all of these properties:
 
-- tenant-scoped and authorized for the exact Worker deployment;
+- aggregated only across the exact tenant allowlist of the Worker deployment;
 - counts only rows claimable **now**, including retry/backoff eligibility;
 - excludes active non-expired leases, running work, approvals, dependencies,
   cancelled and terminal rows;
@@ -104,6 +116,9 @@ transactionally consistent query with all of these properties:
 Manual scale-down is a drain operation: stop new claims for the chosen replicas,
 wait for active work to checkpoint/finish, verify no lease owner matches them,
 then reduce replicas. Scaling up is safe because claims use database fencing.
+The optional KEDA example uses a tenant-label regular expression and `sum` to
+represent total claimable backlog for the shared pool. Its tenant set must be
+updated whenever the corresponding ConfigMap allowlist changes.
 
 ## Validation and rollout
 

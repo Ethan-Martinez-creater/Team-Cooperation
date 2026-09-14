@@ -1,5 +1,6 @@
 # Optional: not included by either Kustomization. Install KEDA and provide the
-# transactionally computed, tenant-filtered claimable metrics before applying.
+# transactionally computed, shared-pool claimable metrics before applying. Keep
+# each tenant regex identical to the corresponding Worker ConfigMap allowlist.
 apiVersion: keda.sh/v1alpha1
 kind: TriggerAuthentication
 metadata:
@@ -39,7 +40,7 @@ spec:
       metricType: Value
       metadata:
         serverAddress: https://metrics-gateway.invalid
-        query: max(coifesp_agent_runs_claimable{tenant_id="replace-me-tenant"})
+        query: sum(coifesp_agent_runs_claimable{tenant_id=~"replace-me-tenant-a|replace-me-tenant-b"})
         threshold: "2"
         authModes: bearer
       authenticationRef:
@@ -73,9 +74,8 @@ spec:
       metricType: Value
       metadata:
         serverAddress: https://metrics-gateway.invalid
-        query: max(coifesp_tool_jobs_claimable{tenant_id="replace-me-tenant"})
+        query: sum(coifesp_tool_jobs_claimable{tenant_id=~"replace-me-tenant-a|replace-me-tenant-b"})
         threshold: "2"
         authModes: bearer
       authenticationRef:
         name: coifesp-keda-metrics
-
