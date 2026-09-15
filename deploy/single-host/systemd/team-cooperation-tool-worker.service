@@ -10,6 +10,7 @@ Group=teamcoop
 WorkingDirectory=/opt/team-cooperation/current
 EnvironmentFile=/opt/team-cooperation/config/app.env
 Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/opt/team-cooperation/current/src
 Environment=HOME=/opt/team-cooperation/home
 RuntimeDirectory=team-cooperation-tool
 RuntimeDirectoryMode=0700

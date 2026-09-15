@@ -43,6 +43,7 @@ def test_systemd_units_are_dedicated_and_hardened() -> None:
         assert "NoNewPrivileges=true" in text
         assert "ProtectSystem=strict" in text
         assert "WorkingDirectory=/opt/team-cooperation/current" in text
+        assert "Environment=PYTHONPATH=/opt/team-cooperation/current/src" in text
         assert "/opt/coifesp" not in text
         assert "8000" not in text and "8010" not in text and "5432" not in text
 

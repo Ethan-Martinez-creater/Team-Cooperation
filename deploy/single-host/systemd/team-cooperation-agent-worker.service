@@ -10,6 +10,7 @@ Group=teamcoop
 WorkingDirectory=/opt/team-cooperation/current
 EnvironmentFile=/opt/team-cooperation/config/app.env
 Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/opt/team-cooperation/current/src
 ExecStart=/opt/team-cooperation/venv/bin/python -m coifesp_harness.worker_main
 Restart=on-failure
 RestartSec=5
