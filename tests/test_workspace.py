@@ -214,7 +214,9 @@ def test_workspace_oidc_callback_recovers_across_browser_contexts():
     assert 'prompt:"login"' in script.text
     assert 'localStorage.removeItem(OIDC_TRANSACTION_KEY)' in script.text
     assert 'sessionStorage.setItem("access_token",state.token)' in script.text
+    assert 'sessionStorage.setItem("refresh_token",tokens.refresh_token)' in script.text
     assert 'localStorage.setItem("access_token"' not in script.text
+    assert 'localStorage.setItem("refresh_token"' not in script.text
     # Every failed callback removes the one-use query and restores a working
     # login action instead of leaving a dead authorization-code URL.
     assert 'history.replaceState({},"","/app/")' in script.text

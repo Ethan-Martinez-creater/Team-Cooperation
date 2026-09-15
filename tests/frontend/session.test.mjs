@@ -114,6 +114,41 @@ ok(S.validateIdToken(jwt(goodClaims), "https://idp.example.test", "coifesp-contr
 ok(S.hasSameSubject(jwt({ ...goodClaims, sub: "team-a-user" }), jwt({ ...goodClaims, sub: "team-a-user" })) === true, "silent renewal preserves the current tab identity");
 ok(S.hasSameSubject(jwt({ ...goodClaims, sub: "team-a-user" }), jwt({ ...goodClaims, sub: "team-b-user" })) === false, "silent renewal rejects an SSO identity switch");
 
+// --- refresh-token renewal remains bound to the identity in each tab ---
+{
+  const current = jwt({ ...goodClaims, sub: "team-a-user" });
+  const renewedId = jwt({ ...goodClaims, sub: "team-a-user" });
+  const storage = memoryStorage({ refresh_token: "refresh-a" });
+  let requestBody = "";
+  const S2 = loadSession({
+    fetch: (_url, options) => {
+      requestBody = options.body.toString();
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          access_token: jwt({ ...goodClaims, sub: "team-a-user" }),
+          id_token: renewedId,
+          refresh_token: "refresh-a-rotated",
+          expires_in: 300,
+        }),
+      });
+    },
+  });
+  const result = await S2.defaultRenew({
+    authMode: "oidc",
+    oidcConfig: {
+      issuer: "https://idp.example.test",
+      audience: "coifesp-control-plane",
+      client_id: "workspace-ui",
+    },
+    currentToken: current,
+    storage,
+  });
+  assert.ok(requestBody.includes("grant_type=refresh_token"), "OIDC renewal uses the tab refresh token");
+  assert.equal(storage.getItem("refresh_token"), "refresh-a-rotated", "rotated refresh token stays in the same tab");
+  assert.equal(result.access_token.split(".").length, 3, "renewal returns the new access token");
+}
+
 // --- route persistence ---
 {
   const storage = memoryStorage();

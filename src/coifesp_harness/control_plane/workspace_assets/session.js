@@ -12,6 +12,7 @@
   var SILENT_STATE_KEY = "silent_state";
   var PKCE_VERIFIER_KEY = "pkce_verifier";
   var ID_TOKEN_KEY = "id_token";
+  var REFRESH_TOKEN_KEY = "refresh_token";
   var RENEW_BEFORE_MS = 60000;
   var SILENT_TIMEOUT_MS = 20000;
 
@@ -146,7 +147,7 @@
       if (!renewer) { return Promise.reject(new Error("会话续期不可用")); }
       renewPromise = Promise.resolve()
         .then(function () {
-          return renewer({ authMode: authMode, oidcConfig: oidcConfig, currentToken: token });
+          return renewer({ authMode: authMode, oidcConfig: oidcConfig, currentToken: token, storage: storage });
         })
         .then(function (result) {
           token = result.access_token;
@@ -283,6 +284,8 @@
     var oidcConfig = options.oidcConfig;
     if (!oidcConfig || !oidcConfig.issuer) return Promise.reject(new Error("OIDC 未配置"));
     var storage = options.storage || global.sessionStorage;
+    var refreshToken = storage.getItem(REFRESH_TOKEN_KEY);
+    if (refreshToken) return refreshOidcToken(refreshToken, oidcConfig, storage, options.currentToken);
     var state = randomB64(18);
     var verifier = randomB64(32);
     try {
@@ -342,6 +345,42 @@
     });
   }
 
+  function refreshOidcToken(refreshToken, oidcConfig, storage, currentToken) {
+    var body = new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: oidcConfig.client_id,
+      refresh_token: refreshToken,
+    });
+    return fetch(
+      oidcConfig.issuer.replace(/\/+$/, "") + "/protocol/openid-connect/token",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body,
+      }
+    ).then(function (response) {
+      if (!response.ok) throw new Error("身份服务拒绝了会话续期");
+      return response.json();
+    }).then(function (tokens) {
+      return acceptRenewedTokens(tokens, oidcConfig, storage, currentToken);
+    });
+  }
+
+  function acceptRenewedTokens(tokens, oidcConfig, storage, currentToken) {
+    var idToken = tokens.id_token || null;
+    var validation = validateIdToken(idToken, oidcConfig.issuer, oidcConfig.audience, Date.now());
+    if (!validation.ok) throw new Error("续期令牌校验失败：" + validation.reason);
+    if (!hasSameSubject(currentToken, idToken)) throw new Error("续期身份与当前标签不一致");
+    try {
+      storage.setItem(ID_TOKEN_KEY, idToken);
+      if (tokens.refresh_token) storage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
+    } catch (error) {}
+    return {
+      access_token: tokens.access_token,
+      expires_at: Date.now() + (Number(tokens.expires_in) || 300) * 1000,
+    };
+  }
+
   function exchangeToken(code, oidcConfig, storage, currentToken) {
     var body = new URLSearchParams({
       grant_type: "authorization_code",
@@ -361,15 +400,7 @@
       if (!response.ok) throw new Error("身份服务拒绝了续期交换");
       return response.json();
     }).then(function (tokens) {
-      var idToken = tokens.id_token || null;
-      var validation = validateIdToken(idToken, oidcConfig.issuer, oidcConfig.audience, Date.now());
-      if (idToken && !validation.ok) throw new Error("续期令牌校验失败：" + validation.reason);
-      if (!hasSameSubject(currentToken, idToken)) throw new Error("续期身份与当前标签不一致");
-      try { storage.setItem(ID_TOKEN_KEY, idToken); } catch (error) {}
-      return {
-        access_token: tokens.access_token,
-        expires_at: Date.now() + (Number(tokens.expires_in) || 300) * 1000,
-      };
+      return acceptRenewedTokens(tokens, oidcConfig, storage, currentToken);
     });
   }
 
