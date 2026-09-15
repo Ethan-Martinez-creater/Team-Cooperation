@@ -291,7 +291,7 @@
       authUrl.search = new URLSearchParams({
         client_id: oidcConfig.client_id,
         response_type: "code",
-        scope: "openid profile email",
+        scope: "openid",
         redirect_uri: callbackUrl,
         code_challenge: challenge,
         code_challenge_method: "S256",

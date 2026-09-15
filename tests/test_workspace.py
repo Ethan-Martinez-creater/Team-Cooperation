@@ -279,6 +279,10 @@ def test_workspace_assets_expose_session_renewal_logout_and_route_recovery():
     assert "saveRoute" in script.text
     assert "fallbackLogout" in script.text
     assert "coifesp_login_hint" in script.text
+    assert 'scope:"openid"' in script.text
+    assert "openid profile email" not in script.text
+    assert 'scope: "openid"' in session.text
+    assert "openid profile email" not in session.text
     assert "Last-Event-ID" in script.text
     assert "eventCursors" in script.text
     # Broadcast messages carry only event metadata, never tokens.
