@@ -110,6 +110,7 @@ def build_workspace_router() -> APIRouter:
             return JSONResponse(
                 {
                     "auth_mode": "oidc",
+                    "product_workspace_enabled": workspace_enabled,
                     "issuer": settings.oidc_issuer.rstrip("/"),
                     "client_id": client_id,
                     "audience": settings.oidc_audience,
@@ -118,9 +119,9 @@ def build_workspace_router() -> APIRouter:
                     "post_logout_redirect_uri": redirect_uri,
                 }
             )
-        return JSONResponse(
-            await session_service.oidc_session_config(redirect_uri=redirect_uri)
-        )
+        oidc_config = await session_service.oidc_session_config(redirect_uri=redirect_uri)
+        oidc_config["product_workspace_enabled"] = workspace_enabled
+        return JSONResponse(oidc_config)
 
     @router.post("/app/local-session", include_in_schema=False)
     async def local_session(body: LocalLoginBody, request: Request) -> JSONResponse:

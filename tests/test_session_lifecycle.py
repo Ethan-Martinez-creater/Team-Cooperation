@@ -326,5 +326,6 @@ def test_workspace_config_returns_end_session_endpoint_when_wired():
     response = asyncio.run(call(app, "GET", "/app/config"))
     assert response.status_code == 200
     body = response.json()
+    assert body["product_workspace_enabled"] is False
     assert body["end_session_endpoint"] == f"{ISSUER}/protocol/openid-connect/logout"
     assert "secret" not in response.text.lower()

@@ -188,6 +188,7 @@ def test_workspace_exposes_only_public_oidc_configuration():
     assert response.status_code == 200
     assert response.json() == {
         "auth_mode": "oidc",
+        "product_workspace_enabled": False,
         "issuer": "https://identity.example.test/realms/coifesp",
         "client_id": "coifesp-local-ui",
         "audience": "coifesp-control-plane",
@@ -215,6 +216,8 @@ def test_workspace_oidc_callback_recovers_across_browser_contexts():
     assert 'localStorage.removeItem(OIDC_TRANSACTION_KEY)' in script.text
     assert 'sessionStorage.setItem("access_token",state.token)' in script.text
     assert 'sessionStorage.setItem("refresh_token",tokens.refresh_token)' in script.text
+    assert "await state.sessionCoordinator.renewNow()" in script.text
+    assert "state.token=state.sessionCoordinator.getToken()" in script.text
     assert 'localStorage.setItem("access_token"' not in script.text
     assert 'localStorage.setItem("refresh_token"' not in script.text
     # Every failed callback removes the one-use query and restores a working
