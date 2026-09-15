@@ -157,3 +157,12 @@ def test_prepared_realm_contains_bounded_service_accounts() -> None:
     assert set(demo_users) == {"team-a-demo", "team-b-demo", "team-c-demo"}
     assert all(user["firstName"] for user in demo_users.values())
     assert all(user["lastName"] == "Demo" for user in demo_users.values())
+    scopes = {scope["name"]: scope for scope in realm["clientScopes"]}
+    assert scopes["basic"]["protocol"] == "openid-connect"
+    assert any(
+        mapper["protocolMapper"] == "oidc-sub-mapper"
+        and mapper["config"]["access.token.claim"] == "true"
+        for mapper in scopes["basic"]["protocolMappers"]
+    )
+    ui = next(client for client in realm["clients"] if client["clientId"] == "coifesp-local-ui")
+    assert "basic" in ui["defaultClientScopes"]
