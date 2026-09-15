@@ -212,6 +212,84 @@ class ProductAccountService:
         except IntegrityError:
             return self.get_account(account_id)
 
+    def ensure_federated_account(self, *, account_id: str, team_id: str) -> Account:
+        """Provision a trusted OIDC subject into the product directory.
+
+        OIDC remains the source of truth for authentication and authorization.
+        Product tables only need stable foreign-key identities so an authenticated
+        human can use projects and collaboration. A tenant is created on first
+        use, and its first account becomes its owner; later accounts join as
+        members. Profile fields are deterministic aliases so providers may omit
+        optional profile and email claims.
+        """
+        self._identifier(account_id)
+        self._identifier(team_id)
+        digest = hashlib.sha256(f"{team_id}\0{account_id}".encode()).hexdigest()
+        username = f"oidc-{digest[:24]}"
+        email = f"{digest}@oidc.invalid"
+        display_name = f"{team_id} member {digest[:8]}"
+        handle = team_id if _HANDLE.fullmatch(team_id) else f"team-{digest[:24]}"
+        now = datetime.now(UTC)
+        for _attempt in range(2):
+            try:
+                with self.engine.begin() as connection:
+                    existing = (
+                        connection.execute(
+                            select(ACCOUNTS).where(ACCOUNTS.c.account_id == account_id)
+                        )
+                        .mappings()
+                        .one_or_none()
+                    )
+                    if existing is not None:
+                        if existing["team_id"] != team_id:
+                            raise PolicyDenied("federated account tenant does not match")
+                        return self._account(existing)
+                    team = connection.execute(
+                        select(TEAMS.c.team_id).where(TEAMS.c.team_id == team_id)
+                    ).scalar_one_or_none()
+                    if team is None:
+                        connection.execute(
+                            insert(TEAMS).values(
+                                team_id=team_id,
+                                handle=handle,
+                                handle_key=handle.casefold(),
+                                name=team_id,
+                                created_at=now,
+                            )
+                        )
+                    account_count = connection.execute(
+                        select(func.count())
+                        .select_from(ACCOUNTS)
+                        .where(ACCOUNTS.c.team_id == team_id)
+                    ).scalar_one()
+                    role = TeamAccountRole.OWNER if account_count == 0 else TeamAccountRole.MEMBER
+                    values = self._account_values(
+                        account_id,
+                        username,
+                        display_name,
+                        email,
+                        secrets.token_urlsafe(24),
+                        team_id,
+                        role,
+                        now,
+                        AccountRegistrationStatus.ACTIVE,
+                        must_change_password=False,
+                    )
+                    connection.execute(insert(ACCOUNTS).values(**values))
+                return self._account(values)
+            except IntegrityError:
+                # Concurrent first requests converge on the committed identity.
+                continue
+        try:
+            account = self.get_account(account_id)
+        except ResourceNotFound as exc:
+            raise GovernanceConflictError(
+                "federated product identity could not be provisioned"
+            ) from exc
+        if account.team_id != team_id:
+            raise PolicyDenied("federated account tenant does not match")
+        return account
+
     def request_account_registration(
         self,
         *,

@@ -251,7 +251,20 @@ def create_app(
     app.state.session_lifecycle = session_lifecycle
     app.state.observability = observability
     app.state.readiness_probe = readiness_probe
-    authenticator = BearerAuthenticator(identity_verifier)
+    identity_sync = None
+    if settings.auth_mode == "oidc" and product_account_service is not None:
+
+        async def identity_sync(identity) -> None:
+            principal = identity.principal
+            if principal.is_service:
+                return
+            await run_in_threadpool(
+                product_account_service.ensure_federated_account,
+                account_id=principal.principal_id,
+                team_id=principal.tenant_id,
+            )
+
+    authenticator = BearerAuthenticator(identity_verifier, identity_sync=identity_sync)
 
     app.add_middleware(
         BoundedBodyMiddleware,

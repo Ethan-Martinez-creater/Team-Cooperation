@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import inspect
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from fastapi import Depends
 from starlette.requests import HTTPConnection
@@ -20,8 +21,14 @@ class Authenticated:
 
 
 class BearerAuthenticator:
-    def __init__(self, verifier: OIDCVerifier) -> None:
+    def __init__(
+        self,
+        verifier: OIDCVerifier,
+        *,
+        identity_sync: Callable[[VerifiedIdentity], object] | None = None,
+    ) -> None:
         self.verifier = verifier
+        self.identity_sync = identity_sync
 
     async def __call__(self, request: HTTPConnection) -> Authenticated:
         values = request.headers.getlist("authorization")
@@ -37,6 +44,10 @@ class BearerAuthenticator:
         ):
             raise AuthenticationError("invalid_token")
         identity = await self.verifier.verify(token)
+        if self.identity_sync is not None:
+            result = self.identity_sync(identity)
+            if inspect.isawaitable(result):
+                await result
         request.state.identity = identity
         return Authenticated(identity=identity)
 
