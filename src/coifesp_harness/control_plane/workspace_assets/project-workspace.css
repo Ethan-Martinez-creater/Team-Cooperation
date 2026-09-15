@@ -172,6 +172,9 @@
 .overview-actions { display: flex; justify-content: flex-end; margin-bottom: 10px; }
 .overview-section { margin-bottom: 16px; }
 .overview-section h4 { margin-bottom: 8px; }
+.repository-summary-card { display: grid; gap: 10px; }
+.repository-operations { gap: 6px; flex-wrap: wrap; }
+.repository-capability-note { margin: 0; }
 .overview-process-card {
   display: flex;
   flex-wrap: wrap;

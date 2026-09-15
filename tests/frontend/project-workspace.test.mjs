@@ -31,6 +31,10 @@ assert.match(script, /verification\.passed/);
 assert.match(script, /执行契约待确认/);
 assert.match(script, /generation/);
 assert.match(script, /ownActive\(project, generation\)/);
+assert.match(script, /\/code\/repositories/);
+assert.match(script, /代码仓库/);
+assert.match(script, /repository_bound/);
+assert.match(script, /status\.reason/);
 
 const activityStart = script.indexOf("function activityPane(activityValue)");
 const deliveryStart = script.indexOf("function deliveryPane", activityStart);
@@ -67,6 +71,7 @@ for (const operation of [
 assert.match(css, /\.work-graph-tree/);
 assert.match(css, /\.activity-list/);
 assert.match(css, /\.delivery-section/);
+assert.match(css, /\.repository-summary-card/);
 
 console.log("project-workspace frontend contract: OK");
 

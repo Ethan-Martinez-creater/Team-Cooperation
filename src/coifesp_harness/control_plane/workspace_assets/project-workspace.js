@@ -592,11 +592,24 @@
 
   async function overviewPane(projectId, harnessView = active?.harnessView || {}) {
     const encodedProjectId = encodeURIComponent(projectId);
-    const [snapshot, planDrafts, resources] = await Promise.all([
+    const [snapshot, planDrafts, resources, repositories] = await Promise.all([
       W.api(`/v1/projects/${encodedProjectId}/workspace`),
       W.api(`/v1/projects/${encodedProjectId}/plan-drafts`).catch(() => []),
       W.api(`/v1/projects/${encodedProjectId}/resources`).catch(() => []),
+      W.api(`/v1/projects/${encodedProjectId}/code/repositories`).catch(() => []),
     ]);
+    const repositoryStatuses = await Promise.all((repositories || []).map(async (repository) => {
+      try {
+        return await W.api(`/v1/projects/${encodedProjectId}/code/repositories/${encodeURIComponent(repository.repository_id)}/status`);
+      } catch (error) {
+        return {
+          repository_bound: true,
+          repository_id: repository.repository_id,
+          default_branch: repository.default_branch,
+          reason: "暂时无法确认源码读取能力",
+        };
+      }
+    }));
     const plan = (planDrafts || []).find((d) => d.status === "approved") || (planDrafts || [])[0];
     const ownTeam = currentTeamId();
     const process = harnessView?.process || {};
@@ -609,6 +622,28 @@
       const canDownload = resource.owner_team_id === ownTeam || resource.propagation === "portable";
       return `<article class="card resource-summary-card"><div class="card-head"><div><strong>${esc(resource.title || "未命名资料")}</strong><div class="meta"><span class="pill ${resource.propagation === "team_private" ? "orange" : "green"}">${propagationLabel[resource.propagation] || "项目可见"}</span></div></div></div>${canDownload ? `<button class="secondary" data-ws-download-resource="${esc(resource.resource_id)}" data-resource-title="${esc(resource.title || "项目资料")}">下载资料</button>` : ""}${canShare ? `<button class="secondary" data-ws-share-resource="${esc(resource.resource_id)}">共享到项目</button>` : ""}</article>`;
     }).join("");
+    const operationLabels = {
+      read_tree: "浏览目录",
+      read_blob: "读取文件",
+      search_code: "搜索代码",
+      read_issue: "读取 Issue",
+      read_pull_request: "读取 Pull Request",
+    };
+    const repositoryCards = (repositories || []).map((repository, index) => {
+      const status = repositoryStatuses[index] || {};
+      const readable = status.repository_bound === true && !status.reason;
+      const operations = (repository.available_operations || [])
+        .map((operation) => operationLabels[operation] || operation)
+        .map((label) => `<span class="pill">${esc(label)}</span>`)
+        .join("");
+      return `<article class="card repository-summary-card">
+        <div class="card-head"><div><strong>${esc(repository.remote_repository_id || repository.repository_id)}</strong>
+          <div class="meta"><span>${esc(repository.default_branch || "未设置默认分支")}</span><span>${esc(repository.connector_id)}</span><span class="pill ${readable ? "green" : "orange"}">${readable ? "源码读取可用" : "仓库已绑定"}</span></div>
+        </div></div>
+        <div class="meta repository-operations">${operations}</div>
+        ${status.reason ? `<p class="muted small repository-capability-note">${esc(status.reason)}</p>` : `<p class="muted small repository-capability-note">Agent 可在固定提交上读取此仓库的源码上下文。</p>`}
+      </article>`;
+    }).join("");
     const blockerSummary = blockers.length
       ? `<div class="overview-blockers"><strong>当前阻塞</strong>${blockers.map((item) => `<p class="muted small">${esc(firstValue(item, ["label", "summary", "reason"], item))}</p>`).join("")}</div>`
       : `<p class="muted small">当前没有已记录的阻塞。</p>`;
@@ -618,6 +653,7 @@
       <section class="overview-section"><h4>目标与计划</h4>${planCard}</section>
       <section class="overview-section"><h4>项目概况</h4><div class="meta overview-stats"><span>任务 ${Number(snapshot?.task_count || 0)}</span><span>资料 ${Number(snapshot?.resource_count || 0)}</span><span>待处理 ${Number(snapshot?.pending_draft_count || 0)}</span></div></section>
       <section class="overview-section"><h4>参与团队</h4>${(snapshot?.teams || []).map((team) => `<div class="meta"><span>${esc(team.name)}</span><span class="pill">${esc(team.kind)}</span></div>`).join("") || `<p class="muted small">尚无参与团队</p>`}</section>
+      <section class="overview-section"><h4>代码仓库</h4>${repositoryCards || `<p class="muted small">尚未绑定代码仓库。绑定后可在这里查看仓库及其可用能力。</p>`}</section>
       <section class="overview-section"><h4>项目资料</h4>${resourceCards || `<p class="muted small">还没有项目资料。上传的文件默认仅本团队可见，可稍后共享到项目。</p>`}</section>`;
   }
 
