@@ -74,6 +74,12 @@
     return { ok: true, claims: claims };
   }
 
+  function hasSameSubject(currentToken, renewedIdToken) {
+    var current = decodePayload(currentToken);
+    var renewed = decodePayload(renewedIdToken);
+    return !!(current && renewed && current.sub && current.sub === renewed.sub);
+  }
+
   function normalizeRoute(route) {
     if (!route || typeof route !== "object") return null;
     var view = String(route.view || "");
@@ -324,7 +330,7 @@
             reject(new Error(message.error ? "静默续期被拒绝：" + message.error : "静默续期失败"));
             return;
           }
-          exchangeToken(message.code, oidcConfig, storage).then(resolve, reject);
+          exchangeToken(message.code, oidcConfig, storage, options.currentToken).then(resolve, reject);
         }
         global.addEventListener("message", onMessage);
         frame = document.createElement("iframe");
@@ -336,7 +342,7 @@
     });
   }
 
-  function exchangeToken(code, oidcConfig, storage) {
+  function exchangeToken(code, oidcConfig, storage, currentToken) {
     var body = new URLSearchParams({
       grant_type: "authorization_code",
       client_id: oidcConfig.client_id,
@@ -356,11 +362,10 @@
       return response.json();
     }).then(function (tokens) {
       var idToken = tokens.id_token || null;
-      if (idToken) {
-        try { storage.setItem(ID_TOKEN_KEY, idToken); } catch (error) {}
-      }
       var validation = validateIdToken(idToken, oidcConfig.issuer, oidcConfig.audience, Date.now());
       if (idToken && !validation.ok) throw new Error("续期令牌校验失败：" + validation.reason);
+      if (!hasSameSubject(currentToken, idToken)) throw new Error("续期身份与当前标签不一致");
+      try { storage.setItem(ID_TOKEN_KEY, idToken); } catch (error) {}
       return {
         access_token: tokens.access_token,
         expires_at: Date.now() + (Number(tokens.expires_in) || 300) * 1000,
@@ -404,6 +409,7 @@
     shouldReplay: shouldReplay,
     validateSilentCallback: validateSilentCallback,
     validateIdToken: validateIdToken,
+    hasSameSubject: hasSameSubject,
     saveRoute: saveRoute,
     takeRoute: takeRoute,
     normalizeRoute: normalizeRoute,

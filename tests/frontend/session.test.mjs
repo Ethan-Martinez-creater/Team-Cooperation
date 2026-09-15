@@ -111,6 +111,8 @@ ok(S.validateIdToken(jwt(goodClaims), "https://idp.example.test", "wrong-audienc
 ok(S.validateIdToken(jwt({ ...goodClaims, exp: Math.floor(Date.now() / 1000) - 60 }), "https://idp.example.test", "coifesp-control-plane", Date.now()).reason === "expired", "expired id_token rejected");
 ok(S.validateIdToken("not-a-jwt", "https://idp.example.test", "coifesp-control-plane", Date.now()).reason === "malformed", "malformed id_token rejected");
 ok(S.validateIdToken(jwt(goodClaims), "https://idp.example.test", "coifesp-control-plane", Date.now()).claims.aud === "coifesp-control-plane", "claims exposed on success");
+ok(S.hasSameSubject(jwt({ ...goodClaims, sub: "team-a-user" }), jwt({ ...goodClaims, sub: "team-a-user" })) === true, "silent renewal preserves the current tab identity");
+ok(S.hasSameSubject(jwt({ ...goodClaims, sub: "team-a-user" }), jwt({ ...goodClaims, sub: "team-b-user" })) === false, "silent renewal rejects an SSO identity switch");
 
 // --- route persistence ---
 {
