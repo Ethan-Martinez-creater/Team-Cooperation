@@ -200,6 +200,26 @@ def test_workspace_exposes_only_public_oidc_configuration():
     assert "secret" not in response.text.lower()
 
 
+def test_workspace_oidc_callback_recovers_across_browser_contexts():
+    app = create_app(settings=workspace_settings(), verifier=StubVerifier({}))
+    script = asyncio.run(request(app, "/app/app.js"))
+
+    assert script.status_code == 200
+    # The in-app browser may recreate its browsing context while visiting the
+    # external identity page. Keep only the short-lived PKCE transaction in
+    # origin-local storage; access and ID tokens remain session-only.
+    assert 'localStorage.setItem(OIDC_TRANSACTION_KEY' in script.text
+    assert "OIDC_TRANSACTION_MAX_AGE_MS=10*60*1000" in script.text
+    assert 'loadOidcTransaction(q.get("state"))' in script.text
+    assert 'localStorage.removeItem(OIDC_TRANSACTION_KEY)' in script.text
+    assert 'sessionStorage.setItem("access_token",state.token)' in script.text
+    assert 'localStorage.setItem("access_token"' not in script.text
+    # Every failed callback removes the one-use query and restores a working
+    # login action instead of leaving a dead authorization-code URL.
+    assert 'history.replaceState({},"","/app/")' in script.text
+    assert script.text.count("bindOidcLogin();throw Error") >= 2
+
+
 def test_workspace_config_fails_closed_without_public_client():
     app = create_app(settings=settings(), verifier=StubVerifier({}))
     response = asyncio.run(request(app, "/app/config"))
