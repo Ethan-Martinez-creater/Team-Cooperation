@@ -149,3 +149,11 @@ def test_prepared_realm_contains_bounded_service_accounts() -> None:
     assert services["coifesp-directory-reader"]["clientRoles"] == {
         "realm-management": ["view-users", "query-users", "query-groups"]
     }
+    demo_users = {
+        user["username"]: user
+        for user in realm["users"]
+        if user["username"].endswith("-demo")
+    }
+    assert set(demo_users) == {"team-a-demo", "team-b-demo", "team-c-demo"}
+    assert all(user["firstName"] for user in demo_users.values())
+    assert all(user["lastName"] == "Demo" for user in demo_users.values())

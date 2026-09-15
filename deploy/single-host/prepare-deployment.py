@@ -84,6 +84,8 @@ def prepare_realm(
         {
             "username": f"{team}-demo",
             "enabled": True,
+            "firstName": team.upper(),
+            "lastName": "Demo",
             "emailVerified": True,
             "email": f"{team}-demo@example.invalid",
             "attributes": {
