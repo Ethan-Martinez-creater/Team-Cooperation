@@ -10,6 +10,7 @@
   let active = null; // { projectId, generation, conversationId, eventController, lastSequence }
   let pendingAttachments = [];
   let openGeneration = 0;
+  let workspacePreviewUrl = null;
   let bound = false;
 
   const DRAWER_TABS = new Set(["overview", "work-graph", "tasks", "activity", "collab", "delivery"]);
@@ -620,7 +621,7 @@
     const resourceCards = (resources || []).map((resource) => {
       const canShare = resource.owner_team_id === ownTeam && resource.propagation === "team_private";
       const canDownload = resource.owner_team_id === ownTeam || resource.propagation === "portable";
-      return `<article class="card resource-summary-card"><div class="card-head"><div><strong>${esc(resource.title || "未命名资料")}</strong><div class="meta"><span class="pill ${resource.propagation === "team_private" ? "orange" : "green"}">${propagationLabel[resource.propagation] || "项目可见"}</span></div></div></div>${canDownload ? `<button class="secondary" data-ws-download-resource="${esc(resource.resource_id)}" data-resource-title="${esc(resource.title || "项目资料")}">下载资料</button>` : ""}${canShare ? `<button class="secondary" data-ws-share-resource="${esc(resource.resource_id)}">共享到项目</button>` : ""}</article>`;
+      return `<article class="card resource-summary-card"><div class="card-head"><div><strong>${esc(resource.title || "未命名资料")}</strong><div class="meta"><span class="pill ${resource.propagation === "team_private" ? "orange" : "green"}">${propagationLabel[resource.propagation] || "项目可见"}</span></div></div></div><div class="task-actions"><button class="secondary" data-ws-preview-resource="${esc(resource.resource_id)}" data-resource-title="${esc(resource.title || "项目资料")}">预览</button>${canDownload ? `<button class="secondary" data-ws-download-resource="${esc(resource.resource_id)}" data-resource-title="${esc(resource.title || "项目资料")}">下载资料</button>` : ""}${canShare ? `<button class="secondary" data-ws-share-resource="${esc(resource.resource_id)}">共享到项目</button>` : ""}</div></article>`;
     }).join("");
     const operationLabels = {
       read_tree: "浏览目录",
@@ -868,6 +869,9 @@
       (exchangeRows.join("") || `<p class="muted small">还没有已发送的跨团队 Agent 共享。草稿经你确认后才会发送给对方团队 Agent。</p>`);
   }
   function bindPaneActions(pane, tab) {
+    pane.querySelectorAll("[data-ws-preview-resource]").forEach((button) =>
+      button.addEventListener("click", () => previewResource(button.dataset.wsPreviewResource, button.dataset.resourceTitle))
+    );
     pane.querySelectorAll("[data-ws-download-resource]").forEach((button) =>
       button.addEventListener("click", () => downloadResource(button.dataset.wsDownloadResource, button.dataset.resourceTitle))
     );
@@ -900,6 +904,54 @@
     pane.querySelectorAll("[data-ws-reject-plan]").forEach((b) =>
       b.addEventListener("click", () => decidePlan(b.dataset.wsRejectPlan, "reject"))
     );
+  }
+
+  async function previewResource(resourceId, title) {
+    if (!active) return;
+    const projectId = active.projectId, generation = active.generation;
+    try {
+      const response = await fetch(`/v1/projects/${encodeURIComponent(projectId)}/resources/${encodeURIComponent(resourceId)}/preview`, {
+        headers: { Authorization: `Bearer ${W.token}` }, cache: "no-store",
+      });
+      if (!response.ok) throw Error("资料不可预览或访问权限已改变");
+      const blob = await response.blob();
+      if (!ownActive(projectId, generation)) return;
+      const type = String(blob.type || response.headers.get("content-type") || "application/octet-stream").toLowerCase();
+      const dialog = $("#resource-preview"), body = $("#resource-preview-body");
+      if (workspacePreviewUrl) URL.revokeObjectURL(workspacePreviewUrl);
+      workspacePreviewUrl = null;
+      body.replaceChildren();
+      $("#resource-preview-title").textContent = title || "项目资料预览";
+      if (type.startsWith("text/") || ["application/json", "application/xml", "application/yaml", "application/x-yaml", "application/javascript"].includes(type)) {
+        const text = await blob.text();
+        if (!ownActive(projectId, generation)) return;
+        const pre = document.createElement("pre"), limit = 200000;
+        pre.textContent = text.slice(0, limit) + (text.length > limit ? "\n\n[预览已截断]" : "");
+        body.append(pre);
+      } else if (["image/png", "image/jpeg", "image/gif", "image/webp"].includes(type)) {
+        workspacePreviewUrl = URL.createObjectURL(blob);
+        const image = document.createElement("img");
+        image.src = workspacePreviewUrl;
+        image.alt = title || "项目资料";
+        body.append(image);
+      } else if (type === "application/pdf") {
+        workspacePreviewUrl = URL.createObjectURL(blob);
+        const frame = document.createElement("iframe");
+        frame.src = workspacePreviewUrl;
+        frame.title = title || "PDF 项目资料";
+        body.append(frame);
+      } else {
+        body.textContent = "该文件类型不支持网页预览；如有下载权限，可下载后使用本地应用打开。";
+      }
+      dialog.onclose = () => {
+        if (workspacePreviewUrl) URL.revokeObjectURL(workspacePreviewUrl);
+        workspacePreviewUrl = null;
+        body.replaceChildren();
+      };
+      dialog.showModal();
+    } catch (error) {
+      if (ownActive(projectId, generation)) toast(error.message, true);
+    }
   }
 
   async function downloadResource(resourceId, title) {

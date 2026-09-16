@@ -35,6 +35,12 @@ assert.match(script, /\/code\/repositories/);
 assert.match(script, /代码仓库/);
 assert.match(script, /repository_bound/);
 assert.match(script, /status\.reason/);
+assert.ok(script.includes("data-ws-preview-resource"), "visible project resources expose a preview action");
+assert.ok(
+  script.includes("/resources/${encodeURIComponent(resourceId)}/preview"),
+  "workspace preview uses the policy-aware preview endpoint",
+);
+assert.ok(script.includes('pre.textContent = text.slice'), "text and HTML previews are rendered as inert text");
 
 const activityStart = script.indexOf("function activityPane(activityValue)");
 const deliveryStart = script.indexOf("function deliveryPane", activityStart);
