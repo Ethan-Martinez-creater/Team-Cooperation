@@ -1,7 +1,8 @@
 import asyncio
+from datetime import UTC, datetime
 
 import httpx
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, insert, select
 from sqlalchemy.pool import StaticPool
 
 from coifesp_harness.artifacts import (
@@ -18,6 +19,7 @@ from coifesp_harness.product import (
     ProjectResourceService,
     TeamCollaborationService,
 )
+from coifesp_harness.product.repository import PROJECTS, PROJECT_RESOURCES
 
 
 async def request(app, method, path, **kwargs):
@@ -244,6 +246,43 @@ def test_private_project_upload_does_not_disclose_or_emit_shared_activity(tmp_pa
         ).json()
         == []
     )
+
+
+def test_agent_produced_resource_with_no_human_creator_is_listed(tmp_path):
+    app = stack(tmp_path)
+    project_id, _, beta_headers = project_with_two_teams(app)
+    engine = app.state.project_resource_service.engine
+    with engine.begin() as connection:
+        owner_team_id = connection.execute(
+            select(PROJECTS.c.owner_team_id).where(PROJECTS.c.project_id == project_id)
+        ).scalar_one()
+        connection.execute(
+            insert(PROJECT_RESOURCES).values(
+                resource_id="resource-agent-output",
+                project_id=project_id,
+                owner_team_id=owner_team_id,
+                created_by=None,
+                title="Agent generated output",
+                artifact_owner_team_id=owner_team_id,
+                artifact_id="artifact-agent-output",
+                artifact_sha256="a" * 64,
+                media_type="text/html",
+                propagation="project_readonly",
+                created_at=datetime.now(UTC),
+                produced_by_principal_id=f"team-agent:{owner_team_id}",
+                source_run_id="run-agent-output",
+                source_integration_id=None,
+                process_id=f"process:{project_id}",
+            )
+        )
+
+    listed = asyncio.run(
+        request(app, "GET", f"/v1/projects/{project_id}/resources", headers=beta_headers)
+    )
+
+    assert listed.status_code == 200, listed.text
+    assert listed.json()[0]["resource_id"] == "resource-agent-output"
+    assert listed.json()[0]["created_by"] is None
 
 
 def test_project_upload_recovery_binds_full_command_metadata(tmp_path):

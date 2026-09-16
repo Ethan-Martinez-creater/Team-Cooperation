@@ -178,7 +178,7 @@ class ProjectResourceView(StrictModel):
     resource_id: str
     project_id: str
     owner_team_id: str
-    created_by: str
+    created_by: str | None
     title: str
     artifact_owner_team_id: str
     artifact_id: str
