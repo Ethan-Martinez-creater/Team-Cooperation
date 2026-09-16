@@ -115,6 +115,18 @@ def test_workspace_assets_expose_task_scheduling_and_notification_center():
     assert "formatDue" in script.text
 
 
+def test_product_workspace_data_loading_is_not_limited_to_builtin_auth():
+    app = create_app(settings=workspace_settings(), verifier=StubVerifier({}))
+    script = asyncio.run(request(app, "/app/app.js"))
+
+    assert script.status_code == 200
+    assert "if(state.config.product_workspace_enabled)state.account=await api('/v1/accounts/me')" in script.text
+    assert "if(state.config.product_workspace_enabled)base.push" in script.text
+    assert "if(!state.config.product_workspace_enabled)return" in script.text
+    assert "if(state.config.auth_mode==='builtin')base.push" not in script.text
+    assert "if(state.config.auth_mode!=='builtin')return" not in script.text
+
+
 def test_workspace_assets_expose_agent_tools_and_skills():
     app = create_app(settings=workspace_settings(), verifier=StubVerifier({}))
     page = asyncio.run(request(app, "/app/"))
