@@ -240,8 +240,8 @@ def _graph_tasks(graph: ProjectGraphSnapshot) -> tuple[WorkItemSnapshot, ...]:
 
 
 def _graph_relations(graph: ProjectGraphSnapshot) -> tuple[WorkRelationSnapshot, ...]:
-    node_ids = {
-        _required_text(node.node_id, "graph node.node_id")
+    node_types = {
+        _required_text(node.node_id, "graph node.node_id"): WorkNodeType(node.node_type)
         for node in graph.nodes
     }
     relations: list[WorkRelationSnapshot] = []
@@ -252,13 +252,22 @@ def _graph_relations(graph: ProjectGraphSnapshot) -> tuple[WorkRelationSnapshot,
         relation_id = _required_text(relation.relation_id, "graph relation.relation_id")
         source = _required_text(relation.source_node_id, "graph relation.source_node_id")
         target = _required_text(relation.target_node_id, "graph relation.target_node_id")
-        if source not in node_ids or target not in node_ids:
+        if source not in node_types or target not in node_types:
             raise ValueError("graph relation references a missing node")
         try:
             relation_type = WorkRelationType(relation.relation_type)
         except (TypeError, ValueError) as exc:
             raise ValueError("graph relation has an invalid relation_type") from exc
-        if relation_type is WorkRelationType.DEPENDS_ON:
+        # WorkGraph also uses depends_on for traceability links such as a task
+        # referring to its phase or requirement.  The readiness evaluator can
+        # only resolve executable task identities, so only task-to-task edges
+        # are scheduling dependencies.  Structural links remain authoritative
+        # in the WorkGraph snapshot and UI but must not block dispatch forever.
+        if (
+            relation_type is WorkRelationType.DEPENDS_ON
+            and node_types[source] is WorkNodeType.TASK
+            and node_types[target] is WorkNodeType.TASK
+        ):
             relations.append(
                 WorkRelationSnapshot(
                     relation_id=relation_id,

@@ -159,6 +159,33 @@ def test_task_status_and_dependency_direction_require_verified_prerequisite():
     assert [item.work_id for item in ready.evaluation.ready_work] == ["task-a"]
 
 
+def test_structural_task_links_do_not_become_execution_dependencies():
+    task = node("task-a")
+    phase = WorkNode(
+        "node-phase-a", "project-a", WorkNodeType.PHASE, "phase-a", NOW
+    )
+    requirement = WorkNode(
+        "node-requirement-a",
+        "project-a",
+        WorkNodeType.REQUIREMENT,
+        "requirement-a",
+        NOW,
+    )
+    fixture = graph(
+        (task, phase, requirement),
+        (task_subject("task-a"),),
+        (
+            relation("rel-task-phase", task.node_id, phase.node_id),
+            relation("rel-task-requirement", task.node_id, requirement.node_id),
+        ),
+    )
+
+    bound = bind(fixture, internal_opt_out_task_ids=("task-a",))
+
+    assert bound.snapshot.relations == ()
+    assert [item.work_id for item in bound.evaluation.ready_work] == ["task-a"]
+
+
 def test_cross_team_task_requires_explicit_accepted_contract_even_with_opt_out_marker():
     fixture = graph(
         (node("task-cross"),),
