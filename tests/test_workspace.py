@@ -99,6 +99,7 @@ def test_workspace_assets_expose_task_scheduling_and_notification_center():
     assert "renderNotificationProjectOptions" in script.text
     assert "openNotificationProject" in script.text
     assert "业务对象所在项目已不可用" in script.text
+    assert "item.activity_sequence===0?'团队定向':'项目广播'" in script.text
     # Task scheduling: creation form, filters, direct edits and proposals.
     assert "data-inbox-filter" in page.text
     assert "未设置截止时间" in script.text
