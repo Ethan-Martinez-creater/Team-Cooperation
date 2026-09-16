@@ -117,7 +117,7 @@ ok(S.hasSameSubject(jwt({ ...goodClaims, sub: "team-a-user" }), jwt({ ...goodCla
 // --- refresh-token renewal remains bound to the identity in each tab ---
 {
   const current = jwt({ ...goodClaims, sub: "team-a-user" });
-  const renewedId = jwt({ ...goodClaims, sub: "team-a-user" });
+  const renewedId = jwt({ ...goodClaims, aud: "workspace-ui", sub: "team-a-user" });
   const storage = memoryStorage({ refresh_token: "refresh-a" });
   let requestBody = "";
   const S2 = loadSession({
@@ -146,6 +146,7 @@ ok(S.hasSameSubject(jwt({ ...goodClaims, sub: "team-a-user" }), jwt({ ...goodCla
   });
   assert.ok(requestBody.includes("grant_type=refresh_token"), "OIDC renewal uses the tab refresh token");
   assert.equal(storage.getItem("refresh_token"), "refresh-a-rotated", "rotated refresh token stays in the same tab");
+  assert.equal(JSON.parse(Buffer.from(storage.getItem("id_token").split(".")[1], "base64url").toString()).aud, "workspace-ui", "renewed ID token is validated for the browser client, not the API audience");
   assert.equal(result.access_token.split(".").length, 3, "renewal returns the new access token");
 }
 

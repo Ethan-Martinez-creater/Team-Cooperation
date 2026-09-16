@@ -368,7 +368,9 @@
 
   function acceptRenewedTokens(tokens, oidcConfig, storage, currentToken) {
     var idToken = tokens.id_token || null;
-    var validation = validateIdToken(idToken, oidcConfig.issuer, oidcConfig.audience, Date.now());
+    // An ID token is issued to the browser OIDC client. The access token's
+    // resource audience is validated by the API and may intentionally differ.
+    var validation = validateIdToken(idToken, oidcConfig.issuer, oidcConfig.client_id, Date.now());
     if (!validation.ok) throw new Error("续期令牌校验失败：" + validation.reason);
     if (!hasSameSubject(currentToken, idToken)) throw new Error("续期身份与当前标签不一致");
     try {
