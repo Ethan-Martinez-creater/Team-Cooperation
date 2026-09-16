@@ -36,6 +36,7 @@ assert.match(script, /代码仓库/);
 assert.match(script, /repository_bound/);
 assert.match(script, /status\.reason/);
 assert.ok(script.includes("data-ws-preview-resource"), "visible project resources expose a preview action");
+assert.ok(script.includes("data-ws-attach-resource"), "text-readable project resources can be attached to chat");
 assert.ok(
   script.includes("/resources/${encodeURIComponent(resourceId)}/preview"),
   "workspace preview uses the policy-aware preview endpoint",
@@ -160,3 +161,29 @@ await context.downloadResource("receipt:3", "denied");
 assert.equal(downloads.length, 1);
 assert.equal(errors.length, 1, "permission failure is visible without downloading");
 console.log("resource download behavior: OK");
+
+// Existing project resources can be explicitly attached to the conversation,
+// but duplicate clicks must not send duplicate context items.
+const attachCode = script.slice(
+  script.indexOf("  function attachResourceToConversation("),
+  script.indexOf("  async function previewResource("),
+);
+const attachmentMessages = [];
+let attachmentRenders = 0, inputFocuses = 0;
+const attachContext = {
+  active: { projectId: "project-a" },
+  pendingAttachments: [],
+  renderAttachmentChips: () => { attachmentRenders += 1; },
+  toast: (message) => attachmentMessages.push(message),
+  $: () => ({ focus: () => { inputFocuses += 1; } }),
+};
+vm.createContext(attachContext);
+vm.runInContext(attachCode, attachContext);
+attachContext.attachResourceToConversation("resource:shared-html");
+attachContext.attachResourceToConversation("resource:shared-html");
+assert.deepEqual(attachContext.pendingAttachments, ["resource:shared-html"]);
+assert.equal(attachmentRenders, 1);
+assert.equal(inputFocuses, 1);
+assert.equal(attachmentMessages.length, 2);
+assert.match(attachmentMessages[1], /已在待发送附件/);
+console.log("existing resource attachment behavior: OK");

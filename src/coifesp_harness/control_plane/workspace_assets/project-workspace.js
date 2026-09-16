@@ -621,7 +621,9 @@
     const resourceCards = (resources || []).map((resource) => {
       const canShare = resource.owner_team_id === ownTeam && resource.propagation === "team_private";
       const canDownload = resource.owner_team_id === ownTeam || resource.propagation === "portable";
-      return `<article class="card resource-summary-card"><div class="card-head"><div><strong>${esc(resource.title || "未命名资料")}</strong><div class="meta"><span class="pill ${resource.propagation === "team_private" ? "orange" : "green"}">${propagationLabel[resource.propagation] || "项目可见"}</span></div></div></div><div class="task-actions"><button class="secondary" data-ws-preview-resource="${esc(resource.resource_id)}" data-resource-title="${esc(resource.title || "项目资料")}">预览</button>${canDownload ? `<button class="secondary" data-ws-download-resource="${esc(resource.resource_id)}" data-resource-title="${esc(resource.title || "项目资料")}">下载资料</button>` : ""}${canShare ? `<button class="secondary" data-ws-share-resource="${esc(resource.resource_id)}">共享到项目</button>` : ""}</div></article>`;
+      const mediaType = String(resource.media_type || "").toLowerCase();
+      const canAttach = mediaType.startsWith("text/") || ["application/json", "application/xml", "application/yaml", "application/x-yaml", "application/javascript"].includes(mediaType);
+      return `<article class="card resource-summary-card"><div class="card-head"><div><strong>${esc(resource.title || "未命名资料")}</strong><div class="meta"><span class="pill ${resource.propagation === "team_private" ? "orange" : "green"}">${propagationLabel[resource.propagation] || "项目可见"}</span></div></div></div><div class="task-actions"><button class="secondary" data-ws-preview-resource="${esc(resource.resource_id)}" data-resource-title="${esc(resource.title || "项目资料")}">预览</button>${canAttach ? `<button class="primary" data-ws-attach-resource="${esc(resource.resource_id)}">加入对话</button>` : ""}${canDownload ? `<button class="secondary" data-ws-download-resource="${esc(resource.resource_id)}" data-resource-title="${esc(resource.title || "项目资料")}">下载资料</button>` : ""}${canShare ? `<button class="secondary" data-ws-share-resource="${esc(resource.resource_id)}">共享到项目</button>` : ""}</div></article>`;
     }).join("");
     const operationLabels = {
       read_tree: "浏览目录",
@@ -869,6 +871,9 @@
       (exchangeRows.join("") || `<p class="muted small">还没有已发送的跨团队 Agent 共享。草稿经你确认后才会发送给对方团队 Agent。</p>`);
   }
   function bindPaneActions(pane, tab) {
+    pane.querySelectorAll("[data-ws-attach-resource]").forEach((button) =>
+      button.addEventListener("click", () => attachResourceToConversation(button.dataset.wsAttachResource))
+    );
     pane.querySelectorAll("[data-ws-preview-resource]").forEach((button) =>
       button.addEventListener("click", () => previewResource(button.dataset.wsPreviewResource, button.dataset.resourceTitle))
     );
@@ -904,6 +909,18 @@
     pane.querySelectorAll("[data-ws-reject-plan]").forEach((b) =>
       b.addEventListener("click", () => decidePlan(b.dataset.wsRejectPlan, "reject"))
     );
+  }
+
+  function attachResourceToConversation(resourceId) {
+    if (!active || !resourceId) return;
+    if (pendingAttachments.includes(resourceId)) {
+      toast("这份资料已在待发送附件中");
+      return;
+    }
+    pendingAttachments.push(resourceId);
+    renderAttachmentChips();
+    $("#ws-input")?.focus();
+    toast("资料已加入对话，请输入分析要求后发送");
   }
 
   async function previewResource(resourceId, title) {
