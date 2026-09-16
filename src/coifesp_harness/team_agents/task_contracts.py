@@ -7,6 +7,7 @@ team task transition. The loader never manufactures acceptance or readiness.
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -120,7 +121,14 @@ class TeamTaskContractService:
             row = TeamCollaborationService._task_row(connection, project_id, task_id)
             if actor["team_id"] != row["source_team_id"]:
                 raise PolicyDenied("only the source team may propose a task contract")
-            if row["status"] not in {"proposed", "rejected"}:
+            late_initial_contract = (
+                row["status"] == "accepted"
+                and row["source_contract_version"] is None
+                and row["accepted_contract_version"] is None
+                and row["assigned_account_id"] is None
+                and not json.loads(row["artifact_resource_ids"] or "[]")
+            )
+            if row["status"] not in {"proposed", "rejected"} and not late_initial_contract:
                 raise GovernanceConflictError(
                     "accepted or executing task contracts are immutable"
                 )
@@ -137,6 +145,9 @@ class TeamTaskContractService:
                 "autonomy_requirement": spec["autonomy_requirement"],
                 "source_contract_version": expected_version + 1,
                 "accepted_contract_version": None,
+                # A legacy/no-contract acceptance cannot authorize structured
+                # execution. Publishing its first contract explicitly returns
+                # the task to the target team's confirmation boundary.
                 "status": "proposed",
                 "updated_at": datetime.now(UTC),
             }

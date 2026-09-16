@@ -166,6 +166,19 @@ def test_persisted_contract_acceptance_is_version_pinned_and_loaded():
         propose(value, expected_version=1)
 
 
+def test_first_contract_after_legacy_acceptance_requires_fresh_target_confirmation():
+    value = stack(accepted=True)
+    contract = propose(value)
+    assert contract["version"] == 1
+    assert contract["accepted_version"] is None
+    with value.engine.connect() as connection:
+        task = connection.execute(select(TEAM_TASKS)).mappings().one()
+    assert task["status"] == "proposed"
+    assert task["assigned_account_id"] is None
+    accept(value, 1)
+    assert load(value).contract_accepted
+
+
 def test_proposal_revision_requires_source_and_current_version_and_resets_rejection():
     value = stack(accepted=False)
     service = TeamTaskContractService(value.engine)
