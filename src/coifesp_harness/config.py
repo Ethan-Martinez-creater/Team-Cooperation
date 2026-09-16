@@ -133,6 +133,7 @@ class Settings:
     llm_api_key: SecretValue | None
     llm_providers: tuple[ModelProviderConfig, ...]
     local_external_internal_provider_ids: tuple[str, ...]
+    production_external_internal_provider_ids: tuple[str, ...]
     llm_max_failover_attempts: int
     llm_concurrency_wait_seconds: float
     llm_circuit_failure_threshold: int
@@ -366,6 +367,9 @@ class Settings:
             local_external_internal_provider_ids=provider_ids(
                 "COIFESP_LOCAL_EXTERNAL_INTERNAL_PROVIDERS"
             ),
+            production_external_internal_provider_ids=provider_ids(
+                "COIFESP_PRODUCTION_EXTERNAL_INTERNAL_PROVIDERS"
+            ),
             llm_max_failover_attempts=positive_integer(
                 "COIFESP_LLM_MAX_FAILOVER_ATTEMPTS",
                 2,
@@ -437,6 +441,29 @@ class Settings:
                 ):
                     problems.append(
                         "locally authorized INTERNAL providers must be external "
+                        "and declare max_data_classification=internal or higher"
+                    )
+        if self.production_external_internal_provider_ids:
+            if self.environment is not Environment.PRODUCTION or self.auth_mode != "oidc":
+                problems.append(
+                    "COIFESP_PRODUCTION_EXTERNAL_INTERNAL_PROVIDERS is allowed only "
+                    "with production OIDC authentication"
+                )
+            providers = {item.provider_id: item for item in self.llm_providers}
+            for provider_id in self.production_external_internal_provider_ids:
+                provider = providers.get(provider_id)
+                if provider is None:
+                    problems.append(
+                        "COIFESP_PRODUCTION_EXTERNAL_INTERNAL_PROVIDERS contains an "
+                        "unregistered provider"
+                    )
+                elif (
+                    not provider.external
+                    or provider.max_data_classification
+                    not in {"internal", "confidential", "restricted"}
+                ):
+                    problems.append(
+                        "production-authorized INTERNAL providers must be external "
                         "and declare max_data_classification=internal or higher"
                     )
         if self.artifact_max_upload_bytes > 2_147_483_648:

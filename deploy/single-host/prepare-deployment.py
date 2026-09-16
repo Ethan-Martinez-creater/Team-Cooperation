@@ -168,8 +168,28 @@ def main() -> None:
     github_source = read_env(args.github_source_env)
     registry_raw = source.get("COIFESP_LLM_PROVIDERS_JSON", "")
     registry = json.loads(registry_raw)
-    if not registry or any(item.get("max_data_classification") != "public" for item in registry):
-        raise SystemExit("production seed providers must be restricted to PUBLIC data")
+    internal_provider_ids = tuple(
+        item.strip()
+        for item in source.get(
+            "COIFESP_PRODUCTION_EXTERNAL_INTERNAL_PROVIDERS", ""
+        ).split(",")
+        if item.strip()
+    )
+    if not registry:
+        raise SystemExit("at least one production LLM provider is required")
+    for item in registry:
+        classification = item.get("max_data_classification")
+        provider_id = item.get("provider_id")
+        if classification == "public":
+            continue
+        if (
+            provider_id not in internal_provider_ids
+            or item.get("external") is not True
+            or classification not in {"internal", "confidential", "restricted"}
+        ):
+            raise SystemExit(
+                "non-PUBLIC production providers require explicit INTERNAL authorization"
+            )
     provider_keys = {item["api_key_env"] for item in registry}
     if any(not source.get(key) for key in provider_keys):
         raise SystemExit("an LLM provider API key is missing")
@@ -271,6 +291,9 @@ def main() -> None:
         "COIFESP_MEMORY_MASTER_KEY": encoded_key(),
         "COIFESP_LLM_PROVIDERS_JSON": registry_raw,
         "COIFESP_LOCAL_EXTERNAL_INTERNAL_PROVIDERS": "",
+        "COIFESP_PRODUCTION_EXTERNAL_INTERNAL_PROVIDERS": ",".join(
+            internal_provider_ids
+        ),
         "COIFESP_SERVICE_NAME": "team-cooperation",
         "COIFESP_TELEMETRY_ENABLED": "false",
         "COIFESP_METRICS_ENABLED": "false",

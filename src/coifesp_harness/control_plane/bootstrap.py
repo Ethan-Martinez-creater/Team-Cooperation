@@ -291,11 +291,14 @@ def build_application(
     settings.validate(require_auth=True, require_memory=True)
     if not settings.database_url:
         raise ConfigurationError("COIFESP_DATABASE_URL is required by the control plane")
-    local_provider_ids = settings.local_external_internal_provider_ids
+    authorized_internal_provider_ids = (
+        settings.local_external_internal_provider_ids
+        + settings.production_external_internal_provider_ids
+    )
     project_model_route_policy = ModelRoutePolicy(
         data_classification=Classification.INTERNAL,
-        allowed_provider_ids=frozenset(local_provider_ids),
-        allow_external_egress=bool(local_provider_ids),
+        allowed_provider_ids=frozenset(authorized_internal_provider_ids),
+        allow_external_egress=bool(authorized_internal_provider_ids),
     )
 
     owns_engine = engine is None

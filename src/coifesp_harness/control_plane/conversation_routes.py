@@ -34,8 +34,10 @@ from .product_models import ProjectTeamView, ProjectView
 
 
 def _project_model_route_policy(request: Request) -> ModelRoutePolicy:
+    settings = request.app.state.settings
     provider_ids = tuple(
-        request.app.state.settings.local_external_internal_provider_ids
+        settings.local_external_internal_provider_ids
+        + settings.production_external_internal_provider_ids
     )
     return ModelRoutePolicy(
         data_classification=Classification.INTERNAL,

@@ -324,6 +324,58 @@ def test_local_external_internal_provider_must_be_registered_and_internal() -> N
         unknown.validate(require_llm=True)
 
 
+def test_production_external_internal_provider_authorization_is_explicit() -> None:
+    value = Settings.from_environment(
+        {
+            "COIFESP_ENV": "production",
+            "COIFESP_AUTH_MODE": "oidc",
+            "COIFESP_DATABASE_URL": "postgresql://app:secret@db.example.test/app",
+            "COIFESP_OIDC_ISSUER": "https://idp.example.test/realms/coifesp",
+            "COIFESP_OIDC_AUDIENCE": "coifesp-control-plane",
+            "COIFESP_OIDC_AUTHORIZED_PARTIES": "coifesp-local-ui",
+            "COIFESP_AUDIT_KEY_ID": "audit-v1",
+            "COIFESP_AUDIT_SIGNING_KEY": "a" * 32,
+            "COIFESP_ENVELOPE_SIGNING_KEY": "e" * 32,
+            "COIFESP_MEMORY_KEY_ID": "memory-v1",
+            "COIFESP_MEMORY_MASTER_KEY": base64.urlsafe_b64encode(
+                b"m" * 32
+            ).decode(),
+            "COIFESP_LLM_API_KEY": "provider-secret",
+            "COIFESP_LLM_PROVIDERS_JSON": provider_registry(
+                max_data_classification="internal"
+            ),
+            "COIFESP_PRODUCTION_EXTERNAL_INTERNAL_PROVIDERS": "deepseek",
+        }
+    )
+    value.validate(require_llm=True)
+    assert value.production_external_internal_provider_ids == ("deepseek",)
+
+
+def test_production_external_internal_provider_authorization_fails_closed() -> None:
+    base = {
+        "COIFESP_ENV": "production",
+        "COIFESP_AUTH_MODE": "oidc",
+        "COIFESP_LLM_API_KEY": "provider-secret",
+        "COIFESP_LLM_PROVIDERS_JSON": provider_registry(),
+        "COIFESP_PRODUCTION_EXTERNAL_INTERNAL_PROVIDERS": "deepseek",
+    }
+    public = Settings.from_environment(base)
+    with pytest.raises(ConfigurationError, match="max_data_classification"):
+        public.validate(require_llm=True)
+    wrong_mode = Settings.from_environment(
+        {
+            **base,
+            "COIFESP_ENV": "development",
+            "COIFESP_AUTH_MODE": "local",
+            "COIFESP_LLM_PROVIDERS_JSON": provider_registry(
+                max_data_classification="internal"
+            ),
+        }
+    )
+    with pytest.raises(ConfigurationError, match="production OIDC"):
+        wrong_mode.validate(require_llm=True)
+
+
 def test_provider_registry_accepts_explicit_local_tokenizer_encoding() -> None:
     value = Settings.from_environment({"COIFESP_ENV": "development",
         "COIFESP_LLM_API_KEY": "provider-secret",

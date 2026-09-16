@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 from coifesp_harness.config import Settings
 from coifesp_harness.control_plane import create_app
 from coifesp_harness.control_plane.conversation_routes import (
+    _project_model_route_policy,
     launch_conversation_turn_run,
 )
 from coifesp_harness.errors import GovernanceConflictError, ResourceNotFound
@@ -743,6 +744,23 @@ def test_conversation_run_external_internal_egress_requires_local_provider_opt_i
         assert policy["data_classification"] == 1
         assert policy["allowed_provider_ids"] == list(provider_ids)
         assert policy["allow_external_egress"] is expected_external
+
+
+def test_conversation_run_accepts_explicit_production_internal_egress_provider():
+    settings = Settings.from_environment(
+        {
+            "COIFESP_ENV": "production",
+            "COIFESP_AUTH_MODE": "oidc",
+            "COIFESP_PRODUCTION_EXTERNAL_INTERNAL_PROVIDERS": "deepseek",
+        }
+    )
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(settings=settings))
+    )
+    policy = _project_model_route_policy(request)
+    assert policy.allowed_provider_ids == frozenset({"deepseek"})
+    assert policy.allow_external_egress is True
+    assert policy.data_classification.value == 1
 
 
 def _stack_with_run_service(run_service):

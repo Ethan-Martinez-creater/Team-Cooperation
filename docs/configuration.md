@@ -72,6 +72,20 @@ Provider 的 `public` 上限提升为 `internal`；它不会降低原本的 `con
 该开关在 `production` 或 `builtin` 认证模式下会令配置校验失败，默认空值仍保持
 `INTERNAL` 上下文禁止外部出站。生产 OIDC、旧单租户 Worker 配置和正式数据策略不受影响。
 
+### 生产 INTERNAL 外部 Provider 授权
+
+生产 OIDC 部署默认仍禁止把 INTERNAL 上下文发送给外部 Provider。项目负责人明确完成数据处理
+审批后，可以用独立的生产 allowlist 精确授权已注册的 Provider：
+
+```dotenv
+COIFESP_PRODUCTION_EXTERNAL_INTERNAL_PROVIDERS=deepseek_v4_flash
+```
+
+该配置仅允许在 `production + oidc` 下使用。名单中的 Provider 必须声明
+`external=true`，并将 `max_data_classification` 明确配置为 `internal` 或更高；
+未列入名单、只声明 `public`、拼写错误或未注册的 Provider 都会启动失败。此项只授权模型
+路由，不改变项目资源共享范围，也不允许向其他团队传播 team-private 数据。
+
 ## Worker 服务身份
 
 本地 Keycloak、真实 OIDC、Agent Worker client-credentials 和最小权限目录读取已经完成验收。公网
