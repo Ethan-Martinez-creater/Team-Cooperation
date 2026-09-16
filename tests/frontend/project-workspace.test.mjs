@@ -69,11 +69,56 @@ for (const operation of [
 }
 
 assert.match(css, /\.work-graph-tree/);
+assert.match(css, /\.work-node-children/);
 assert.match(css, /\.activity-list/);
 assert.match(css, /\.delivery-section/);
 assert.match(css, /\.repository-summary-card/);
 
 console.log("project-workspace frontend contract: OK");
+
+// Execute the real Work Graph renderer and verify that persisted relations,
+// rather than hard-coded node types, determine the visual hierarchy.
+const graphCode = script.slice(script.indexOf("  function normalizeItems("),
+  script.indexOf("  async function tasksPane("));
+const graphContext = {
+  firstValue: (value, keys, fallback = "") => {
+    for (const key of keys) if (value && value[key] !== undefined && value[key] !== null && value[key] !== "") return value[key];
+    return fallback;
+  },
+  esc: (value) => String(value),
+  stateName: (value) => String(value),
+};
+vm.createContext(graphContext);
+vm.runInContext(graphCode, graphContext);
+const graphHtml = graphContext.workGraphPane({
+  nodes: [
+    { node_id: "goal", type: "goal", label: "交付 MVP" },
+    { node_id: "requirement", type: "requirement", label: "创建任务" },
+    { node_id: "milestone", type: "milestone", label: "可验收版本" },
+    { node_id: "phase", type: "phase", label: "工程实现" },
+    { node_id: "task", type: "task", label: "实现看板" },
+    { node_id: "risk", type: "risk", label: "范围膨胀" },
+  ],
+  edges: [
+    { source: "requirement", target: "goal", type: "derived_from" },
+    // Legacy Plan v2 graphs omitted this milestone -> goal edge; the renderer
+    // intentionally attaches a root milestone only when there is one goal.
+    { source: "phase", target: "milestone", type: "part_of" },
+    { source: "task", target: "phase", type: "part_of" },
+    { source: "risk", target: "goal", type: "relates_to" },
+    { source: "task", target: "requirement", type: "depends_on" },
+  ],
+});
+for (const id of ["goal", "requirement", "milestone", "phase", "task", "risk"]) {
+  assert.ok(graphHtml.includes(`data-work-node-id="${id}"`), `${id} remains visible`);
+}
+assert.ok(graphHtml.indexOf('data-work-node-id="goal"') < graphHtml.indexOf('data-work-node-id="requirement"'));
+assert.ok(graphHtml.indexOf('data-work-node-id="goal"') < graphHtml.indexOf('data-work-node-id="milestone"'));
+assert.ok(graphHtml.indexOf('data-work-node-id="milestone"') < graphHtml.indexOf('data-work-node-id="phase"'));
+assert.ok(graphHtml.indexOf('data-work-node-id="phase"') < graphHtml.indexOf('data-work-node-id="task"'));
+assert.equal((graphHtml.match(/dependency-badge/g) || []).length, 1, "part_of is not shown as a dependency");
+assert.equal(graphHtml.includes("level-"), false, "fixed type indentation is removed");
+console.log("work graph hierarchy behavior: OK");
 
 // Execute the real download function against a bounded browser double.
 const downloadCode = script.slice(script.indexOf("  async function downloadResource("),

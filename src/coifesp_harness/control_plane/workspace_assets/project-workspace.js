@@ -681,29 +681,86 @@
   function workGraphPane(graph) {
     const nodes = graphNodes(graph);
     if (!nodes.length) return `<p class="muted small">Work Graph 尚未形成。确认项目计划后，目标、阶段、任务和风险会在这里按层级展示。</p>`;
-    const relations = normalizeItems(graph?.relations || graph?.edges).filter((relation) => {
-      const kind = firstValue(relation, ["kind", "relation_type", "type"], "");
-      return String(kind).toLowerCase() === "depends_on" || String(kind).toLowerCase() === "dependency";
+    const relations = normalizeItems(graph?.relations || graph?.edges);
+    const nodeById = new Map();
+    nodes.forEach((node) => {
+      const nodeId = firstValue(node, ["node_id", "id", "work_node_id"], "");
+      if (nodeId) nodeById.set(nodeId, node);
     });
+    const parentById = new Map();
+    relations.forEach((relation) => {
+      const kind = String(firstValue(relation, ["kind", "relation_type", "type"], "")).toLowerCase();
+      const source = firstValue(relation, ["source_id", "source", "from"], "");
+      const target = firstValue(relation, ["target_id", "target", "to"], "");
+      const sourceNode = nodeById.get(source);
+      const sourceType = String(firstValue(sourceNode, ["type", "node_type", "kind"], "")).toLowerCase();
+      const isHierarchy = kind === "part_of" || kind === "derived_from" || (kind === "relates_to" && sourceType === "risk");
+      if (isHierarchy && source !== target && nodeById.has(source) && nodeById.has(target) && !parentById.has(source)) {
+        parentById.set(source, target);
+      }
+    });
+
+    // Older plan projections did not persist milestone -> goal relations. Keep
+    // those graphs readable without inventing a parent when more than one goal
+    // exists; new explicit relations always win over this compatibility rule.
+    const goalIds = nodes
+      .filter((node) => String(firstValue(node, ["type", "node_type", "kind"], "")).toLowerCase() === "goal")
+      .map((node) => firstValue(node, ["node_id", "id", "work_node_id"], ""))
+      .filter(Boolean);
+    if (goalIds.length === 1) {
+      nodes.forEach((node) => {
+        const nodeId = firstValue(node, ["node_id", "id", "work_node_id"], "");
+        const nodeType = String(firstValue(node, ["type", "node_type", "kind"], "")).toLowerCase();
+        if (nodeType === "milestone" && nodeId && !parentById.has(nodeId)) parentById.set(nodeId, goalIds[0]);
+      });
+    }
+
     const dependencyCount = new Map();
     relations.forEach((relation) => {
-      const dependent = firstValue(relation, ["source_id", "source", "from"], "") || firstValue(relation, ["target_id", "target", "to"], "");
-      dependencyCount.set(dependent, (dependencyCount.get(dependent) || 0) + 1);
+      const kind = String(firstValue(relation, ["kind", "relation_type", "type"], "")).toLowerCase();
+      if (kind !== "depends_on" && kind !== "dependency") return;
+      const dependent = firstValue(relation, ["source_id", "source", "from"], "");
+      if (dependent) dependencyCount.set(dependent, (dependencyCount.get(dependent) || 0) + 1);
     });
-    const typeOrder = { goal: 0, requirement: 1, milestone: 1, phase: 2, task: 3, risk: 2, artifact: 4, verification: 5 };
+    const childrenById = new Map();
+    parentById.forEach((parentId, childId) => {
+      if (!childrenById.has(parentId)) childrenById.set(parentId, []);
+      childrenById.get(parentId).push(childId);
+    });
+    const typeOrder = { goal: 0, requirement: 1, milestone: 2, phase: 3, task: 4, risk: 5, artifact: 6, verification: 7 };
     const typeLabel = { goal: "目标", requirement: "需求", milestone: "里程碑", phase: "阶段", task: "任务", risk: "风险", artifact: "资料", verification: "验收" };
-    const rows = nodes.slice().sort((left, right) => {
+    const compareNodes = (left, right) => {
       const a = String(firstValue(left, ["type", "node_type", "kind"], "")).toLowerCase();
       const b = String(firstValue(right, ["type", "node_type", "kind"], "")).toLowerCase();
-      return (typeOrder[a] ?? 9) - (typeOrder[b] ?? 9);
-    }).map((node) => {
+      const order = (typeOrder[a] ?? 9) - (typeOrder[b] ?? 9);
+      if (order) return order;
+      return String(firstValue(left, ["title", "name", "label"], "")).localeCompare(String(firstValue(right, ["title", "name", "label"], "")), "zh-CN");
+    };
+    childrenById.forEach((childIds) => childIds.sort((left, right) => compareNodes(nodeById.get(left), nodeById.get(right))));
+    const roots = nodes.filter((node) => {
+      const nodeId = firstValue(node, ["node_id", "id", "work_node_id"], "");
+      return !nodeId || !parentById.has(nodeId);
+    }).sort(compareNodes);
+    const rendered = new Set();
+    const renderNode = (node, ancestors = new Set()) => {
       const nodeType = String(firstValue(node, ["type", "node_type", "kind"], "work")).toLowerCase();
       const nodeId = firstValue(node, ["node_id", "id", "work_node_id"], "");
-      const dependencies = Array.isArray(node.depends_on) ? node.depends_on : (Array.isArray(node.dependencies) ? node.dependencies : []);
-      const count = dependencies.length || dependencyCount.get(nodeId) || 0;
-      const level = nodeType === "goal" || nodeType === "milestone" ? 0 : nodeType === "phase" || nodeType === "risk" ? 1 : 2;
-      return `<li class="work-node level-${level}"><div class="work-node-line"><span class="work-node-type">${esc(typeLabel[nodeType] || "工作项")}</span><strong>${esc(firstValue(node, ["title", "name", "label"], "未命名工作项"))}</strong><span class="pill work-node-status">${esc(stateName(firstValue(node, ["status", "state"], "待处理")))}</span>${count ? `<span class="dependency-badge">依赖 ${count}</span>` : ""}</div>${firstValue(node, ["description", "summary"]) ? `<p class="muted small">${esc(firstValue(node, ["description", "summary"]))}</p>` : ""}</li>`;
-    }).join("");
+      if (nodeId) rendered.add(nodeId);
+      const count = dependencyCount.get(nodeId) || 0;
+      const nextAncestors = new Set(ancestors);
+      if (nodeId) nextAncestors.add(nodeId);
+      const childRows = (childrenById.get(nodeId) || [])
+        .filter((childId) => !nextAncestors.has(childId))
+        .map((childId) => renderNode(nodeById.get(childId), nextAncestors))
+        .join("");
+      return `<li class="work-node" data-work-node-id="${esc(nodeId)}"><div class="work-node-line"><span class="work-node-type">${esc(typeLabel[nodeType] || "工作项")}</span><strong>${esc(firstValue(node, ["title", "name", "label"], "未命名工作项"))}</strong><span class="pill work-node-status">${esc(stateName(firstValue(node, ["status", "state"], "待处理")))}</span>${count ? `<span class="dependency-badge">依赖 ${count}</span>` : ""}</div>${firstValue(node, ["description", "summary"]) ? `<p class="muted small">${esc(firstValue(node, ["description", "summary"]))}</p>` : ""}${childRows ? `<ul class="work-node-children">${childRows}</ul>` : ""}</li>`;
+    };
+    let rows = roots.map((node) => renderNode(node)).join("");
+    // Malformed cyclic relations must never hide nodes from the participant.
+    nodes.slice().sort(compareNodes).forEach((node) => {
+      const nodeId = firstValue(node, ["node_id", "id", "work_node_id"], "");
+      if (nodeId && !rendered.has(nodeId)) rows += renderNode(node);
+    });
     return `<p class="muted small">项目事实以 Work Graph 为准；依赖关系会决定任务何时可以开始。</p><ul class="work-graph-tree">${rows}</ul>`;
   }
 
