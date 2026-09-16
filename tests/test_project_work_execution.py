@@ -394,6 +394,32 @@ def test_project_work_requires_every_work_graph_dependency_to_be_verified():
 
 
 @project_api_required
+def test_project_work_ignores_structural_work_graph_dependencies():
+    value = _project_stack()
+    value.graph.create_phase(
+        phase_id="phase-delivery",
+        project_id="project-a",
+        title="Delivery",
+        description="Structural delivery phase",
+        milestone_id=None,
+        owner_team_id="team-b",
+    )
+    value.graph.add_relation(
+        relation_id="relation:task-phase",
+        project_id="project-a",
+        source_node_id="node:task:task-a",
+        relation_type=WorkRelationType.DEPENDS_ON,
+        target_node_id="node:phase:phase-delivery",
+        created_by_type="system",
+        created_by_id="planner",
+    )
+
+    task = _enqueue(value, idempotency_key="project-work:structural-dependency")
+
+    _assert_project_execution_task(task)
+
+
+@project_api_required
 def test_project_work_checks_exact_task_node_and_accepted_contract_version():
     value = _project_stack()
 

@@ -302,9 +302,12 @@ class TaskExecutionService:
         ).all()
         for node_type, subject_id in targets:
             if node_type != "task":
-                raise GovernanceConflictError(
-                    "project work has a non-task dependency without completion evidence"
-                )
+                # Plan materialization also uses ``depends_on`` to attach a task
+                # to structural phase/requirement nodes.  Those hierarchy edges
+                # are not executable task prerequisites and therefore must not
+                # block admission.  Only task-to-task dependencies carry the
+                # verified-before-dispatch invariant.
+                continue
             status = connection.execute(
                 select(TEAM_TASKS.c.status).where(
                     and_(
