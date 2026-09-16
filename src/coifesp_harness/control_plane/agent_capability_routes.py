@@ -70,11 +70,11 @@ def build_agent_capability_router(
         authenticated: Authenticated = Depends(authenticator),
     ) -> AgentCapabilityReportView:
         if project_id is not None:
-            collaboration = getattr(request.app.state, "team_collaboration_service", None)
-            if collaboration is None:
+            directory = getattr(request.app.state, "project_directory_service", None)
+            if directory is None:
                 raise HTTPException(status_code=503, detail="项目协作服务不可用")
             await run_in_threadpool(
-                collaboration.get_project,
+                directory.get_project,
                 project_id=project_id,
                 actor_id=authenticated.principal.principal_id,
             )

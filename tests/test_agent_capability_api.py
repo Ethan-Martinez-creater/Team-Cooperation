@@ -216,6 +216,39 @@ def test_capability_report_covers_all_four_statuses():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_project_scoped_capability_report_uses_project_directory_membership():
+    app, principal, root = stack(skill_root_name=".test-project-cap-skills")
+    try:
+        created = asyncio.run(
+            call(
+                app,
+                "POST",
+                "/v1/projects",
+                principal.token,
+                json={
+                    "name": "Scoped capability project",
+                    "description": "Verify project membership",
+                    "owner_assignment_name": "Product",
+                    "owner_kind": "product",
+                },
+            )
+        )
+        assert created.status_code == 201, created.text
+        project_id = created.json()["project_id"]
+        response = asyncio.run(
+            call(
+                app,
+                "GET",
+                f"/v1/agent-capabilities?project_id={project_id}",
+                principal.token,
+            )
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["project_id"] == project_id
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 def test_capability_report_marks_unconfigured_tools():
     app, principal, root = stack(office=False, with_skills=False)
     try:
