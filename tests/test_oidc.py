@@ -137,6 +137,22 @@ def test_identity_provider_internal_roles_are_not_application_roles() -> None:
         asyncio.run(verifier.verify(unknown_only))
 
 
+def test_capability_publisher_is_preserved_as_an_application_role() -> None:
+    private_key, jwk = key_material()
+    fetcher = StubFetcher({JWKS_URL: FetchResult({"keys": [jwk]}, 300)})
+    verifier = OIDCVerifier(settings=oidc_settings(), fetcher=fetcher)
+
+    token = signed_token(
+        private_key,
+        claims(roles=["contributor", "capability_publisher"]),
+    )
+
+    verified = asyncio.run(verifier.verify(token))
+    assert verified.principal.roles == frozenset(
+        {"contributor", "capability_publisher"}
+    )
+
+
 @pytest.mark.parametrize(
     "payload_change",
     [

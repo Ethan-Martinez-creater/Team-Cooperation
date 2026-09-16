@@ -11,6 +11,7 @@ APPLICATION_ROLES = frozenset(
         "collaboration_creator",
         "agent_run_controller",
         "execution_controller",
+        "capability_publisher",
         "platform_administrator",
         "agent_worker",
         "tool_worker",
