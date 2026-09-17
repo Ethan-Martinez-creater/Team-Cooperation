@@ -254,6 +254,8 @@ class SemanticCheckpointService:
     def _message(message):
         return json.dumps({"role": message.role, "content": message.content,
             "name": message.name, "tool_call_id": message.tool_call_id,
+            "images": [{"media_type": image.media_type,
+                "data_base64": image.data_base64} for image in message.images],
             "tool_calls": [{"call_id": c.call_id, "name": c.name, "arguments": c.arguments}
                 for c in message.tool_calls]}, ensure_ascii=False, sort_keys=True,
             separators=(",", ":"), allow_nan=False).encode()

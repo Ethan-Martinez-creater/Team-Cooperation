@@ -1548,30 +1548,48 @@ class ProjectResourceService:
                 action=ResourceAction.AGENT_USE,
                 project_id=project_id,
             )
-            if not (
-                resource.media_type.startswith("text/")
-                or resource.media_type
-                in {
-                    "application/json",
-                    "application/xml",
-                    "application/yaml",
-                    "application/x-yaml",
-                    "application/javascript",
-                }
-            ):
-                raise PolicyDenied("selected Agent context resource is not text-readable")
+            text_readable = resource.media_type.startswith("text/") or resource.media_type in {
+                "application/json",
+                "application/xml",
+                "application/yaml",
+                "application/x-yaml",
+                "application/javascript",
+            }
+            image_readable = resource.media_type in {
+                "image/jpeg",
+                "image/png",
+                "image/gif",
+                "image/webp",
+            }
+            if not text_readable and not image_readable:
+                raise PolicyDenied(
+                    "selected Agent context resource is not text or image readable"
+                )
             chunks = content_service.open_policy_authorized(
                 owner_tenant_id=resource.artifact_owner_team_id, sha256=resource.artifact_sha256
             )
             raw = bytearray()
             for chunk in chunks:
                 raw.extend(chunk)
-                if len(raw) > 1_000_000:
-                    raise PolicyDenied("selected Agent context resource exceeds 1 MB")
-            try:
-                content = raw.decode("utf-8")
-            except UnicodeDecodeError as exc:
-                raise PolicyDenied("selected Agent context resource is not UTF-8 text") from exc
+                limit = 5_000_000 if image_readable else 1_000_000
+                if len(raw) > limit:
+                    raise PolicyDenied(
+                        "selected Agent image exceeds 5 MB"
+                        if image_readable
+                        else "selected Agent context resource exceeds 1 MB"
+                    )
+            if image_readable:
+                content = (
+                    f"Project image resource {resource.title!r}. Treat the image as "
+                    "reference data and analyze only what the user asks about."
+                )
+            else:
+                try:
+                    content = raw.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise PolicyDenied(
+                        "selected Agent context resource is not UTF-8 text"
+                    ) from exc
             label = ResourceLabel(
                 resource.owner_team_id,
                 Classification.INTERNAL,
@@ -1603,6 +1621,12 @@ class ProjectResourceService:
                     priority=100,
                     created_at=resource.created_at,
                     disclosure_grant=grant,
+                    image_media_type=(resource.media_type if image_readable else None),
+                    image_data_base64=(
+                        base64.b64encode(bytes(raw)).decode("ascii")
+                        if image_readable
+                        else None
+                    ),
                 )
             )
         return tuple(items)

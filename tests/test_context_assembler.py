@@ -1,3 +1,4 @@
+import base64
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -89,6 +90,39 @@ def test_context_is_provenance_bound_and_injection_remains_data_only() -> None:
         if message.role == "system"
     )
     assert audit.events[-1].event_type == "context.assemble"
+
+
+def test_authorized_image_context_is_rendered_as_a_user_image() -> None:
+    service, _ = assembler()
+    encoded = base64.b64encode(b"image-bytes").decode("ascii")
+    image = ContextItem(
+        item_id="image-1",
+        content="project screenshot",
+        source=ContextSource.DOCUMENT,
+        source_id="artifact:image-1",
+        label=ResourceLabel(
+            "team-a",
+            Classification.CONFIDENTIAL,
+            frozenset({"project-x"}),
+            "document:image-1",
+        ),
+        content_trust=ContentTrust.VERIFIED,
+        image_media_type="image/jpeg",
+        image_data_base64=encoded,
+    )
+
+    result = service.assemble(
+        principal=actor(),
+        correlation_id="corr-image",
+        purpose="project:project-x",
+        conversation=(Message("user", "分析截图"),),
+        items=(image,),
+        budget=ContextBudget(),
+    )
+
+    assert result.messages[-1].images[0].media_type == "image/jpeg"
+    assert result.messages[-1].images[0].data_base64 == encoded
+    assert result.manifest[0].digest == image.content_digest
 
 
 def test_cross_tenant_context_requires_an_exact_disclosure_grant() -> None:

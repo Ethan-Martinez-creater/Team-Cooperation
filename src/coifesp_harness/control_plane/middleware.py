@@ -68,7 +68,8 @@ class RequestContextMiddleware:
                                     + (f" {self.oidc_origin}" if self.oidc_origin else "")
                                     + "; frame-src 'self'"
                                     + (f" {self.oidc_origin}" if self.oidc_origin else "")
-                                    + "; img-src 'self'; base-uri 'none'; "
+                                    + " blob:"
+                                    + "; img-src 'self' blob:; base-uri 'none'; "
                                     "form-action 'self' https: http:; "
                                     "frame-ancestors "
                                     + ("'self'" if silent_callback else "'none'")

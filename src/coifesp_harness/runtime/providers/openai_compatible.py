@@ -347,4 +347,20 @@ class OpenAICompatibleProvider:
             }
         if message.role not in {"system", "user"}:
             raise ProviderProtocolError(self.provider_id)
-        return {"role": message.role, "content": message.content}
+        if not message.images:
+            return {"role": message.role, "content": message.content}
+        if message.role != "user":
+            raise ProviderProtocolError(self.provider_id)
+        content: list[dict[str, Any]] = [
+            {"type": "text", "text": message.content}
+        ]
+        content.extend(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{image.media_type};base64,{image.data_base64}",
+                },
+            }
+            for image in message.images
+        )
+        return {"role": "user", "content": content}

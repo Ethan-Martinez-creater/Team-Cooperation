@@ -56,6 +56,13 @@ def test_workspace_is_same_origin_and_has_restrictive_browser_headers():
     assert "/app/blue-theme.css" in page.text
     assert "--green: #1769c2" in blue_theme_style.text
     assert "unsafe-inline" not in page.headers["content-security-policy"]
+    assert "img-src 'self' blob:" in page.headers["content-security-policy"]
+    frame_src = next(
+        directive
+        for directive in page.headers["content-security-policy"].split(";")
+        if directive.strip().startswith("frame-src ")
+    )
+    assert "'self'" in frame_src and "blob:" in frame_src
     assert "frame-ancestors 'none'" in page.headers["content-security-policy"]
     assert page.headers["cache-control"] == "no-store"
     assert "Agent 会话" in page.text

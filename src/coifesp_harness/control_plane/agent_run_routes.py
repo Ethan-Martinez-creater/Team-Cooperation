@@ -671,6 +671,11 @@ def _bind_project_context(checkpoint: dict, project_id: str, items: tuple) -> di
         raise ValueError("client-supplied context items cannot be mixed with project resources")
     context["purpose"] = f"project:{project_id}"
     context["items"] = [AgentRunCheckpointCodec._context_item_json(item) for item in items]
+    if any(item.image_data_base64 is not None for item in items):
+        policy = result.setdefault("model_route_policy", {})
+        capabilities = set(policy.get("required_capabilities", []))
+        capabilities.add("vision")
+        policy["required_capabilities"] = sorted(capabilities)
     return result
 
 

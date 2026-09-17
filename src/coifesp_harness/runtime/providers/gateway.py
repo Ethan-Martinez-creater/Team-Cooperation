@@ -571,7 +571,10 @@ class ModelGateway:
         *, messages: tuple[Message, ...], tools: tuple[ToolSpec, ...]
     ) -> int:
         # UTF-8 byte count deliberately overestimates common tokenizers for preflight safety.
-        message_bytes = sum(len(item.content.encode("utf-8")) + 32 for item in messages)
+        message_bytes = sum(
+            len(item.content.encode("utf-8")) + 32 + 1024 * len(item.images)
+            for item in messages
+        )
         tool_bytes = len(
             json.dumps(
                 [

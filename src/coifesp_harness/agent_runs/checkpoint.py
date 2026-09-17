@@ -18,6 +18,7 @@ from ..runtime import (
     AuthorizedSkill,
     AuthorizedTool,
     Message,
+    MessageImage,
     ModelCapability,
     ModelRoutePolicy,
     RunBudget,
@@ -397,11 +398,25 @@ class AgentRunCheckpointCodec:
                 }
                 for call in message.tool_calls
             ],
+            "images": [
+                {
+                    "media_type": image.media_type,
+                    "data_base64": image.data_base64,
+                }
+                for image in message.images
+            ],
         }
 
     def _message(self, value: Any) -> Message:
         item = self._dict(value, "message")
-        if set(item) - {"role", "content", "name", "tool_call_id", "tool_calls"}:
+        if set(item) - {
+            "role",
+            "content",
+            "name",
+            "tool_call_id",
+            "tool_calls",
+            "images",
+        }:
             raise ValueError("message contains unknown fields")
         role = item.get("role")
         content = item.get("content")
@@ -413,6 +428,10 @@ class AgentRunCheckpointCodec:
             self._tool_call(call)
             for call in self._list(item.get("tool_calls", []), "tool calls", 100)
         )
+        images = tuple(
+            self._message_image(image)
+            for image in self._list(item.get("images", []), "message images", 8)
+        )
         return Message(
             role=role,
             content=content,
@@ -422,6 +441,18 @@ class AgentRunCheckpointCodec:
                 "tool call ID",
             ),
             tool_calls=calls,
+            images=images,
+        )
+
+    def _message_image(self, value: Any) -> MessageImage:
+        item = self._dict(value, "message image")
+        if set(item) != {"media_type", "data_base64"}:
+            raise ValueError("message image fields are invalid")
+        return MessageImage(
+            media_type=self._required_string(item["media_type"], "image media type"),
+            data_base64=self._required_string(
+                item["data_base64"], "image data", max_length=6_700_000
+            ),
         )
 
     def _tool_call(self, value: Any) -> ToolCall:
@@ -588,7 +619,8 @@ class AgentRunCheckpointCodec:
             "content_digest",
             "disclosure_grant",
         }
-        if set(item) != required:
+        optional = {"image_media_type", "image_data_base64"}
+        if not required.issubset(item) or set(item) - required - optional:
             raise ValueError("context item fields are invalid")
         created = datetime.fromisoformat(
             self._required_string(item["created_at"], "context created_at")
@@ -607,6 +639,14 @@ class AgentRunCheckpointCodec:
                 None
                 if item["disclosure_grant"] is None
                 else self._grant(self._dict(item["disclosure_grant"], "disclosure grant"))
+            ),
+            image_media_type=self._optional_string(
+                item.get("image_media_type"), "context image media type"
+            ),
+            image_data_base64=self._optional_string(
+                item.get("image_data_base64"),
+                "context image data",
+                max_length=6_700_000,
             ),
         )
         if result.content_digest != item["content_digest"]:
@@ -632,6 +672,8 @@ class AgentRunCheckpointCodec:
             "created_at": item.created_at.isoformat(),
             "content_digest": item.content_digest,
             "disclosure_grant": AgentRunCheckpointCodec._grant_json(item.disclosure_grant),
+            "image_media_type": item.image_media_type,
+            "image_data_base64": item.image_data_base64,
         }
 
     def _label(self, item: dict[str, Any]) -> ResourceLabel:
@@ -729,10 +771,14 @@ class AgentRunCheckpointCodec:
         return value
 
     @staticmethod
-    def _optional_string(value: Any, name: str) -> str | None:
+    def _optional_string(
+        value: Any, name: str, *, max_length: int = 128
+    ) -> str | None:
         if value is None:
             return None
-        return AgentRunCheckpointCodec._required_string(value, name)
+        return AgentRunCheckpointCodec._required_string(
+            value, name, max_length=max_length
+        )
 
     def _string_list(self, value: Any, name: str) -> tuple[str, ...]:
         items = self._list(value, name, 256)

@@ -1,4 +1,5 @@
 import asyncio
+import base64
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,7 @@ from coifesp_harness.runtime import (
     AgentRunRequest,
     LLMResponse,
     Message,
+    MessageImage,
     ModelCapability,
     ModelRoutePolicy,
     ModelStreamEvent,
@@ -483,6 +485,36 @@ def test_checkpoint_preserves_route_policy_and_cost_across_recovery():
     assert value["budget"].max_model_cost_microusd == 1234
     assert value["usage"].model_cost_microusd == 0
     assert value["model_route_policy"] == request.model_route_policy
+
+
+def test_checkpoint_round_trips_multimodal_context_and_messages():
+    encoded = base64.b64encode(b"image-bytes").decode("ascii")
+    image = MessageImage("image/jpeg", encoded)
+    context = ContextItem(
+        item_id="ctx-image",
+        content="project image reference",
+        source=ContextSource.DOCUMENT,
+        source_id="artifact-image",
+        label=ResourceLabel("team-a", Classification.INTERNAL),
+        image_media_type="image/jpeg",
+        image_data_base64=encoded,
+    )
+    request = AgentRunRequest(
+        run_id="image-run",
+        correlation_id="image-corr",
+        principal=Principal("lead", "team-a"),
+        messages=(Message("user", "分析图片", images=(image,)),),
+        context_items=(context,),
+        model_route_policy=ModelRoutePolicy(
+            required_capabilities=frozenset({ModelCapability.VISION})
+        ),
+    )
+
+    value = AgentRunCheckpointCodec().decode(AgentRunCheckpointCodec().initial(request))
+
+    assert value["messages"][0].images == (image,)
+    assert value["context_items"][0].image_data_base64 == encoded
+    assert ModelCapability.VISION in value["model_route_policy"].required_capabilities
 
 
 def test_run_request_rejects_route_classification_below_context_data():

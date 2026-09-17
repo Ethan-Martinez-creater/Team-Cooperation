@@ -224,7 +224,24 @@ class AnthropicProvider:
                 continue
             conversation_started = True
             if message.role == "user":
-                conversation.append({"role": "user", "content": message.content})
+                if message.images:
+                    blocks: list[dict[str, Any]] = [
+                        {"type": "text", "text": message.content}
+                    ]
+                    blocks.extend(
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": image.media_type,
+                                "data": image.data_base64,
+                            },
+                        }
+                        for image in message.images
+                    )
+                    conversation.append({"role": "user", "content": blocks})
+                else:
+                    conversation.append({"role": "user", "content": message.content})
             elif message.role == "assistant":
                 blocks: list[dict[str, Any]] = []
                 if message.content:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.concurrency import run_in_threadpool
@@ -14,7 +14,13 @@ from ..product.models import (
     DataPropagation,
     ProjectAgentMode,
 )
-from ..runtime.models import AgentRunRequest, Message, ModelRoutePolicy, RunBudget
+from ..runtime.models import (
+    AgentRunRequest,
+    Message,
+    ModelCapability,
+    ModelRoutePolicy,
+    RunBudget,
+)
 from ..security import Classification
 from .auth import Authenticated, BearerAuthenticator
 from .conversation_models import (
@@ -454,6 +460,14 @@ async def launch_conversation_turn_run(
             )
         messages.append(Message(role="user", content=display_message, name=None))
         run_id = f"run-{secrets.token_hex(12)}"
+        route_policy = _project_model_route_policy(request)
+        if any(item.image_data_base64 is not None for item in items):
+            route_policy = replace(
+                route_policy,
+                required_capabilities=(
+                    route_policy.required_capabilities | {ModelCapability.VISION}
+                ),
+            )
         request_obj = AgentRunRequest(
             run_id=run_id,
             correlation_id=f"conv:{conversation_id}:turn:{turn_id}",
@@ -463,7 +477,7 @@ async def launch_conversation_turn_run(
             context_items=tuple(items),
             context_purpose=f"project:{project_id}",
             tool_authorization=None,
-            model_route_policy=_project_model_route_policy(request),
+            model_route_policy=route_policy,
         )
         checkpoint = codec.initial(request_obj)
         run = await run_in_threadpool(

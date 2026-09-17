@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, AsyncIterator, Protocol
@@ -18,12 +20,40 @@ class ToolCall:
 
 
 @dataclass(frozen=True, slots=True)
+class MessageImage:
+    media_type: str
+    data_base64: str
+
+    def __post_init__(self) -> None:
+        if self.media_type not in {
+            "image/jpeg",
+            "image/png",
+            "image/gif",
+            "image/webp",
+        }:
+            raise ValueError("message image media type is unsupported")
+        try:
+            raw = base64.b64decode(self.data_base64, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError("message image data is invalid") from exc
+        if not raw or len(raw) > 5_000_000:
+            raise ValueError("message image must contain 1 to 5,000,000 bytes")
+
+
+@dataclass(frozen=True, slots=True)
 class Message:
     role: str
     content: str
     name: str | None = None
     tool_call_id: str | None = None
     tool_calls: tuple[ToolCall, ...] = ()
+    images: tuple[MessageImage, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.images and self.role != "user":
+            raise ValueError("only user messages may contain images")
+        if len(self.images) > 8:
+            raise ValueError("a message may contain at most eight images")
 
 
 @dataclass(frozen=True, slots=True)

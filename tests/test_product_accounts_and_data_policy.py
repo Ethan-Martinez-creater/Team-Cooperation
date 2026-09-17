@@ -1,3 +1,4 @@
+import base64
 from datetime import UTC, datetime
 
 import pytest
@@ -156,6 +157,37 @@ def test_three_levels_follow_account_team_and_project_context():
         resource_ids=("resource-project_readonly",), content_service=Content())
     assert items[0].content == "verified project context"
     assert items[0].instruction_trust.value == "data_only"
+
+    with engine.begin() as connection:
+        connection.execute(
+            insert(PROJECT_RESOURCES).values(
+                resource_id="resource-image",
+                project_id=project.project_id,
+                owner_team_id=alice.team_id,
+                created_by=alice.account_id,
+                title="设计截图",
+                artifact_owner_team_id=alice.team_id,
+                artifact_id="artifact-image",
+                artifact_sha256="b" * 64,
+                media_type="image/jpeg",
+                propagation=DataPropagation.PROJECT_READONLY.value,
+                created_at=datetime.now(UTC),
+            )
+        )
+
+    class ImageContent:
+        @staticmethod
+        def open_policy_authorized(**kwargs):
+            return iter([b"jpeg-image-bytes"])
+
+    image_item = resources.agent_context_items(
+        actor_id=bob.account_id,
+        project_id=project.project_id,
+        resource_ids=("resource-image",),
+        content_service=ImageContent(),
+    )[0]
+    assert image_item.image_media_type == "image/jpeg"
+    assert base64.b64decode(image_item.image_data_base64) == b"jpeg-image-bytes"
     with pytest.raises(PolicyDenied):
         resources.agent_context_items(actor_id=bob.account_id,
             project_id=project.project_id, resource_ids=("resource-team_private",),

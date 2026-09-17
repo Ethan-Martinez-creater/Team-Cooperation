@@ -29,7 +29,8 @@ class TiktokenCounter:
                 for item in tools]}
         wire = json.dumps(payload, ensure_ascii=False, sort_keys=True,
             separators=(",", ":"), allow_nan=False)
-        return max(1, len(self.encoding.encode(wire, disallowed_special=())))
+        image_tokens = sum(1024 * len(item.images) for item in messages)
+        return max(1, len(self.encoding.encode(wire, disallowed_special=())) + image_tokens)
 
     def count_text(self, text: str) -> int:
         return max(1, len(self.encoding.encode(text, disallowed_special=())))
@@ -37,6 +38,11 @@ class TiktokenCounter:
 
 def _message(item: Message) -> dict:
     value = {"role": item.role, "content": item.content}
+    if item.images:
+        value["images"] = [
+            {"media_type": image.media_type, "data": "<image-bytes>"}
+            for image in item.images
+        ]
     if item.name is not None: value["name"] = item.name
     if item.tool_call_id is not None: value["tool_call_id"] = item.tool_call_id
     if item.tool_calls:

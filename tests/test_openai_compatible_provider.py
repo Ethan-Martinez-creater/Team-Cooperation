@@ -1,8 +1,9 @@
 import asyncio
+import base64
 import json
 from types import SimpleNamespace
 
-from coifesp_harness.runtime import Message, ToolCall, ToolSpec
+from coifesp_harness.runtime import Message, MessageImage, ToolCall, ToolSpec
 from coifesp_harness.runtime.providers import OpenAICompatibleProvider
 
 
@@ -80,3 +81,28 @@ def test_provider_preserves_tool_call_sequence_and_usage() -> None:
     assert completions.request["messages"][1]["tool_calls"][0]["id"] == "call-1"
     assert completions.request["messages"][2]["tool_call_id"] == "call-1"
     assert completions.request["tools"][0]["function"]["name"] == "lookup"
+
+
+def test_provider_serializes_user_image_as_multimodal_content() -> None:
+    completions = FakeCompletions()
+    provider = OpenAICompatibleProvider(
+        client=SimpleNamespace(chat=SimpleNamespace(completions=completions)),
+        model="deepseek-flash",
+    )
+    image = MessageImage(
+        media_type="image/jpeg",
+        data_base64=base64.b64encode(b"jpeg-bytes").decode("ascii"),
+    )
+
+    asyncio.run(
+        provider.complete(
+            messages=(Message("user", "分析图片", images=(image,)),),
+            tools=(),
+            correlation_id="corr-image",
+        )
+    )
+
+    content = completions.request["messages"][0]["content"]
+    assert content[0] == {"type": "text", "text": "分析图片"}
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")

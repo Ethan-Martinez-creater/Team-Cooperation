@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import re
 from dataclasses import dataclass, field
@@ -51,6 +53,8 @@ class ContextItem:
     priority: int = 0
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     disclosure_grant: DisclosureGrant | None = None
+    image_media_type: str | None = None
+    image_data_base64: str | None = None
     content_digest: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -59,6 +63,23 @@ class ContextItem:
                 raise ValueError(f"{name} is invalid")
         if not self.content or len(self.content.encode("utf-8")) > 1_000_000:
             raise ValueError("context content must contain 1 to 1,000,000 UTF-8 bytes")
+        if (self.image_media_type is None) != (self.image_data_base64 is None):
+            raise ValueError("context image media type and data must be provided together")
+        image_bytes = b""
+        if self.image_media_type is not None:
+            if self.image_media_type not in {
+                "image/jpeg",
+                "image/png",
+                "image/gif",
+                "image/webp",
+            }:
+                raise ValueError("context image media type is unsupported")
+            try:
+                image_bytes = base64.b64decode(self.image_data_base64, validate=True)
+            except (ValueError, binascii.Error) as exc:
+                raise ValueError("context image data is invalid") from exc
+            if not image_bytes or len(image_bytes) > 5_000_000:
+                raise ValueError("context image must contain 1 to 5,000,000 bytes")
         if not -1000 <= self.priority <= 1000:
             raise ValueError("context priority must be between -1000 and 1000")
         if self.created_at.tzinfo is None:
@@ -73,11 +94,13 @@ class ContextItem:
             and self.source is not ContextSource.USER
         ):
             raise ValueError("only a user source may carry user instructions")
-        object.__setattr__(
-            self,
-            "content_digest",
-            hashlib.sha256(self.content.encode("utf-8")).hexdigest(),
-        )
+        digest = hashlib.sha256(self.content.encode("utf-8"))
+        if self.image_media_type is not None:
+            digest.update(b"\x00image\x00")
+            digest.update(self.image_media_type.encode("ascii"))
+            digest.update(b"\x00")
+            digest.update(image_bytes)
+        object.__setattr__(self, "content_digest", digest.hexdigest())
 
 
 @dataclass(frozen=True, slots=True)

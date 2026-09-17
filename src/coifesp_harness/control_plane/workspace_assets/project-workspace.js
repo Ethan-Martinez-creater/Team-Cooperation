@@ -622,7 +622,7 @@
       const canShare = resource.owner_team_id === ownTeam && resource.propagation === "team_private";
       const canDownload = resource.owner_team_id === ownTeam || resource.propagation === "portable";
       const mediaType = String(resource.media_type || "").toLowerCase();
-      const canAttach = mediaType.startsWith("text/") || ["application/json", "application/xml", "application/yaml", "application/x-yaml", "application/javascript"].includes(mediaType);
+      const canAttach = mediaType.startsWith("text/") || ["image/jpeg", "image/png", "image/gif", "image/webp", "application/json", "application/xml", "application/yaml", "application/x-yaml", "application/javascript"].includes(mediaType);
       return `<article class="card resource-summary-card"><div class="card-head"><div><strong>${esc(resource.title || "未命名资料")}</strong><div class="meta"><span class="pill ${resource.propagation === "team_private" ? "orange" : "green"}">${propagationLabel[resource.propagation] || "项目可见"}</span></div></div></div><div class="task-actions"><button class="secondary" data-ws-preview-resource="${esc(resource.resource_id)}" data-resource-title="${esc(resource.title || "项目资料")}">预览</button>${canAttach ? `<button class="primary" data-ws-attach-resource="${esc(resource.resource_id)}">加入对话</button>` : ""}${canDownload ? `<button class="secondary" data-ws-download-resource="${esc(resource.resource_id)}" data-resource-title="${esc(resource.title || "项目资料")}">下载资料</button>` : ""}${canShare ? `<button class="secondary" data-ws-share-resource="${esc(resource.resource_id)}">共享到项目</button>` : ""}</div></article>`;
     }).join("");
     const operationLabels = {
