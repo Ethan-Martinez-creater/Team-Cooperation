@@ -6,10 +6,12 @@ Keycloak 使用独立 PostgreSQL 数据库和最小权限账号；UI 使用 Auth
 service account 分配 `realm-management` 的 `view-users`、`query-users`、`query-groups`，用于读取
 Worker 所需的实时用户、团队和角色信息。
 
-Realm 导出提供 `lead`、`contributor`、`reviewer`、`observer`、`tool_approver`、`agent_worker` 和
-`tool_worker` 角色，
+Realm 导出提供 `lead`、`contributor`、`reviewer`、`observer`、`tool_approver`、
+`capability_publisher`、`artifact_publisher`、`agent_worker` 和 `tool_worker` 角色，
 并把 `tenant_id`、`clearance`、`compartments`、顶层 `roles` 和 API audience 写入 token。用户应加入唯一
 团队组，并由管理员授予最小必要 Realm Role。不得允许用户自行修改这些安全属性。
+需要从项目工作台上传资料的成员必须具有 `artifact_publisher`；该角色只开放不可变制品写入，项目参与关系、
+资料所有团队和传播范围仍由应用服务逐项校验。
 
 `keycloak.env.example` 只是一份变量清单。填好的 `keycloak.env` 必须保留在 `E:\keyclock\runtime`，不得
 放入 Git。生产部署还必须使用 HTTPS、反向代理、外部 Secret 管理、数据库备份和集群缓存；本地 HTTP

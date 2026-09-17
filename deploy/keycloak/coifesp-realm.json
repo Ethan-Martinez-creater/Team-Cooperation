@@ -35,6 +35,8 @@
       {"name": "collaboration_creator", "description": "Creates cross-team collaboration programs"},
       {"name": "agent_run_controller", "description": "Controls Agent Runs owned by other principals in the same tenant"},
       {"name": "execution_controller", "description": "Reads execution tasks owned by other principals in the same tenant"},
+      {"name": "capability_publisher", "description": "Publishes team capability declarations and capacity"},
+      {"name": "artifact_publisher", "description": "Publishes immutable project artifacts after project authorization"},
       {"name": "platform_administrator", "description": "Tenant-scoped platform administration"},
       {"name": "agent_worker", "description": "Durable Agent Worker service identity"},
       {"name": "tool_worker", "description": "Durable Tool Worker service identity"},

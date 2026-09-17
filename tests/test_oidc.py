@@ -153,6 +153,22 @@ def test_capability_publisher_is_preserved_as_an_application_role() -> None:
     )
 
 
+def test_artifact_publisher_is_preserved_as_an_application_role() -> None:
+    private_key, jwk = key_material()
+    fetcher = StubFetcher({JWKS_URL: FetchResult({"keys": [jwk]}, 300)})
+    verifier = OIDCVerifier(settings=oidc_settings(), fetcher=fetcher)
+
+    token = signed_token(
+        private_key,
+        claims(roles=["contributor", "artifact_publisher"]),
+    )
+
+    verified = asyncio.run(verifier.verify(token))
+    assert verified.principal.roles == frozenset(
+        {"contributor", "artifact_publisher"}
+    )
+
+
 @pytest.mark.parametrize(
     "payload_change",
     [
