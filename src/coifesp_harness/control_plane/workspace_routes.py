@@ -10,6 +10,14 @@ from ..config import ConfigurationError
 from ..errors import AuthenticationError
 
 _ASSETS = Path(__file__).with_name("workspace_assets")
+_WORKSPACE_STYLES = (
+    "app.css",
+    "agent-workbench.css",
+    "project-resources.css",
+    "product-auth.css",
+    "blue-theme.css",
+    "project-workspace.css",
+)
 
 
 class LocalLoginBody(BaseModel):
@@ -30,6 +38,14 @@ def build_workspace_router() -> APIRouter:
     @router.get("/app/app.css", include_in_schema=False)
     async def stylesheet() -> FileResponse:
         return FileResponse(_ASSETS / "app.css", media_type="text/css")
+
+    @router.get("/app/workspace.css", include_in_schema=False)
+    async def workspace_stylesheet() -> Response:
+        content = "\n".join(
+            (_ASSETS / filename).read_text(encoding="utf-8")
+            for filename in _WORKSPACE_STYLES
+        )
+        return Response(content=content, media_type="text/css")
 
     @router.get("/app/agent-workbench.css", include_in_schema=False)
     async def agent_workbench_stylesheet() -> FileResponse:

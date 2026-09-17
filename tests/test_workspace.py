@@ -38,6 +38,7 @@ def local_workspace_settings():
 def test_workspace_is_same_origin_and_has_restrictive_browser_headers():
     app = create_app(settings=workspace_settings(), verifier=StubVerifier({}))
     page = asyncio.run(request(app, "/app/"))
+    workspace_style = asyncio.run(request(app, "/app/workspace.css"))
     script = asyncio.run(request(app, "/app/app.js"))
     style = asyncio.run(request(app, "/app/app.css"))
     workbench_style = asyncio.run(request(app, "/app/agent-workbench.css"))
@@ -45,6 +46,7 @@ def test_workspace_is_same_origin_and_has_restrictive_browser_headers():
     blue_theme_style = asyncio.run(request(app, "/app/blue-theme.css"))
     assert (
         page.status_code
+        == workspace_style.status_code
         == script.status_code
         == style.status_code
         == workbench_style.status_code
@@ -53,8 +55,13 @@ def test_workspace_is_same_origin_and_has_restrictive_browser_headers():
         == 200
     )
     assert "COIFESP 协作工作台" in page.text
-    assert "/app/blue-theme.css" in page.text
+    assert "/app/workspace.css" in page.text
+    assert "/app/blue-theme.css" not in page.text
     assert "--green: #1769c2" in blue_theme_style.text
+    assert "--green: #1769c2" in workspace_style.text
+    assert workspace_style.text.index("--green:#245a43") < workspace_style.text.index(
+        "--green: #1769c2"
+    )
     assert "unsafe-inline" not in page.headers["content-security-policy"]
     assert "img-src 'self' blob:" in page.headers["content-security-policy"]
     frame_src = next(
