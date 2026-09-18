@@ -9,6 +9,7 @@
   let W = null;
   let active = null; // { projectId, generation, conversationId, eventController, lastSequence }
   let pendingAttachments = [];
+  let pendingRepositoryContext = [];
   let openGeneration = 0;
   let workspacePreviewUrl = null;
   let bound = false;
@@ -226,6 +227,8 @@
       if (active?.eventController) active.eventController.abort();
       active = null;
       pendingAttachments = [];
+      pendingRepositoryContext = [];
+      if (typeof state !== "undefined") state.agentRepositoryContext = [];
       renderAttachmentChips();
       const conversationBox = $("#ws-conversation");
       if (conversationBox) conversationBox.innerHTML = "";
@@ -399,21 +402,19 @@
   async function sendMessage() {
     const input = $("#ws-input");
     const content = input.value.trim();
-    if (!active || (!content && pendingAttachments.length === 0)) return;
+    if (!active || (!content && pendingAttachments.length === 0 && pendingRepositoryContext.length === 0)) return;
     const projectId = active.projectId;
     const generation = active.generation;
     const conversationId = active.conversationId;
     const attachments = [...pendingAttachments];
-    const repositoryContext = typeof state === "undefined" || !state?.agentRepositoryContext
-      ? []
-      : state.agentRepositoryContext
-          .filter((item) => !item.project_id || item.project_id === projectId)
-          .map((item) => ({
-            repository_id: item.repository_id,
-            commit: item.commit,
-            paths: [...item.paths],
-          }));
+    const repositoryContext = pendingRepositoryContext.map((item) => ({
+      repository_id: item.repository_id,
+      commit: item.commit,
+      paths: [...item.paths],
+    }));
     pendingAttachments = [];
+    pendingRepositoryContext = [];
+    syncRepositoryContextState();
     renderAttachmentChips();
     input.value = "";
     const body = {
@@ -429,11 +430,6 @@
         `/v1/projects/${encodeURIComponent(projectId)}/conversation/messages`,
         { method: "POST", body: JSON.stringify(body) }
       );
-      if (repositoryContext.length && typeof state !== "undefined") {
-        state.agentRepositoryContext = state.agentRepositoryContext.filter(
-          (item) => item.project_id && item.project_id !== projectId
-        );
-      }
       // Ignore the response if the user switched projects while awaiting.
       if (!ownActive(projectId, generation)) return;
       renderConversation([result.message]);
@@ -447,6 +443,8 @@
     } catch (e) {
       if (!ownActive(projectId, generation)) return;
       pendingAttachments = pendingAttachments.concat(attachments);
+      pendingRepositoryContext = repositoryContext;
+      syncRepositoryContextState();
       renderAttachmentChips();
       renderTurnFailed(e.message);
       toast(e.message, true);
@@ -456,15 +454,68 @@
   function renderAttachmentChips() {
     const area = $("#ws-attachments");
     if (!area) return;
-    area.innerHTML = pendingAttachments
+    const resourceChips = pendingAttachments
       .map((id, index) => `<span class="attachment-chip">${esc(id)} <button type="button" data-remove-attachment="${index}">×</button></span>`)
       .join("");
+    const repositoryChips = pendingRepositoryContext.flatMap((selection, selectionIndex) =>
+      selection.paths.map((path, pathIndex) =>
+        `<span class="attachment-chip">代码 · ${esc(path)} <button type="button" data-remove-repository-context="${selectionIndex}:${pathIndex}">×</button></span>`
+      )
+    ).join("");
+    area.innerHTML = resourceChips + repositoryChips;
     area.querySelectorAll("[data-remove-attachment]").forEach((button) =>
       button.addEventListener("click", () => {
         pendingAttachments.splice(Number(button.dataset.removeAttachment), 1);
         renderAttachmentChips();
       })
     );
+    area.querySelectorAll("[data-remove-repository-context]").forEach((button) =>
+      button.addEventListener("click", () => {
+        const [selectionIndex, pathIndex] = button.dataset.removeRepositoryContext.split(":").map(Number);
+        const selection = pendingRepositoryContext[selectionIndex];
+        if (!selection) return;
+        selection.paths.splice(pathIndex, 1);
+        if (!selection.paths.length) pendingRepositoryContext.splice(selectionIndex, 1);
+        syncRepositoryContextState();
+        renderAttachmentChips();
+      })
+    );
+  }
+
+  function syncRepositoryContextState() {
+    if (typeof state === "undefined" || !active) return;
+    state.agentRepositoryContext = pendingRepositoryContext.map((item) => ({
+      project_id: active.projectId,
+      repository_id: item.repository_id,
+      commit: item.commit,
+      paths: [...item.paths],
+    }));
+  }
+
+  function queueRepositoryContext(projectId, selection) {
+    if (!active || active.projectId !== projectId) return false;
+    let queued = pendingRepositoryContext.find(
+      (item) => item.repository_id === selection.repository_id && item.commit === selection.commit
+    );
+    if (!queued) {
+      queued = { repository_id: selection.repository_id, commit: selection.commit, paths: [] };
+      pendingRepositoryContext.push(queued);
+    }
+    for (const path of selection.paths || []) {
+      if (!queued.paths.includes(path)) queued.paths.push(path);
+    }
+    syncRepositoryContextState();
+    renderAttachmentChips();
+    return true;
+  }
+
+  function removeRepositoryContext(projectId, selection) {
+    if (!active || active.projectId !== projectId) return;
+    pendingRepositoryContext = pendingRepositoryContext.filter(
+      (item) => item.repository_id !== selection.repository_id || item.commit !== selection.commit
+    );
+    syncRepositoryContextState();
+    renderAttachmentChips();
   }
 
   function renderTurnPending() {
@@ -1363,5 +1414,12 @@
     };
   }
 
-  window.CoifespWorkspace = { init, openProject, refresh, showProjects };
+  window.CoifespWorkspace = {
+    init,
+    openProject,
+    refresh,
+    showProjects,
+    queueRepositoryContext,
+    removeRepositoryContext,
+  };
 })();

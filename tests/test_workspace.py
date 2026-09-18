@@ -364,8 +364,12 @@ def test_agent_first_repository_card_opens_the_code_workspace_when_readable():
     assert "打开代码工作区" in workspace.text
     assert "CoifespOpenCodeWorkspace" in workspace.text
     assert "repository_context: repositoryContext" in workspace.text
-    assert "item.project_id === projectId" in workspace.text
+    assert "pendingRepositoryContext" in workspace.text
+    assert "data-remove-repository-context" in workspace.text
+    assert "queueRepositoryContext" in workspace.text
     assert "project_id:selectedProjectId" in script.text
+    assert "已加入输入框上方" in script.text
+    assert "queueRepositoryContext(selectedProjectId,entry)" in script.text
 
 
 def test_workspace_silent_callback_page_is_frameable_only_by_same_origin():
