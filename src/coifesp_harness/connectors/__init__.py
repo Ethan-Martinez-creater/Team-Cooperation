@@ -7,7 +7,11 @@ from .configuration import (
     load_connector_endpoints,
     load_connector_endpoints_for_tenants,
 )
-from .git_local import LocalGitArtifactConnector, LocalGitRepository
+from .git_local import (
+    LocalGitArtifactConnector,
+    LocalGitRepository,
+    load_local_git_connector,
+)
 from .github import GITHUB_ADAPTER_PATHS, GitHubTools
 from .models import ConnectorEndpoint, ConnectorRequest, ConnectorResponse
 from .repository import CONNECTOR_METADATA, SQLAlchemyConnectorRegistry
@@ -33,4 +37,5 @@ __all__ = [
     "configured_connector_tenants",
     "load_connector_endpoints",
     "load_connector_endpoints_for_tenants",
+    "load_local_git_connector",
 ]

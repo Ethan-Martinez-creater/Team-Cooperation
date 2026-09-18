@@ -67,6 +67,23 @@ revision。尚未审批、已拒绝或已禁用的 revision 不可执行，Secre
 重放不重复副作用的真实闭环验收。正式部署仍须提供自己的允许仓库、最小权限令牌及网络出口配置，
 详见 [GitHub 适配器配置](github-adapter.md)。
 
+### 项目源码读取连接器
+
+GitHub 适配器负责 Issue、Actions 和 Checks；源码读取使用部署侧的只读 Git 工作区，避免把 GitHub
+令牌、任意远端 URL 或宿主机文件路径暴露给浏览器和 Agent。部署者先将允许的仓库克隆到一个专用
+根目录，再以严格 JSON 把项目仓库 ID 和租户映射到该根目录下的相对路径：
+
+```dotenv
+COIFESP_GIT_REPOSITORY_ROOT=/var/lib/coifesp/git
+COIFESP_GIT_REPOSITORIES_JSON=[{"repository_id":"team-cooperation-test","tenant_id":"team-a","path":"shared/team-cooperation-test"},{"repository_id":"team-cooperation-test","tenant_id":"team-b","path":"shared/team-cooperation-test"}]
+```
+
+两个变量必须同时设置，根目录必须是绝对路径。注册表只接受 `repository_id`、`tenant_id` 和 `path`；
+路径必须相对根目录且不能包含 `..`。同一个共享仓库可为多个项目参与团队分别登记。连接器只执行
+固定参数的 Git 对象读取，不执行 fetch、checkout、commit 或 push；仓库同步仍由部署运维流程负责。
+前端代码工作区要求用户选择完整的 40 位 commit SHA 和具体文件路径，只有明确选择的文本文件才会
+进入下一次 Agent 上下文。
+
 ### GitHub adapter 响应与持久回执
 
 Adapter 必须返回下列结构。仅返回 HTTP 成功或 `accepted: true` 不足以构成执行凭证。

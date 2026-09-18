@@ -644,7 +644,7 @@
           <div class="meta"><span>${esc(repository.default_branch || "未设置默认分支")}</span><span>${esc(repository.connector_id)}</span><span class="pill ${readable ? "green" : "orange"}">${readable ? "源码读取可用" : "仓库已绑定"}</span></div>
         </div></div>
         <div class="meta repository-operations">${operations}</div>
-        ${status.reason ? `<p class="muted small repository-capability-note">${esc(status.reason)}</p>` : `<p class="muted small repository-capability-note">Agent 可在固定提交上读取此仓库的源码上下文。</p>`}
+        ${status.reason ? `<p class="muted small repository-capability-note">${esc(status.reason)}</p>` : `<p class="muted small repository-capability-note">Agent 可在固定提交上读取此仓库的源码上下文。</p><div class="task-actions"><button class="primary" data-ws-open-code-workspace>打开代码工作区</button></div>`}
       </article>`;
     }).join("");
     const blockerSummary = blockers.length
@@ -881,6 +881,9 @@
       button.addEventListener("click", () => downloadResource(button.dataset.wsDownloadResource, button.dataset.resourceTitle))
     );
     pane.querySelectorAll("[data-ws-upload]").forEach((b) => b.addEventListener("click", uploadAttachment));
+    pane.querySelectorAll("[data-ws-open-code-workspace]").forEach((b) =>
+      b.addEventListener("click", () => window.CoifespOpenCodeWorkspace?.(active?.projectId))
+    );
     pane.querySelectorAll("[data-ws-share-resource]").forEach((b) =>
       b.addEventListener("click", () => shareResource(b.dataset.wsShareResource))
     );

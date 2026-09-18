@@ -36,6 +36,7 @@ from ..connectors import (
     configured_connector_path_sets,
     configured_connector_paths,
     configured_connector_tenants,
+    load_local_git_connector,
 )
 from ..context import SemanticCheckpointKeyring, SemanticCheckpointService
 from ..contracts import ContractCoordinationService, SQLAlchemyContractRepository
@@ -624,8 +625,15 @@ def build_application(
             observability.shutdown,
             session_lifecycle.aclose,
         )
+        git_connector = None
+        if settings.git_repository_root and settings.git_repositories_json:
+            git_connector = load_local_git_connector(
+                allowed_root=settings.git_repository_root,
+                repositories_json=settings.git_repositories_json,
+            )
         code_workspace_service = CodeWorkspaceService(
             engine=runtime_engine,
+            git_connector=git_connector,
             audit_log=audit,
             workspace_root=(
                 Path(settings.sandbox_workspace_root) if settings.sandbox_workspace_root else None

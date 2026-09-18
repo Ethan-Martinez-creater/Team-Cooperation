@@ -8,6 +8,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from urllib.parse import urlparse
 
 from .errors import HarnessError
@@ -112,6 +113,8 @@ class Settings:
     sandbox_workspace_root: str | None
     sandbox_profiles_json: str | None
     connectors_json: str | None
+    git_repository_root: str | None
+    git_repositories_json: str | None
     skills_root: str | None
     skills_trusted_keys_json: str | None
     office_data_classification: str
@@ -334,6 +337,8 @@ class Settings:
             sandbox_workspace_root=optional("COIFESP_SANDBOX_WORKSPACE_ROOT"),
             sandbox_profiles_json=optional("COIFESP_SANDBOX_PROFILES_JSON"),
             connectors_json=optional("COIFESP_CONNECTORS_JSON"),
+            git_repository_root=optional("COIFESP_GIT_REPOSITORY_ROOT"),
+            git_repositories_json=optional("COIFESP_GIT_REPOSITORIES_JSON"),
             skills_root=optional("COIFESP_SKILLS_ROOT"),
             skills_trusted_keys_json=optional("COIFESP_SKILLS_TRUSTED_KEYS_JSON"),
             office_data_classification=(
@@ -726,8 +731,6 @@ class Settings:
                 problems.append("COIFESP_TOOL_WORKER_IDLE_POLL_SECONDS must be between 0.05 and 60")
 
         if require_sandbox:
-            from pathlib import Path
-
             from .sandbox import load_code_profiles
 
             if self.sandbox_runtime not in {"docker", "podman"}:
@@ -750,6 +753,13 @@ class Settings:
             "restricted",
         }:
             problems.append("COIFESP_OFFICE_DATA_CLASSIFICATION is invalid")
+        if bool(self.git_repository_root) != bool(self.git_repositories_json):
+            problems.append(
+                "COIFESP_GIT_REPOSITORY_ROOT and COIFESP_GIT_REPOSITORIES_JSON "
+                "must be configured together"
+            )
+        if self.git_repository_root and not Path(self.git_repository_root).is_absolute():
+            problems.append("COIFESP_GIT_REPOSITORY_ROOT must be absolute")
 
         if require_memory or self.environment is Environment.PRODUCTION:
             if not self.memory_key_id:

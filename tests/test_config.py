@@ -29,6 +29,28 @@ def test_live_model_configuration_is_explicit() -> None:
         settings.validate(require_llm=True)
 
 
+def test_git_repository_configuration_requires_root_and_registry_together(tmp_path) -> None:
+    root_only = Settings.from_environment(
+        {
+            "COIFESP_ENV": "development",
+            "COIFESP_GIT_REPOSITORY_ROOT": str(tmp_path),
+        }
+    )
+    with pytest.raises(ConfigurationError, match="must be configured together"):
+        root_only.validate()
+
+    configured = Settings.from_environment(
+        {
+            "COIFESP_ENV": "development",
+            "COIFESP_GIT_REPOSITORY_ROOT": str(tmp_path),
+            "COIFESP_GIT_REPOSITORIES_JSON": "[]",
+        }
+    )
+    configured.validate()
+    assert configured.git_repository_root == str(tmp_path)
+    assert configured.git_repositories_json == "[]"
+
+
 def test_openai_compatible_provider_requires_base_url() -> None:
     settings = Settings.from_environment(
         {

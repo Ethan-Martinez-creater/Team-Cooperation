@@ -354,6 +354,17 @@ def test_workspace_assets_expose_session_renewal_logout_and_route_recovery():
     assert "尚未配置外部连接器" in script.text
 
 
+def test_agent_first_repository_card_opens_the_code_workspace_when_readable():
+    app = create_app(settings=workspace_settings(), verifier=StubVerifier({}))
+    script = asyncio.run(request(app, "/app/app.js"))
+    workspace = asyncio.run(request(app, "/app/project-workspace.js"))
+    assert script.status_code == workspace.status_code == 200
+    assert "window.CoifespOpenCodeWorkspace=openCodeWorkspace" in script.text
+    assert "data-ws-open-code-workspace" in workspace.text
+    assert "打开代码工作区" in workspace.text
+    assert "CoifespOpenCodeWorkspace" in workspace.text
+
+
 def test_workspace_silent_callback_page_is_frameable_only_by_same_origin():
     app = create_app(settings=workspace_settings(), verifier=StubVerifier({}))
     silent_page = asyncio.run(request(app, "/app/silent-callback.html"))

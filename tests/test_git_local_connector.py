@@ -3,7 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from coifesp_harness.connectors import LocalGitArtifactConnector, LocalGitRepository
+from coifesp_harness.connectors import (
+    LocalGitArtifactConnector,
+    LocalGitRepository,
+    load_local_git_connector,
+)
 from coifesp_harness.security import Classification, Principal
 
 
@@ -40,3 +44,31 @@ def test_local_git_connector_rejects_repository_outside_allowed_root(tmp_path):
     with pytest.raises(ValueError, match="outside"):
         LocalGitArtifactConnector(allowed_root=allowed,
             repositories=(LocalGitRepository("repo", "team-a", outside),))
+
+
+def test_load_local_git_connector_from_bounded_deployment_registry(tmp_path):
+    repository = tmp_path / "team-a" / "repo"
+    repository.mkdir(parents=True)
+    git(repository, "init")
+    connector = load_local_git_connector(
+        allowed_root=tmp_path,
+        repositories_json=(
+            '[{"repository_id":"repo-1","tenant_id":"team-a",'
+            '"path":"team-a/repo"}]'
+        ),
+    )
+    assert connector.repositories[("team-a", "repo-1")].root == repository.resolve()
+
+
+@pytest.mark.parametrize(
+    "registry",
+    [
+        "[]",
+        '[{"repository_id":"repo-1","tenant_id":"team-a","path":"../repo"}]',
+        '[{"repository_id":"repo-1","tenant_id":"team-a","path":"/tmp/repo"}]',
+        '[{"repository_id":"repo-1","tenant_id":"team-a","path":"repo","extra":1}]',
+    ],
+)
+def test_load_local_git_connector_rejects_unbounded_registry(tmp_path, registry):
+    with pytest.raises(ValueError):
+        load_local_git_connector(allowed_root=tmp_path, repositories_json=registry)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import subprocess
 from dataclasses import dataclass
@@ -165,3 +166,43 @@ class LocalGitArtifactConnector:
         except (subprocess.SubprocessError, OSError) as exc:
             raise ResourceNotFound("Git object is absent or unreadable") from exc
         return result.stdout
+
+
+def load_local_git_connector(
+    *, allowed_root: str | Path, repositories_json: str
+) -> LocalGitArtifactConnector:
+    """Build the bounded read-only Git connector from deployment metadata."""
+    if len(repositories_json.encode("utf-8")) > 262_144:
+        raise ValueError("Git repository registry is too large")
+    try:
+        values = json.loads(repositories_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Git repository registry is invalid JSON") from exc
+    fields = {"repository_id", "tenant_id", "path"}
+    if not isinstance(values, list) or not 1 <= len(values) <= 64:
+        raise ValueError("Git repository registry must contain 1 to 64 repositories")
+    root = Path(allowed_root)
+    repositories = []
+    for value in values:
+        if not isinstance(value, dict) or set(value) != fields:
+            raise ValueError("Git repository registry fields are invalid")
+        path = value["path"]
+        if (
+            not isinstance(path, str)
+            or not path
+            or path.startswith(("/", "\\"))
+            or Path(path).is_absolute()
+            or ".." in Path(path).parts
+        ):
+            raise ValueError("Git repository path must be relative to the allowed root")
+        repositories.append(
+            LocalGitRepository(
+                repository_id=value["repository_id"],
+                tenant_id=value["tenant_id"],
+                root=root / path,
+            )
+        )
+    return LocalGitArtifactConnector(
+        allowed_root=root,
+        repositories=tuple(repositories),
+    )
