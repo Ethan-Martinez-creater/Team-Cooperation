@@ -295,6 +295,7 @@ class TeamAgentDispatcher:
             verification_evidence = None
             integration_evidence = None
             delivery_evidence = None
+            task_output_evidence = None
             if rework:
                 verification_evidence = self.verification_evidence_loader(
                     connection, process=process, graph=graph,
@@ -315,8 +316,21 @@ class TeamAgentDispatcher:
 
                         delivery_evidence = load_delivery_rework(connection, process=process, graph=graph, task_id=task_id)
                     if integration_evidence is None and delivery_evidence is None:
+                        from .task_output_rework import load_task_output_rework
+
+                        task_output_evidence = load_task_output_rework(
+                            connection,
+                            process=process,
+                            graph=graph,
+                            task_id=task_id,
+                        )
+                    if (
+                        integration_evidence is None
+                        and delivery_evidence is None
+                        and task_output_evidence is None
+                    ):
                         raise GovernanceConflictError(
-                            "changes_requested task lacks current verification FAIL evidence or current integration FAIL evidence"
+                            "changes_requested task lacks current bounded rework evidence"
                         )
                 facts = self.fact_loader(
                     connection=connection, process=process, task=task,
@@ -367,9 +381,15 @@ class TeamAgentDispatcher:
                 from .delivery_rework import delivery_rework_feedback
 
                 feedback = delivery_rework_feedback(task=task, evidence=delivery_evidence)
+            if task_output_evidence is not None:
+                from .task_output_rework import task_output_rework_feedback
+
+                feedback = task_output_rework_feedback(
+                    task=task, evidence=task_output_evidence
+                )
             if rework and feedback is None:
                 raise GovernanceConflictError(
-                    "verification FAIL has no safe structured finding for rework"
+                    "rework evidence has no safe structured finding"
                 )
             context_builder = (
                 _EvidenceBoundReworkContextBuilder()

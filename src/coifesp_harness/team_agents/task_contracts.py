@@ -372,8 +372,14 @@ class PersistentTaskDispatchFactLoader:
 
             if load_delivery_rework(connection, process=process, graph=graph, task_id=task_id) is not None:
                 return
+            from .task_output_rework import load_task_output_rework
+
+            if load_task_output_rework(
+                connection, process=process, graph=graph, task_id=task_id
+            ) is not None:
+                return
             raise GovernanceConflictError(
-                "changes_requested task lacks current verification FAIL evidence"
+                "changes_requested task lacks current bounded rework evidence"
             )
 
     def _input(self, connection, task, entry):
