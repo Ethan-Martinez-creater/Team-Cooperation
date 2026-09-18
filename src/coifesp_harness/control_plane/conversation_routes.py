@@ -22,6 +22,8 @@ from ..runtime.models import (
     RunBudget,
 )
 from ..security import Classification
+from .agent_run_models import RepositoryContextSelection
+from .agent_run_routes import _repository_context_items
 from .auth import Authenticated, BearerAuthenticator
 from .conversation_models import (
     MessagePageView,
@@ -210,6 +212,7 @@ def build_conversation_router(*, authenticator: BearerAuthenticator) -> APIRoute
             user_message=message.content,
             user_message_sequence=message.sequence,
             attachment_resource_ids=body.attachment_resource_ids,
+            repository_context=body.repository_context,
             trigger_kind=turn.trigger_kind.value,
         )
         return MessageSendResult(
@@ -357,6 +360,7 @@ async def launch_conversation_turn_run(
     user_message: str,
     user_message_sequence: int | None = None,
     attachment_resource_ids: tuple[str, ...] = (),
+    repository_context: tuple[RepositoryContextSelection, ...] = (),
     trigger_kind: str = "user_message",
 ):
     """Create the durable run backing a conversation turn.
@@ -410,6 +414,19 @@ async def launch_conversation_turn_run(
                     content_service=content_service,
                 )
                 items.extend(resource_items)
+        if repository_context:
+            code_workspace = getattr(request.app.state, "code_workspace_service", None)
+            if code_workspace is None:
+                raise HarnessError("code workspace service is unavailable")
+            repository_items = await run_in_threadpool(
+                _repository_context_items,
+                service=code_workspace,
+                actor_id=authenticated.principal.principal_id,
+                tenant_id=authenticated.principal.tenant_id,
+                project_id=project_id,
+                selections=repository_context,
+            )
+            items.extend(repository_items)
         messages = [
             Message(
                 role="system",
@@ -453,10 +470,11 @@ async def launch_conversation_turn_run(
                     Message(role=message.role, content=message.content, name=None)
                 )
         display_message = (user_message or "").strip()
-        if not display_message and attachment_resource_ids:
+        if not display_message and (attachment_resource_ids or repository_context):
             display_message = (
-                f"（消息仅附带 {len(attachment_resource_ids)} 份项目资料，"
-                "请基于资料内容给出回应）"
+                f"（消息附带 {len(attachment_resource_ids)} 份项目资料和 "
+                f"{sum(len(item.paths) for item in repository_context)} 个代码文件，"
+                "请基于所选上下文给出回应）"
             )
         messages.append(Message(role="user", content=display_message, name=None))
         run_id = f"run-{secrets.token_hex(12)}"

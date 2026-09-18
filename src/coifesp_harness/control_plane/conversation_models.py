@@ -13,6 +13,7 @@ from ..product.models import (
     TurnStatus,
     TurnTriggerKind,
 )
+from .agent_run_models import RepositoryContextSelection
 from .product_models import ProjectTeamView, ProjectView
 
 
@@ -207,12 +208,21 @@ class MessageSendBody(BaseModel):
     attachment_resource_ids: tuple[str, ...] = Field(
         default_factory=tuple, max_length=32
     )
+    repository_context: tuple[RepositoryContextSelection, ...] = Field(
+        default_factory=tuple, max_length=8
+    )
     expected_last_sequence: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _require_content_or_attachment(self) -> "MessageSendBody":
-        if not self.content.strip() and not self.attachment_resource_ids:
-            raise ValueError("message content or at least one attachment is required")
+        if (
+            not self.content.strip()
+            and not self.attachment_resource_ids
+            and not self.repository_context
+        ):
+            raise ValueError(
+                "message content, an attachment, or repository context is required"
+            )
         return self
 
 

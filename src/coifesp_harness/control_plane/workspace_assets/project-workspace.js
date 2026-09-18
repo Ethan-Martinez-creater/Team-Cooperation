@@ -404,6 +404,15 @@
     const generation = active.generation;
     const conversationId = active.conversationId;
     const attachments = [...pendingAttachments];
+    const repositoryContext = typeof state === "undefined" || !state?.agentRepositoryContext
+      ? []
+      : state.agentRepositoryContext
+          .filter((item) => !item.project_id || item.project_id === projectId)
+          .map((item) => ({
+            repository_id: item.repository_id,
+            commit: item.commit,
+            paths: [...item.paths],
+          }));
     pendingAttachments = [];
     renderAttachmentChips();
     input.value = "";
@@ -411,6 +420,7 @@
       content,
       idempotency_key: uid("msg"),
       attachment_resource_ids: attachments,
+      repository_context: repositoryContext,
     };
     // The optimistic lock uses the last sequence we actually observed.
     if (ownActive(projectId, generation) && active.lastSequence != null) body.expected_last_sequence = active.lastSequence;
@@ -419,6 +429,11 @@
         `/v1/projects/${encodeURIComponent(projectId)}/conversation/messages`,
         { method: "POST", body: JSON.stringify(body) }
       );
+      if (repositoryContext.length && typeof state !== "undefined") {
+        state.agentRepositoryContext = state.agentRepositoryContext.filter(
+          (item) => item.project_id && item.project_id !== projectId
+        );
+      }
       // Ignore the response if the user switched projects while awaiting.
       if (!ownActive(projectId, generation)) return;
       renderConversation([result.message]);

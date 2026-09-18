@@ -7,6 +7,8 @@ import httpx
 from sqlalchemy import create_engine, insert
 from sqlalchemy.pool import StaticPool
 
+from coifesp_harness.agent_runs.checkpoint import AgentRunCheckpointCodec
+from coifesp_harness.agent_runs.models import DurableAgentRun, DurableRunStatus
 from coifesp_harness.config import Settings
 from coifesp_harness.control_plane import create_app
 from coifesp_harness.control_plane.conversation_routes import (
@@ -689,7 +691,28 @@ class RecordingRunService:
 
     def create(self, **kwargs):
         self.created.append(kwargs)
-        return SimpleNamespace(run_id=kwargs["run_id"])
+        now = datetime.now(UTC)
+        return DurableAgentRun(
+            run_id=kwargs["run_id"],
+            tenant_id=kwargs["principal"].tenant_id,
+            owner_principal_id=kwargs["principal"].principal_id,
+            correlation_id=kwargs["correlation_id"],
+            status=DurableRunStatus.QUEUED,
+            version=1,
+            turns=0,
+            tool_calls=0,
+            total_tokens=0,
+            model_cost_microusd=0,
+            pending_call_id=None,
+            pending_approval_id=None,
+            failure_count=0,
+            max_failures=kwargs["max_failures"],
+            next_attempt_at=None,
+            last_error_code=None,
+            created_at=now,
+            updated_at=now,
+            completed_at=None,
+        )
 
 
 def test_conversation_run_external_internal_egress_requires_local_provider_opt_in():
@@ -763,7 +786,7 @@ def test_conversation_run_accepts_explicit_production_internal_egress_provider()
     assert policy.data_classification.value == 1
 
 
-def _stack_with_run_service(run_service):
+def _stack_with_run_service(run_service, *, code_workspace_service=None):
     engine = create_engine(
         "sqlite+pysqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
@@ -781,8 +804,52 @@ def _stack_with_run_service(run_service):
         team_collaboration_service=collaboration,
         project_workspace_service=workspace,
         agent_run_service=run_service,
+        code_workspace_service=code_workspace_service,
     )
     return app, engine
+
+
+def test_primary_project_conversation_includes_selected_repository_context():
+    class CodeContextService:
+        def read_blob(self, **kwargs):
+            assert kwargs["project_id"] == "project-demo"
+            assert kwargs["repository_id"] == "repo-demo"
+            assert kwargs["path"] == "workflow.yml"
+            return SimpleNamespace(text="name: repository-context", sha256="b" * 64)
+
+    run_service = RecordingRunService()
+    app, engine = _stack_with_run_service(
+        run_service,
+        code_workspace_service=CodeContextService(),
+    )
+    seed(with_engine=engine)
+    token = _issue_token(engine, "lead-lin")
+    response = asyncio.run(
+        _call(
+            app,
+            "POST",
+            "/v1/projects/project-demo/conversation/messages",
+            token=token,
+            json={
+                "content": "请分析所选工作流",
+                "idempotency_key": "repository-chat-context",
+                "repository_context": [
+                    {
+                        "repository_id": "repo-demo",
+                        "commit": "a" * 40,
+                        "paths": ["workflow.yml"],
+                    }
+                ],
+            },
+        )
+    )
+    assert response.status_code == 201, response.text
+    decoded = AgentRunCheckpointCodec().decode(run_service.created[0]["checkpoint"])
+    repository_items = [
+        item for item in decoded["context_items"] if "Path: workflow.yml" in item.content
+    ]
+    assert len(repository_items) == 1
+    assert "name: repository-context" in repository_items[0].content
 
 
 def test_run_launch_failure_does_not_lock_conversation():
